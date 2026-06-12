@@ -4,6 +4,7 @@ import {
   GEMINI_CODE_ASSIST_ENDPOINT,
   GEMINI_CODE_ASSIST_HEADERS,
 } from '../../constants'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 
 type GeminiOAuthState = {
   refreshToken: string
@@ -103,6 +104,19 @@ function getCacheKey(auth: GeminiOAuthState): string | undefined {
   return refresh ? refresh : undefined
 }
 
+function redactGeminiProjectError(
+  error: unknown,
+  accessToken: string,
+): unknown {
+  const redactedError = redactSecrets(error)
+  if (redactedError instanceof Error) {
+    redactedError.message = redactedError.message
+      .split(accessToken)
+      .join('[REDACTED]')
+  }
+  return redactedError
+}
+
 export function invalidateProjectContextCache(refreshToken?: string): void {
   if (!refreshToken) {
     projectContextPendingCache.clear()
@@ -141,7 +155,10 @@ export async function loadManagedProject(
 
     return response.json as LoadCodeAssistPayload
   } catch (error) {
-    console.error('Failed to load Gemini managed project:', error)
+    console.error(
+      'Failed to load Gemini managed project:',
+      redactGeminiProjectError(error, accessToken),
+    )
     return null
   }
 }
@@ -192,7 +209,10 @@ export async function onboardManagedProject(
         return projectId
       }
     } catch (error) {
-      console.error('Failed to onboard Gemini managed project:', error)
+      console.error(
+        'Failed to onboard Gemini managed project:',
+        redactGeminiProjectError(error, accessToken),
+      )
       return undefined
     }
 

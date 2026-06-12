@@ -5,6 +5,7 @@ import { SmartComposerSettings } from '../settings/schema/setting.types'
 type SettingsContextType = {
   settings: SmartComposerSettings
   setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  getSettings: () => SmartComposerSettings
 }
 
 // Settings context
@@ -16,11 +17,13 @@ export const SettingsProvider = ({
   children,
   settings: initialSettings,
   setSettings,
+  getSettings,
   addSettingsChangeListener,
 }: {
   children: React.ReactNode
   settings: SmartComposerSettings
   setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  getSettings: () => SmartComposerSettings
   addSettingsChangeListener: (
     listener: (newSettings: SmartComposerSettings) => void,
   ) => () => void
@@ -38,8 +41,8 @@ export const SettingsProvider = ({
   }, [addSettingsChangeListener, setSettings])
 
   const value = useMemo(
-    () => ({ settings: settingsCached, setSettings }),
-    [settingsCached, setSettings],
+    () => ({ settings: settingsCached, setSettings, getSettings }),
+    [settingsCached, setSettings, getSettings],
   )
 
   return (

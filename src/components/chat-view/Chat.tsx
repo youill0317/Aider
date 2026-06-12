@@ -45,6 +45,7 @@ import {
 import { groupAssistantAndToolMessages } from '../../utils/chat/message-groups'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { readTFileContent } from '../../utils/obsidian'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 import { ErrorModal } from '../modals/ErrorModal'
 import { TemplateSectionModal } from '../modals/TemplateSectionModal'
 
@@ -85,7 +86,7 @@ export type ChatProps = {
 
 const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const app = useApp()
-  const { settings, setSettings } = useSettings()
+  const { settings, setSettings, getSettings } = useSettings()
   const { getRAGEngine } = useRAG()
   const { getMcpManager } = useMcp()
 
@@ -296,6 +297,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         modelId: settings.applyModelId,
         settings,
         setSettings,
+        getSettings,
       })
 
       const updatedFileContent = await applyChangesToFile({
@@ -330,8 +332,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           showSettingsButton: true,
         }).open()
       } else {
-        new Notice(error.message)
-        console.error('Failed to apply changes', error)
+        new Notice(redactSecrets(error.message))
+        console.error('Failed to apply changes', redactSecrets(error))
       }
     },
   })

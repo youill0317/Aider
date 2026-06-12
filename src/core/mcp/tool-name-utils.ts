@@ -1,7 +1,6 @@
 import { InvalidToolNameException } from './exception'
-import { McpManager } from './mcpManager'
 
-const DEFAULT_DELIMITER = McpManager.TOOL_NAME_DELIMITER
+export const DEFAULT_TOOL_NAME_DELIMITER = '__'
 
 /**
  * Validates that a server name follows the required format and doesn't contain the delimiter
@@ -10,7 +9,7 @@ const DEFAULT_DELIMITER = McpManager.TOOL_NAME_DELIMITER
  */
 export function validateServerName(
   name: string,
-  delimiter: string = DEFAULT_DELIMITER,
+  delimiter: string = DEFAULT_TOOL_NAME_DELIMITER,
 ): void {
   // OpenAI only allows alphanumeric characters, underscores, and hyphens in the tool name
   const regex = /^[a-zA-Z0-9_-]+$/
@@ -34,7 +33,7 @@ export function validateServerName(
  */
 export function parseToolName(
   name: string,
-  delimiter: string = DEFAULT_DELIMITER,
+  delimiter: string = DEFAULT_TOOL_NAME_DELIMITER,
 ): {
   serverName: string
   toolName: string
@@ -65,7 +64,7 @@ export function parseToolName(
 export function getToolName(
   serverName: string,
   toolName: string,
-  delimiter: string = DEFAULT_DELIMITER,
+  delimiter: string = DEFAULT_TOOL_NAME_DELIMITER,
 ): string {
   return `${serverName}${delimiter}${toolName}`
 }

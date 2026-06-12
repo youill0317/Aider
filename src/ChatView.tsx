@@ -78,6 +78,7 @@ export class ChatView extends ItemView {
               setSettings={(newSettings) =>
                 this.plugin.setSettings(newSettings)
               }
+              getSettings={() => this.plugin.settings}
               addSettingsChangeListener={(listener) =>
                 this.plugin.addSettingsChangeListener(listener)
               }

@@ -23,6 +23,7 @@ export class SmartComposerSettingTab extends PluginSettingTab {
       <SettingsProvider
         settings={this.plugin.settings}
         setSettings={(newSettings) => this.plugin.setSettings(newSettings)}
+        getSettings={() => this.plugin.settings}
         addSettingsChangeListener={(listener) =>
           this.plugin.addSettingsChangeListener(listener)
         }

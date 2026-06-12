@@ -19,6 +19,15 @@ describe('calculateFileDistance', () => {
     expect(result).toBe(2)
   })
 
+  it('keeps vault paths slash-delimited', () => {
+    // Given: Obsidian vault paths use slash delimiters on every OS.
+    const file1 = new MockTFile('folder/sub/file1.md') as TFile
+    const file2 = new MockTFile('folder/other/file2.md') as TFile
+
+    // When/Then: path logic treats slash-separated segments as vault paths.
+    expect(calculateFileDistance(file1, file2)).toBe(4)
+  })
+
   it('should calculate the correct distance between files in different subfolders', () => {
     const file1 = new MockTFile('folder1/folder2/file1.md') as TFile
     const file2 = new MockTFile('folder1/folder3/file2.md') as TFile

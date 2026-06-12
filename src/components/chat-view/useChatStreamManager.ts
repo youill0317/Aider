@@ -15,6 +15,7 @@ import { getChatModelClient } from '../../core/llm/manager'
 import { ChatMessage } from '../../types/chat'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { ResponseGenerator } from '../../utils/chat/responseGenerator'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 import { ErrorModal } from '../modals/ErrorModal'
 
 type UseChatStreamManagerParams = {
@@ -38,7 +39,7 @@ export function useChatStreamManager({
   promptGenerator,
 }: UseChatStreamManagerParams): UseChatStreamManager {
   const app = useApp()
-  const { settings, setSettings } = useSettings()
+  const { settings, setSettings, getSettings } = useSettings()
   const { getMcpManager } = useMcp()
 
   const activeStreamAbortControllersRef = useRef<AbortController[]>([])
@@ -56,6 +57,7 @@ export function useChatStreamManager({
         modelId: settings.chatModelId,
         settings,
         setSettings,
+        getSettings,
       })
     } catch (error) {
       if (error instanceof LLMModelNotFoundException) {
@@ -80,11 +82,12 @@ export function useChatStreamManager({
           modelId: firstChatModel.id,
           settings,
           setSettings,
+          getSettings,
         })
       }
       throw error
     }
-  }, [settings, setSettings])
+  }, [settings, setSettings, getSettings])
 
   const submitChatMutation = useMutation({
     mutationFn: async ({
@@ -169,8 +172,8 @@ export function useChatStreamManager({
           showSettingsButton: true,
         }).open()
       } else {
-        new Notice(error.message)
-        console.error('Failed to generate response', error)
+        new Notice(redactSecrets(error.message))
+        console.error('Failed to generate response', redactSecrets(error))
       }
     },
   })

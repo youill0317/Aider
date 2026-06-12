@@ -37,6 +37,12 @@
 > 
 > **Use at your own risk.** Keep usage limited to personal, interactive sessions and avoid any automation.
 
+> ### Security and data flow
+>
+> Smart Composer stores API keys and OAuth tokens through Obsidian `app.secretStorage` when that API is available. On older Obsidian runtimes without `app.secretStorage`, the plugin keeps working through a fallback settings path; that fallback is less secure because secrets are protected only as ordinary local plugin data. The `minAppVersion` remains unchanged because this fallback exists. Requiring secure storage for every user would require Obsidian 1.11.4+.
+>
+> Subscription OAuth uses third-party or internal provider endpoints and should be treated as use-at-your-own-risk, separate from official usage-based API keys. MCP tools can run local commands, and MCP tool output may be sent to the selected LLM provider. MCP server `env` values are ordinary plugin settings, not Obsidian `app.secretStorage` entries. Vault content is also sent to providers when you include files, folders, current-file context, Vault Search/RAG results, web content, images, or tool results in a chat.
+
 ![SC1_Title.gif](https://github.com/user-attachments/assets/a50a1f80-39ff-4eba-8090-e3d75e7be98c)
 
 Everytime we ask ChatGPT, we need to put so much context information for each query. Why spend time putting background infos that are already in your vault?

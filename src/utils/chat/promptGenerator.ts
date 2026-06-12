@@ -29,6 +29,10 @@ import {
   readTFileContent,
 } from '../obsidian'
 
+import {
+  wrapUntrustedContext,
+  wrapUntrustedToolOutput,
+} from './untrusted-context'
 import { YoutubeTranscript, isYoutubeUrl } from './youtube-transcript'
 
 export class PromptGenerator {
@@ -232,13 +236,14 @@ ${message.annotations
           return {
             role: 'tool',
             tool_call: toolCall.request,
-            content: toolCall.response.data.text,
+            content: wrapUntrustedToolOutput(toolCall.response.data.text),
           }
         case ToolCallResponseStatus.Error:
           return {
             role: 'tool',
             tool_call: toolCall.request,
-            content: `Error: ${toolCall.response.error}`,
+            content: `Error:
+${wrapUntrustedToolOutput(toolCall.response.error)}`,
           }
       }
     })
@@ -325,35 +330,40 @@ ${message.annotations
               onQueryProgressChange: onQueryProgressChange,
             })
         filePrompt = `## Potentially Relevant Snippets from the current vault
-${similaritySearchResults
-  .map(({ path, content, metadata }) => {
-    const newContent =
-      this.getModelPromptLevel() == PromptLevel.Default
-        ? this.addLineNumbersToContent({
-            content,
-            startLine: metadata.startLine,
-          })
-        : content
-    return `\`\`\`${path}\n${newContent}\n\`\`\`\n`
-  })
-  .join('')}\n`
+${wrapUntrustedContext(
+  similaritySearchResults
+    .map(({ path, content, metadata }) => {
+      const newContent =
+        this.getModelPromptLevel() == PromptLevel.Default
+          ? this.addLineNumbersToContent({
+              content,
+              startLine: metadata.startLine,
+            })
+          : content
+      return `\`\`\`${path}\n${newContent}\n\`\`\`\n`
+    })
+    .join(''),
+)}\n`
       } else {
-        filePrompt = allFiles
-          .map((file, index) => {
-            return `\`\`\`${file.path}\n${fileContents[index]}\n\`\`\`\n`
-          })
-          .join('')
+        filePrompt = wrapUntrustedContext(
+          allFiles
+            .map((file, index) => {
+              return `\`\`\`${file.path}\n${fileContents[index]}\n\`\`\`\n`
+            })
+            .join(''),
+        )
       }
 
       const blocks = message.mentionables.filter(
         (m): m is MentionableBlock => m.type === 'block',
       )
-      const blockPrompt = blocks
-        .map(({ file, content }) => {
-          return `\`\`\`${file.path}\n${content}\n\`\`\`\n`
-        })
-        .join('')
-
+      const blockPrompt = wrapUntrustedContext(
+        blocks
+          .map(({ file, content }) => {
+            return `\`\`\`${file.path}\n${content}\n\`\`\`\n`
+          })
+          .join(''),
+      )
       const urls = message.mentionables.filter(
         (m): m is MentionableUrl => m.type === 'url',
       )
@@ -361,17 +371,19 @@ ${similaritySearchResults
       const urlPrompt =
         urls.length > 0
           ? `## Potentially Relevant Websearch Results
-${(
-  await Promise.all(
-    urls.map(
-      async ({ url }) => `\`\`\`
+${wrapUntrustedContext(
+  (
+    await Promise.all(
+      urls.map(
+        async ({ url }) => `\`\`\`
 Website URL: ${url}
 Website Content:
 ${await this.getWebsiteContent(url)}
 \`\`\``,
-    ),
-  )
-).join('\n')}
+      ),
+    )
+  ).join('\n'),
+)}
 `
           : ''
 
@@ -509,9 +521,9 @@ ${customInstruction}
       content: `# Inputs
 ## Current File
 Here is the file I'm looking at.
-\`\`\`${currentFile.path}
+${wrapUntrustedContext(`\`\`\`${currentFile.path}
 ${fileContent}
-\`\`\`\n\n`,
+\`\`\``)}\n\n`,
     }
   }
 

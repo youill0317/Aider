@@ -1,5 +1,6 @@
 import { App } from 'obsidian'
 
+import { redactSecrets } from '../../utils/security/redact-secrets'
 import { ReactModal } from '../common/ReactModal'
 
 type ErrorModalOptions = {
@@ -15,6 +16,22 @@ type ErrorModalComponentProps = {
   options: ErrorModalOptions
 }
 
+export function getRedactedErrorModalProps({
+  message,
+  log,
+}: {
+  message: string
+  log?: string
+}): {
+  message: string
+  log?: string
+} {
+  return {
+    message: redactSecrets(message),
+    log: log === undefined ? undefined : redactSecrets(log),
+  }
+}
+
 export class ErrorModal extends ReactModal<ErrorModalComponentProps> {
   constructor(
     app: App,
@@ -23,13 +40,14 @@ export class ErrorModal extends ReactModal<ErrorModalComponentProps> {
     log?: string,
     options: ErrorModalOptions = {},
   ) {
+    const redactedProps = getRedactedErrorModalProps({ message, log })
     super({
       app: app,
       Component: ErrorModalComponent,
       props: {
         app,
-        message,
-        log,
+        message: redactedProps.message,
+        log: redactedProps.log,
         options,
       },
       options: {

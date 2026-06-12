@@ -29,10 +29,12 @@ export function getProviderClient({
   providerId,
   settings,
   setSettings,
+  getSettings,
 }: {
   providerId: string
   settings: SmartComposerSettings
   setSettings?: (newSettings: SmartComposerSettings) => void | Promise<void>
+  getSettings?: () => SmartComposerSettings
 }): BaseLLMProvider<LLMProvider> {
   const provider = settings.providers.find((p) => p.id === providerId)
   if (!provider) {
@@ -40,18 +42,11 @@ export function getProviderClient({
   }
 
   const onProviderUpdate = setSettings
-    ? async (targetProviderId: string, update: Partial<LLMProvider>) => {
-        const updatedProviders: LLMProvider[] = settings.providers.map(
-          (item) =>
-            item.id === targetProviderId
-              ? ({ ...item, ...update } as LLMProvider)
-              : item,
-        )
-        await setSettings({
-          ...settings,
-          providers: updatedProviders,
-        })
-      }
+    ? createProviderUpdateHandler({
+        settings,
+        setSettings,
+        getSettings,
+      })
     : undefined
 
   switch (provider.type) {
@@ -107,10 +102,12 @@ export function getChatModelClient({
   modelId,
   settings,
   setSettings,
+  getSettings,
 }: {
   modelId: string
   settings: SmartComposerSettings
   setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  getSettings?: () => SmartComposerSettings
 }): {
   providerClient: BaseLLMProvider<LLMProvider>
   model: ChatModel
@@ -124,10 +121,67 @@ export function getChatModelClient({
     providerId: chatModel.providerId,
     settings,
     setSettings,
+    getSettings,
   })
 
   return {
     providerClient,
     model: chatModel,
   }
+}
+
+export function createProviderUpdateHandler({
+  settings,
+  setSettings,
+  getSettings,
+}: {
+  settings: SmartComposerSettings
+  setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  getSettings?: () => SmartComposerSettings
+}): (targetProviderId: string, update: Partial<LLMProvider>) => Promise<void> {
+  return async (targetProviderId, update) => {
+    await setSettings(
+      mergeProviderUpdateIntoSettings(
+        getSettings?.() ?? settings,
+        targetProviderId,
+        update,
+      ),
+    )
+  }
+}
+
+export function mergeProviderUpdateIntoSettings(
+  settings: SmartComposerSettings,
+  targetProviderId: string,
+  update: Partial<LLMProvider>,
+): SmartComposerSettings {
+  const updatedProviders: LLMProvider[] = settings.providers.map((item) =>
+    item.id === targetProviderId ? mergeProviderUpdate(item, update) : item,
+  )
+
+  return {
+    ...settings,
+    providers: updatedProviders,
+  }
+}
+
+function mergeProviderUpdate(
+  provider: LLMProvider,
+  update: Partial<LLMProvider>,
+): LLMProvider {
+  if (
+    'oauth' in update &&
+    !('oauth' in provider && provider.oauth !== undefined)
+  ) {
+    const { oauth: _oauth, ...nonOAuthUpdate } = update
+    return {
+      ...provider,
+      ...nonOAuthUpdate,
+    } as LLMProvider
+  }
+
+  return {
+    ...provider,
+    ...update,
+  } as LLMProvider
 }

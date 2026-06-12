@@ -1,5 +1,19 @@
 # Development Notes
 
+## Public Distribution Security Model
+
+Credential storage prefers Obsidian `app.secretStorage` through feature detection. When `app.secretStorage` is unavailable, Smart Composer falls back to ordinary plugin settings so existing users on older Obsidian builds do not lose access or see a new setup flow. That fallback must be documented as `insecure-settings-fallback`; it must not be described as secure storage.
+
+The current `minAppVersion` can remain unchanged only because fallback support exists. If a release ever requires secure storage for every user, the plugin must require Obsidian 1.11.4+ and update the manifest and release notes together.
+
+Security-sensitive data flow to preserve in future changes:
+
+- API keys and OAuth tokens should be persisted through the secret boundary, not raw settings, whenever Obsidian `app.secretStorage` is available.
+- Subscription OAuth uses third-party/internal endpoints and remains use-at-your-own-risk.
+- MCP tools run local commands with structured `{ command, args, env }` parameters. Do not convert them to shell strings.
+- MCP server `env` values remain ordinary plugin settings and are not migrated into Obsidian `app.secretStorage`.
+- MCP tool output, web content, selected vault content, current-file content, and Vault Search/RAG snippets can be sent to LLM providers and must be treated as untrusted model input.
+
 ## PGlite in Obsidian Environment
 
 PGlite typically uses the `node:fs` module to load bundle files. However, Obsidian plugins run in a browser-like environment where `node:fs` is not available. This presents a challenge in implementing PGlite in Obsidian's environment.

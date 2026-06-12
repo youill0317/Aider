@@ -21,6 +21,7 @@ import {
   ensureProjectContext,
   invalidateProjectContextCache,
 } from './geminiProject'
+import { redactAuthError } from './redactAuthError'
 
 export class GeminiPlanProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'gemini-plan' }>
@@ -126,7 +127,7 @@ export class GeminiPlanProvider extends BaseLLMProvider<
       } catch (error) {
         throw new LLMAPIKeyInvalidException(
           'Gemini OAuth token refresh failed. Please log in again.',
-          error instanceof Error ? error : undefined,
+          redactAuthError(error, [this.provider.oauth.refreshToken]),
         )
       }
     }

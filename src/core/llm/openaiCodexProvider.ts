@@ -19,6 +19,7 @@ import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
 } from './exception'
+import { redactAuthError } from './redactAuthError'
 
 export class OpenAICodexProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'openai-plan' }>
@@ -113,7 +114,7 @@ export class OpenAICodexProvider extends BaseLLMProvider<
       } catch (error) {
         throw new LLMAPIKeyInvalidException(
           'OpenAI Codex OAuth token refresh failed. Please log in again.',
-          error instanceof Error ? error : undefined,
+          redactAuthError(error, [this.provider.oauth.refreshToken]),
         )
       }
     }

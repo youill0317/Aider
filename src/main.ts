@@ -11,6 +11,15 @@ import { DatabaseManager } from './database/DatabaseManager'
 import { PGLiteAbortedException } from './database/exception'
 import { migrateToJsonDatabase } from './database/json/migrateToJsonDatabase'
 import {
+  SecretStore,
+  createSecretStore,
+} from './security/secret-store/secret-store'
+import {
+  hydrateSettingsSecrets,
+  persistSettingsUpdate,
+  sanitizeSettingsForPersistence,
+} from './security/secret-store/settings-secrets'
+import {
   SmartComposerSettings,
   smartComposerSettingsSchema,
 } from './settings/schema/setting.types'
@@ -27,6 +36,8 @@ export default class SmartComposerPlugin extends Plugin {
   ragEngine: RAGEngine | null = null
   private dbManagerInitPromise: Promise<DatabaseManager> | null = null
   private ragEngineInitPromise: Promise<RAGEngine> | null = null
+  private secretStore: SecretStore | null = null
+  private settingsSaveQueue: Promise<void> = Promise.resolve()
   private timeoutIds: ReturnType<typeof setTimeout>[] = [] // Use ReturnType instead of number
 
   async onload() {
@@ -154,8 +165,12 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = parseSmartComposerSettings(await this.loadData())
-    await this.saveData(this.settings) // Save updated settings
+    const parsedSettings = parseSmartComposerSettings(await this.loadData())
+    const secretStore = this.getSecretStore()
+    this.settings = await hydrateSettingsSecrets(parsedSettings, secretStore)
+    await this.saveData(
+      await sanitizeSettingsForPersistence(this.settings, secretStore),
+    ) // Save updated settings
   }
 
   async setSettings(newSettings: SmartComposerSettings) {
@@ -167,10 +182,32 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       return
     }
 
-    this.settings = newSettings
-    await this.saveData(newSettings)
+    this.settingsSaveQueue = this.settingsSaveQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const previousSettings = this.settings
+        const secretStore = this.getSecretStore()
+        await persistSettingsUpdate({
+          previousSettings,
+          nextSettings: newSettings,
+          secretStore,
+          publishRuntimeSettings: (settings) => {
+            this.settings = settings
+          },
+          saveData: (settings) => this.saveData(settings),
+        })
+      })
+    await this.settingsSaveQueue
     this.ragEngine?.setSettings(newSettings)
     this.settingsChangeListeners.forEach((listener) => listener(newSettings))
+  }
+
+  private getSecretStore(): SecretStore {
+    if (!this.secretStore) {
+      this.secretStore = createSecretStore({ app: this.app })
+    }
+
+    return this.secretStore
   }
 
   addSettingsChangeListener(

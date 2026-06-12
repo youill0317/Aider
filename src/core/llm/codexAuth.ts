@@ -9,6 +9,8 @@ import {
   CODEX_REDIRECT_URI,
 } from '../../constants'
 
+import { decideOAuthCallback } from './oauthCallback'
+
 type CodexPkceCodes = {
   verifier: string
   challenge: string
@@ -124,44 +126,24 @@ export async function startCodexCallbackServer(params: {
 
     const server = http.createServer((req, res) => {
       const requestUrl = new URL(req.url ?? '/', origin)
+      const decision = decideOAuthCallback({
+        requestUrl,
+        expectedPath: path,
+        expectedState: state,
+      })
 
-      if (requestUrl.pathname !== path) {
+      if (decision.kind === 'not-found') {
         res.statusCode = 404
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.end('Not found')
         return
       }
 
-      const code = requestUrl.searchParams.get('code')
-      const incomingState = requestUrl.searchParams.get('state')
-      const error = requestUrl.searchParams.get('error')
-      const errorDescription = requestUrl.searchParams.get('error_description')
-
-      if (!incomingState) {
-        res.statusCode = 400
-        res.end('Missing state parameter')
-        finalize(new Error('Missing state parameter'))
-        return
-      }
-
-      if (incomingState !== state) {
-        res.statusCode = 400
-        res.end('Invalid state parameter')
-        finalize(new Error('Invalid state parameter'))
-        return
-      }
-
-      if (error) {
-        const errorMsg = errorDescription ?? error
-        res.statusCode = 400
-        res.end(`OAuth error: ${errorMsg}`)
-        finalize(new Error(errorMsg))
-        return
-      }
-
-      if (!code) {
-        res.statusCode = 400
-        res.end('Missing authorization code')
-        finalize(new Error('Missing authorization code'))
+      if (decision.kind === 'error') {
+        res.statusCode = decision.statusCode
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.end(decision.responseBody)
+        finalize(decision.error)
         return
       }
 
@@ -170,7 +152,7 @@ export async function startCodexCallbackServer(params: {
       res.end(
         '<!doctype html><html><head><title>Authorization Successful</title></head><body><p>You can close this window.</p><script>setTimeout(() => window.close(), 2000)</script></body></html>',
       )
-      finalize(undefined, code)
+      finalize(undefined, decision.code)
     })
 
     const finalize = (error?: Error, code?: string) => {

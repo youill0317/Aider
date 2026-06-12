@@ -29,6 +29,7 @@ function McpSectionComponent({ app, plugin }: McpSectionComponentProps) {
     <SettingsProvider
       settings={plugin.settings}
       setSettings={(newSettings) => plugin.setSettings(newSettings)}
+      getSettings={() => plugin.settings}
       addSettingsChangeListener={(listener) =>
         plugin.addSettingsChangeListener(listener)
       }

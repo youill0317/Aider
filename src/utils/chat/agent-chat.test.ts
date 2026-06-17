@@ -1,6 +1,7 @@
 import type { TFile } from 'obsidian'
 
 import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
+import type { ChatUserMessage } from '../../types/chat'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
 import {
@@ -204,15 +205,17 @@ describe('buildAgentPrompt', () => {
     } as TFile
 
     // When: the prompt is prepared for Codex.
+    const userMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Summarize this note.',
+      id: 'user-1',
+      mentionables: [{ type: 'current-file', file }],
+    }
     const prompt = buildAgentPrompt({
+      messages: [userMessage],
       prompt: 'Summarize this note.',
-      userMessage: {
-        role: 'user',
-        content: null,
-        promptContent: 'Summarize this note.',
-        id: 'user-1',
-        mentionables: [{ type: 'current-file', file }],
-      },
+      userMessage,
     })
 
     // Then: Codex receives the active markdown path explicitly.
@@ -229,19 +232,23 @@ describe('buildAgentPrompt', () => {
     } as TFile
 
     // When: the prompt is prepared for Codex.
+    const userMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Inspect the project.',
+      id: 'user-1',
+      mentionables: [{ type: 'current-file', file }],
+    }
     const prompt = buildAgentPrompt({
+      messages: [userMessage],
       prompt: 'Inspect the project.',
-      userMessage: {
-        role: 'user',
-        content: null,
-        promptContent: 'Inspect the project.',
-        id: 'user-1',
-        mentionables: [{ type: 'current-file', file }],
-      },
+      userMessage,
     })
 
     // Then: no misleading active markdown note context is sent.
-    expect(prompt).toBe('Inspect the project.')
+    expect(prompt).not.toContain(AGENT_CHAT_CONTEXT_HEADING)
+    expect(prompt).not.toContain('Path: Images/diagram.png')
+    expect(prompt).toContain('Inspect the project.')
   })
 })
 

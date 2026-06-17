@@ -1,4 +1,4 @@
-import { buildAgentChatMessages } from './agent-chat'
+import { buildAgentChatMessages, buildAgentPrompt } from './agent-chat'
 import {
   agentCommand,
   assistant,
@@ -150,5 +150,41 @@ describe('Agent Chat user journeys', () => {
         'Codex found the package file.',
       ]),
     )
+  })
+
+  it('builds Agent Chat prompts from the last 10 user turns', () => {
+    const followUpUser = user(
+      'Continue from the previous agent result.',
+      'user-agent-follow-up',
+    )
+
+    const prompt = buildAgentPrompt({
+      messages: [
+        user('Explain the plugin structure first.', 'user-normal'),
+        assistant(
+          'The chat UI is coordinated by Chat.tsx.',
+          'assistant-normal',
+        ),
+        user('Inspect the files with Codex.', 'user-agent'),
+        agentCommand({
+          command: "rg -n 'handleUserMessageSubmit' src/components",
+          id: 'rg-submit',
+          output: 'src/components/chat-view/Chat.tsx:294\n',
+        }),
+        assistant('Codex found the submit path.', 'assistant-agent'),
+        followUpUser,
+      ],
+      prompt: 'Continue from the previous agent result.',
+      userMessage: followUpUser,
+    })
+
+    expect(prompt).toContain('Explain the plugin structure first.')
+    expect(prompt).toContain('The chat UI is coordinated by Chat.tsx.')
+    expect(prompt).toContain(
+      ">_ rg -n 'handleUserMessageSubmit' src/components",
+    )
+    expect(prompt).toContain('src/components/chat-view/Chat.tsx:294')
+    expect(prompt).toContain('Codex found the submit path.')
+    expect(prompt).toContain('Continue from the previous agent result.')
   })
 })

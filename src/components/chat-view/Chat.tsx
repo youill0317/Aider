@@ -375,6 +375,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             name: CODEX_TOOL_NAME,
             args: buildAgentChatRequestArgs(
               buildAgentPrompt({
+                messages: compiledMessages,
                 prompt: agentPrompt,
                 userMessage: compiledLastMessage,
               }),

@@ -18,6 +18,7 @@ import { OpenAICodexProvider } from './openaiCodexProvider'
 import { OpenAICompatibleProvider } from './openaiCompatibleProvider'
 import { OpenRouterProvider } from './openRouterProvider'
 import { PerplexityProvider } from './perplexityProvider'
+import { VoyageProvider } from './voyageProvider'
 import { XaiProvider } from './xaiProvider'
 
 /*
@@ -88,6 +89,9 @@ export function getProviderClient({
     }
     case 'xai': {
       return new XaiProvider(provider)
+    }
+    case 'voyage': {
+      return new VoyageProvider(provider)
     }
     case 'azure-openai': {
       return new AzureOpenAIProvider(provider)

@@ -349,7 +349,7 @@ function createSettings(
   overrides: Partial<SmartComposerSettings>,
 ): SmartComposerSettings {
   return {
-    version: 17,
+    version: 18,
     providers: [],
     chatModels: [
       {

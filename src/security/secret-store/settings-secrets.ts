@@ -40,6 +40,7 @@ function hasOAuth(provider: LLMProvider): provider is ProviderWithOAuth {
     case 'deepseek':
     case 'perplexity':
     case 'mistral':
+    case 'voyage':
     case 'openrouter':
     case 'ollama':
     case 'lm-studio':

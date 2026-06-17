@@ -672,7 +672,7 @@ function createSettings(
   },
 ): SmartComposerSettings {
   return {
-    version: 16,
+    version: 18,
     providers: [],
     chatModels: [],
     embeddingModels: [],
@@ -702,6 +702,17 @@ function createSettings(
       includeCurrentFileContent: true,
       enableTools: true,
       maxAutoIterations: 1,
+    },
+    agent: {
+      codex: {
+        enabled: true,
+        command: 'codex',
+        defaultSandbox: 'workspace-write',
+        approvalPolicy: 'default',
+        cwdMode: 'vault',
+        customCwd: '',
+        resume: true,
+      },
     },
   }
 }

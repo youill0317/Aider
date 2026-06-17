@@ -5,9 +5,11 @@ import { useEffect } from 'react'
 
 export default function OnEnterPlugin({
   onEnter,
+  onAgentChat,
   onVaultChat,
 }: {
   onEnter: (evt: KeyboardEvent) => void
+  onAgentChat?: () => void
   onVaultChat?: () => void
 }) {
   const [editor] = useLexicalComposerContext()
@@ -26,6 +28,16 @@ export default function OnEnterPlugin({
           onVaultChat()
           return true
         }
+        if (
+          onAgentChat &&
+          !evt.shiftKey &&
+          (Platform.isMacOS ? evt.metaKey : evt.ctrlKey)
+        ) {
+          evt.preventDefault()
+          evt.stopPropagation()
+          onAgentChat()
+          return true
+        }
         if (evt.shiftKey) {
           return false
         }
@@ -40,7 +52,7 @@ export default function OnEnterPlugin({
     return () => {
       removeListener()
     }
-  }, [editor, onEnter, onVaultChat])
+  }, [editor, onAgentChat, onEnter, onVaultChat])
 
   return null
 }

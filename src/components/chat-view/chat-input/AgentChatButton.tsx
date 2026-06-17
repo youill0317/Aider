@@ -1,5 +1,6 @@
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { CornerDownLeftIcon } from 'lucide-react'
+import { ChevronUp, Command, CornerDownLeftIcon } from 'lucide-react'
+import { Platform } from 'obsidian'
 
 export function AgentChatButton({ onClick }: { onClick: () => void }) {
   return (
@@ -11,10 +12,14 @@ export function AgentChatButton({ onClick }: { onClick: () => void }) {
             onClick={onClick}
           >
             <div className="smtcmp-chat-user-input-submit-button-icons">
-              <span className="smtcmp-agent-chat-button-symbol">{'>_'}</span>
+              {Platform.isMacOS ? (
+                <Command size={10} />
+              ) : (
+                <ChevronUp size={12} />
+              )}
               <CornerDownLeftIcon size={12} />
             </div>
-            <div>{'>_ Agent'}</div>
+            <div>Agent</div>
           </div>
         </Tooltip.Trigger>
         <Tooltip.Portal>

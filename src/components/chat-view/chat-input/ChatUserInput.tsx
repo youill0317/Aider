@@ -264,9 +264,8 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           autoFocus={autoFocus}
           plugins={{
             onEnter: {
-              onVaultChat: () => {
-                handleSubmit('vault')
-              },
+              onAgentChat: () => handleSubmit('agent'),
+              onVaultChat: () => handleSubmit('vault'),
             },
             templatePopover: {
               anchorElement: containerRef.current,

@@ -26,9 +26,12 @@ function CopyButton({ messages }: { messages: AssistantToolMessageGroup }) {
             return getToolMessageContent(message)
           case 'agent-command':
             return [
-              `>_ ${message.command}`,
+              [message.title, message.detail].filter(Boolean).join(' '),
               `Status: ${message.status}`,
-              `Exit code: ${message.exitCode ?? 'running'}`,
+              ...(message.exitCode !== undefined
+                ? [`Exit code: ${message.exitCode ?? 'running'}`]
+                : []),
+              message.input,
               message.output,
             ]
               .filter((line) => line.length > 0)

@@ -2,9 +2,7 @@ import type { TFile } from 'obsidian'
 import { v4 as uuidv4 } from 'uuid'
 
 import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
-import type { CodexAgentEvent } from '../../core/agent/types'
 import {
-  ChatAgentCommandMessage,
   ChatAssistantMessage,
   ChatMessage,
   ChatToolMessage,
@@ -14,6 +12,10 @@ import { MentionableCurrentFile } from '../../types/mentionable'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
 import { getLastChatTurns } from './promptGenerator'
+export {
+  buildAgentCommandMessageFromEvent,
+  upsertAgentCommandMessage,
+} from './agent-events'
 
 export const AGENT_CHAT_SUMMARY = 'Agent Chat'
 
@@ -34,14 +36,6 @@ type BuildAgentPromptParams = {
   readonly messages: readonly ChatMessage[]
   readonly prompt: string
   readonly userMessage: ChatUserMessage
-}
-
-type CodexCommandExecutionItem = {
-  readonly id: string
-  readonly command: string
-  readonly aggregatedOutput: string
-  readonly exitCode: number | null
-  readonly status: string
 }
 
 export function buildAgentChatToolMessage({
@@ -163,9 +157,12 @@ function formatAgentHistoryMessage(message: ChatMessage): string {
       return formatToolMessage(message)
     case 'agent-command':
       return [
-        `>_ ${message.command}`,
+        [message.title, message.detail].filter(Boolean).join(' '),
         `Status: ${message.status}`,
-        `Exit code: ${message.exitCode ?? 'running'}`,
+        ...(message.exitCode !== undefined
+          ? [`Exit code: ${message.exitCode ?? 'running'}`]
+          : []),
+        message.input,
         message.output,
       ]
         .filter((line) => line.length > 0)
@@ -237,48 +234,6 @@ export function withCurrentFileMentionable(
   }
 }
 
-export function buildAgentCommandMessageFromEvent(
-  event: CodexAgentEvent,
-): ChatAgentCommandMessage | null {
-  if (
-    event.kind !== 'item.started' &&
-    event.kind !== 'item.updated' &&
-    event.kind !== 'item.completed'
-  ) {
-    return null
-  }
-
-  const item = parseCodexCommandExecutionItem(event.item)
-  if (!item) {
-    return null
-  }
-
-  return {
-    role: 'agent-command',
-    id: `agent-command:${item.id}`,
-    command: item.command,
-    output: item.aggregatedOutput,
-    exitCode: item.exitCode,
-    status: getAgentCommandStatus(item),
-  }
-}
-
-export function upsertAgentCommandMessage(
-  messages: readonly ChatMessage[],
-  commandMessage: ChatAgentCommandMessage,
-): ChatMessage[] {
-  const existingIndex = messages.findIndex(
-    (message) => message.id === commandMessage.id,
-  )
-  if (existingIndex === -1) {
-    return [...messages, commandMessage]
-  }
-
-  return messages.map((message, index) =>
-    index === existingIndex ? commandMessage : message,
-  )
-}
-
 export function isAgentChatTerminalMessage(message: ChatMessage): boolean {
   return message.role === 'tool' && isAgentChatToolMessage(message)
 }
@@ -319,39 +274,4 @@ export function isAgentChatToolMessage(message: ChatToolMessage): boolean {
       return false
     }
   })
-}
-
-function parseCodexCommandExecutionItem(
-  item: Record<string, unknown>,
-): CodexCommandExecutionItem | null {
-  if (item.type !== 'command_execution') {
-    return null
-  }
-  if (typeof item.id !== 'string' || typeof item.command !== 'string') {
-    return null
-  }
-  if (typeof item.status !== 'string') {
-    return null
-  }
-
-  const aggregatedOutput =
-    typeof item.aggregated_output === 'string' ? item.aggregated_output : ''
-  const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null
-
-  return {
-    id: item.id,
-    command: item.command,
-    aggregatedOutput,
-    exitCode,
-    status: item.status,
-  }
-}
-
-function getAgentCommandStatus(
-  item: CodexCommandExecutionItem,
-): ChatAgentCommandMessage['status'] {
-  if (item.status !== 'completed') {
-    return 'running'
-  }
-  return item.exitCode === 0 ? 'success' : 'error'
 }

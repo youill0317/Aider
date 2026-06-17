@@ -50,12 +50,15 @@ export function agentCommand({
   readonly output: string
 }): ChatAgentCommandMessage {
   return {
-    command,
+    detail: command,
     exitCode: 0,
     id: `agent-command-${id}`,
+    input: '',
+    kind: 'command',
     output,
     role: 'agent-command',
     status: 'success',
+    title: '>_',
   }
 }
 

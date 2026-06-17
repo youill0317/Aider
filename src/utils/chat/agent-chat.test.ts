@@ -295,9 +295,12 @@ describe('buildAgentCommandMessageFromEvent', () => {
     expect(message).toEqual({
       role: 'agent-command',
       id: 'agent-command:item_0',
-      command: "/bin/bash -lc 'rg --files'",
+      title: '>_',
+      detail: "/bin/bash -lc 'rg --files'",
+      input: '',
       output: 'package.json\n',
       exitCode: 0,
+      kind: 'command',
       status: 'success',
     })
   })
@@ -317,6 +320,64 @@ describe('buildAgentCommandMessageFromEvent', () => {
     })
 
     expect(message?.status).toBe('running')
+  })
+
+  it('maps Codex web search events to visible tool messages', () => {
+    const message = buildAgentCommandMessageFromEvent({
+      kind: 'item.completed',
+      line: 1,
+      item: {
+        id: 'item_1',
+        type: 'web_search',
+        query: 'OpenAI Codex CLI',
+        action: {
+          type: 'search',
+          query: 'OpenAI Codex CLI',
+        },
+      },
+    })
+
+    expect(message).toEqual({
+      role: 'agent-command',
+      id: 'agent-command:item_1',
+      title: 'Web search',
+      detail: 'OpenAI Codex CLI',
+      input: JSON.stringify(
+        {
+          type: 'search',
+          query: 'OpenAI Codex CLI',
+        },
+        null,
+        2,
+      ),
+      output: 'OpenAI Codex CLI',
+      kind: 'web-search',
+      status: 'success',
+    })
+  })
+
+  it('maps Codex MCP tool call events to visible tool messages', () => {
+    const message = buildAgentCommandMessageFromEvent({
+      kind: 'item.completed',
+      line: 1,
+      item: {
+        id: 'item_2',
+        type: 'mcp_tool_call',
+        server: 'github',
+        tool: 'search',
+        arguments: { q: 'codex' },
+        result: {
+          content: [{ type: 'text', text: 'found' }],
+        },
+        status: 'completed',
+      },
+    })
+
+    expect(message?.title).toBe('github:search')
+    expect(message?.kind).toBe('mcp-tool')
+    expect(message?.status).toBe('success')
+    expect(message?.input).toBe(JSON.stringify({ q: 'codex' }, null, 2))
+    expect(message?.output).toContain('found')
   })
 })
 

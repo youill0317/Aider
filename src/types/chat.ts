@@ -42,10 +42,13 @@ export type ChatToolMessage = {
 export type ChatAgentCommandMessage = {
   role: 'agent-command'
   id: string
-  command: string
+  title: string
+  detail: string
+  input: string
   output: string
-  exitCode: number | null
   status: 'running' | 'success' | 'error'
+  kind: 'command' | 'web-search' | 'mcp-tool'
+  exitCode?: number | null
 }
 
 export type ChatMessage =

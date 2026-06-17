@@ -6,7 +6,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { editorStateToPlainText } from '../components/chat-view/chat-input/utils/editor-state-to-plain-text'
 import { useApp } from '../contexts/app-context'
 import { ChatConversationMetadata } from '../database/json/chat/types'
-import { ChatMessage, SerializedChatMessage } from '../types/chat'
+import {
+  ChatAgentCommandMessage,
+  ChatMessage,
+  SerializedChatMessage,
+} from '../types/chat'
 import { Mentionable } from '../types/mentionable'
 import {
   deserializeMentionable,
@@ -156,7 +160,31 @@ const serializeChatMessage = (message: ChatMessage): SerializedChatMessage => {
         id: message.id,
       }
     case 'agent-command':
-      return message
+      return normalizeAgentCommandMessage(message)
+  }
+}
+
+const normalizeAgentCommandMessage = (
+  message: ChatAgentCommandMessage,
+): ChatAgentCommandMessage => {
+  if (message.title && message.kind) {
+    return message
+  }
+
+  const legacyMessage = message as ChatAgentCommandMessage & {
+    readonly command?: string
+  }
+  const command = legacyMessage.command ?? ''
+  return {
+    detail: command,
+    exitCode: message.exitCode ?? null,
+    id: message.id,
+    input: '',
+    kind: 'command',
+    output: message.output,
+    role: 'agent-command',
+    status: message.status,
+    title: '>_',
   }
 }
 

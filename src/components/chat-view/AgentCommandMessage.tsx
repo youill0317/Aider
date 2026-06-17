@@ -11,6 +11,18 @@ const STATUS_LABELS: Record<ChatAgentCommandMessage['status'], string> = {
   success: 'Completed',
 }
 
+const INPUT_LABELS: Record<ChatAgentCommandMessage['kind'], string> = {
+  command: 'Command',
+  'web-search': 'Search',
+  'mcp-tool': 'Parameters',
+}
+
+const OUTPUT_LABELS: Record<ChatAgentCommandMessage['kind'], string> = {
+  command: 'Output',
+  'web-search': 'Query',
+  'mcp-tool': 'Result',
+}
+
 const AgentCommandMessage = memo(function AgentCommandMessage({
   message,
 }: {
@@ -31,7 +43,9 @@ const AgentCommandMessage = memo(function AgentCommandMessage({
           <div className="smtcmp-toolcall-header-content">
             <span>{STATUS_LABELS[message.status]}</span>
             <span>&nbsp;&nbsp;</span>
-            <span className="smtcmp-toolcall-header-tool-name">&gt;_</span>
+            <span className="smtcmp-toolcall-header-tool-name">
+              {message.title}
+            </span>
           </div>
           <div className="smtcmp-toolcall-header-icon smtcmp-toolcall-header-icon--status">
             <StatusIcon status={message.status} />
@@ -39,17 +53,27 @@ const AgentCommandMessage = memo(function AgentCommandMessage({
         </div>
         {isOpen && (
           <div className="smtcmp-toolcall-content">
-            <div className="smtcmp-toolcall-content-section">
-              <div>Command:</div>
-              <ObsidianCodeBlock language="bash" content={message.command} />
-            </div>
+            {message.detail.length > 0 && (
+              <div className="smtcmp-toolcall-content-section">
+                <div>{message.detail}</div>
+              </div>
+            )}
+            {message.input.length > 0 && (
+              <div className="smtcmp-toolcall-content-section">
+                <div>{INPUT_LABELS[message.kind]}:</div>
+                <ObsidianCodeBlock
+                  language={message.kind === 'command' ? 'bash' : undefined}
+                  content={message.input}
+                />
+              </div>
+            )}
             {message.output.length > 0 && (
               <div className="smtcmp-toolcall-content-section">
-                <div>Output:</div>
+                <div>{OUTPUT_LABELS[message.kind]}:</div>
                 <ObsidianCodeBlock content={message.output} />
               </div>
             )}
-            {message.exitCode !== null && (
+            {message.exitCode !== undefined && message.exitCode !== null && (
               <div className="smtcmp-toolcall-content-section">
                 <div>Exit code: {message.exitCode}</div>
               </div>

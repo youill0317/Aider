@@ -4,6 +4,7 @@ import {
   ChatToolMessage,
 } from '../../types/chat'
 
+import AgentCommandMessage from './AgentCommandMessage'
 import AssistantMessageAnnotations from './AssistantMessageAnnotations'
 import AssistantMessageContent from './AssistantMessageContent'
 import AssistantMessageReasoning from './AssistantMessageReasoning'
@@ -49,13 +50,17 @@ export default function AssistantToolMessageGroupItem({
               />
             </div>
           ) : null
-        ) : (
+        ) : message.role === 'tool' ? (
           <div key={message.id}>
             <ToolMessage
               message={message}
               conversationId={conversationId}
               onMessageUpdate={onToolMessageUpdate}
             />
+          </div>
+        ) : (
+          <div key={message.id}>
+            <AgentCommandMessage message={message} />
           </div>
         ),
       )}

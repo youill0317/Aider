@@ -2,8 +2,9 @@ import clsx from 'clsx'
 import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
 import { memo, useCallback, useMemo, useState } from 'react'
 
-import { useMcp } from '../../contexts/mcp-context'
 import { useSettings } from '../../contexts/settings-context'
+import { useToolDispatcher } from '../../contexts/tool-dispatcher-context'
+import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
 import { InvalidToolNameException } from '../../core/mcp/exception'
 import { parseToolName } from '../../core/mcp/tool-name-utils'
 import { ChatToolMessage } from '../../types/chat'
@@ -39,7 +40,13 @@ export const getToolMessageContent = (message: ChatToolMessage): string => {
         }
       })()
       return [
-        `${STATUS_LABELS[toolCall.response.status]} ${serverName ? `${serverName}:${toolName}` : toolName}`,
+        `${STATUS_LABELS[toolCall.response.status]} ${
+          toolCall.request.name === CODEX_TOOL_NAME
+            ? '>_'
+            : serverName
+              ? `${serverName}:${toolName}`
+              : toolName
+        }`,
         ...(toolCall.request.arguments
           ? [`Parameters: ${toolCall.request.arguments}`]
           : []),
@@ -101,6 +108,7 @@ function ToolCallItem({
     handleReject,
     handleAbort,
   } = useToolCall(request, conversationId, onResponseUpdate)
+  const isCodexTool = request.name === CODEX_TOOL_NAME
 
   const [isOpen, setIsOpen] = useState(
     // Open by default if the tool call requires approval
@@ -144,7 +152,11 @@ function ToolCallItem({
           <span>{STATUS_LABELS[response.status] || 'Unknown'}</span>
           <span>&nbsp;&nbsp;</span>
           <span className="smtcmp-toolcall-header-tool-name">
-            {serverName ? `${serverName}:${toolName}` : toolName}
+            {isCodexTool
+              ? '>_'
+              : serverName
+                ? `${serverName}:${toolName}`
+                : toolName}
           </span>
         </div>
         <div className="smtcmp-toolcall-header-icon smtcmp-toolcall-header-icon--status">
@@ -182,24 +194,37 @@ function ToolCallItem({
                   handleToolCall()
                   setIsOpen(false)
                 }}
-                menuOptions={[
-                  {
-                    label: 'Always allow this tool',
-                    onClick: () => {
-                      handleToolCall()
-                      handleAllowAutoExecution()
-                      setIsOpen(false)
-                    },
-                  },
-                  {
-                    label: 'Allow for this chat',
-                    onClick: () => {
-                      handleToolCall()
-                      handleAllowForConversation()
-                      setIsOpen(false)
-                    },
-                  },
-                ]}
+                menuOptions={
+                  isCodexTool
+                    ? [
+                        {
+                          label: 'Allow for this chat',
+                          onClick: () => {
+                            handleToolCall()
+                            handleAllowForConversation()
+                            setIsOpen(false)
+                          },
+                        },
+                      ]
+                    : [
+                        {
+                          label: 'Always allow this tool',
+                          onClick: () => {
+                            handleToolCall()
+                            handleAllowAutoExecution()
+                            setIsOpen(false)
+                          },
+                        },
+                        {
+                          label: 'Allow for this chat',
+                          onClick: () => {
+                            handleToolCall()
+                            handleAllowForConversation()
+                            setIsOpen(false)
+                          },
+                        },
+                      ]
+                }
               />
               <button
                 onClick={() => {
@@ -228,25 +253,29 @@ function useToolCall(
   onResponseUpdate: (response: ToolCallResponse) => void,
 ) {
   const { settings, setSettings } = useSettings()
-  const { getMcpManager } = useMcp()
+  const { getToolDispatcher } = useToolDispatcher()
 
   const handleToolCall = useCallback(async () => {
-    const mcpManager = await getMcpManager()
+    const toolDispatcher = await getToolDispatcher()
     onResponseUpdate({
       status: ToolCallResponseStatus.Running,
     })
-    const toolCallResponse: ToolCallResponse = await mcpManager.callTool({
+    const toolCallResponse: ToolCallResponse = await toolDispatcher.callTool({
       name: request.name,
       args: request.arguments,
       id: request.id,
     })
     onResponseUpdate(toolCallResponse)
-  }, [request, onResponseUpdate, getMcpManager])
+  }, [request, onResponseUpdate, getToolDispatcher])
 
   const handleAllowForConversation = useCallback(async () => {
-    const mcpManager = await getMcpManager()
-    mcpManager.allowToolForConversation(request.name, conversationId)
-  }, [request, conversationId, getMcpManager])
+    const toolDispatcher = await getToolDispatcher()
+    toolDispatcher.allowToolForConversation(
+      request.name,
+      request.arguments,
+      conversationId,
+    )
+  }, [request, conversationId, getToolDispatcher])
 
   const handleAllowAutoExecution = useCallback(async () => {
     const { serverName, toolName } = parseToolName(request.name)
@@ -290,12 +319,12 @@ function useToolCall(
   }, [onResponseUpdate])
 
   const handleAbort = useCallback(async () => {
-    const mcpManager = await getMcpManager()
-    mcpManager.abortToolCall(request.id)
+    const toolDispatcher = await getToolDispatcher()
+    toolDispatcher.abortToolCall(request.id)
     onResponseUpdate({
       status: ToolCallResponseStatus.Aborted,
     })
-  }, [request, onResponseUpdate, getMcpManager])
+  }, [request, onResponseUpdate, getToolDispatcher])
 
   return {
     handleToolCall,

@@ -155,6 +155,8 @@ const serializeChatMessage = (message: ChatMessage): SerializedChatMessage => {
         toolCalls: message.toolCalls,
         id: message.id,
       }
+    case 'agent-command':
+      return message
   }
 }
 
@@ -192,5 +194,7 @@ const deserializeChatMessage = (
         toolCalls: message.toolCalls,
         id: message.id,
       }
+    case 'agent-command':
+      return message
   }
 }

@@ -3,8 +3,8 @@ import { Notice } from 'obsidian'
 import { useCallback, useMemo, useRef } from 'react'
 
 import { useApp } from '../../contexts/app-context'
-import { useMcp } from '../../contexts/mcp-context'
 import { useSettings } from '../../contexts/settings-context'
+import { useToolDispatcher } from '../../contexts/tool-dispatcher-context'
 import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
@@ -40,7 +40,7 @@ export function useChatStreamManager({
 }: UseChatStreamManagerParams): UseChatStreamManager {
   const app = useApp()
   const { settings, setSettings, getSettings } = useSettings()
-  const { getMcpManager } = useMcp()
+  const { getToolDispatcher } = useToolDispatcher()
 
   const activeStreamAbortControllersRef = useRef<AbortController[]>([])
 
@@ -110,7 +110,7 @@ export function useChatStreamManager({
       let unsubscribeResponseGenerator: (() => void) | undefined
 
       try {
-        const mcpManager = await getMcpManager()
+        const toolDispatcher = await getToolDispatcher()
         const responseGenerator = new ResponseGenerator({
           providerClient,
           model,
@@ -119,7 +119,7 @@ export function useChatStreamManager({
           enableTools: settings.chatOptions.enableTools,
           maxAutoIterations: settings.chatOptions.maxAutoIterations,
           promptGenerator,
-          mcpManager,
+          toolDispatcher,
           abortSignal: abortController.signal,
         })
 

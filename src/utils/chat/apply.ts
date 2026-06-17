@@ -3,6 +3,7 @@ import { TFile } from 'obsidian'
 import { editorStateToPlainText } from '../../components/chat-view/chat-input/utils/editor-state-to-plain-text'
 import { BaseLLMProvider } from '../../core/llm/base'
 import {
+  ChatAgentCommandMessage,
   ChatAssistantMessage,
   ChatMessage,
   ChatToolMessage,
@@ -13,7 +14,9 @@ import { RequestMessage } from '../../types/llm/request'
 import { MentionableBlock, MentionableFile } from '../../types/mentionable'
 import { LLMProvider } from '../../types/provider.types'
 
-const MAX_CHAT_HISTORY_MESSAGES = 10
+import { getLastChatTurns } from './promptGenerator'
+
+const MAX_CHAT_HISTORY_TURNS = 10
 
 const PREDICTED_OUTPUTS_SUPPORTED_MODELS = [
   'gpt-4o',
@@ -84,6 +87,19 @@ const parseToolMessageForApply = (message: ChatToolMessage): string => {
   )
 }
 
+const parseAgentCommandMessageForApply = (
+  message: ChatAgentCommandMessage,
+): string => {
+  return [
+    message.command,
+    `Status: ${message.status}`,
+    `Exit code: ${message.exitCode ?? 'running'}`,
+    message.output,
+  ]
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
+
 const generateApplyPrompt = (
   blockToApply: string,
   currentFile: TFile,
@@ -99,8 +115,7 @@ ${currentFileContent}
 \`\`\`
 
 ## Conversation History
-${chatMessages
-  .slice(-MAX_CHAT_HISTORY_MESSAGES)
+${getLastChatTurns(chatMessages, MAX_CHAT_HISTORY_TURNS)
   .map((message) => {
     if (message.role === 'user') {
       return `[User]: ${parseUserMessageForApply(message)}`
@@ -108,6 +123,8 @@ ${chatMessages
       return `[Assistant]: ${parseAssistantMessageForApply(message)}`
     } else if (message.role === 'tool') {
       return `[Tool]: ${parseToolMessageForApply(message)}`
+    } else if (message.role === 'agent-command') {
+      return `[>_]: ${parseAgentCommandMessageForApply(message)}`
     }
   })
   .join('\n')}

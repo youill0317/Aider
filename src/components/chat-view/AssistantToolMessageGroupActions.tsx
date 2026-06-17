@@ -24,6 +24,15 @@ function CopyButton({ messages }: { messages: AssistantToolMessageGroup }) {
             return message.content === '' ? null : message.content
           case 'tool':
             return getToolMessageContent(message)
+          case 'agent-command':
+            return [
+              `>_ ${message.command}`,
+              `Status: ${message.status}`,
+              `Exit code: ${message.exitCode ?? 'running'}`,
+              message.output,
+            ]
+              .filter((line) => line.length > 0)
+              .join('\n')
         }
       })
       .filter(Boolean)

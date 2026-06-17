@@ -6,6 +6,7 @@ import { RAGEngine } from '../../core/rag/ragEngine'
 import { SelectEmbedding } from '../../database/schema'
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import {
+  ChatAgentCommandMessage,
   ChatAssistantMessage,
   ChatMessage,
   ChatToolMessage,
@@ -39,7 +40,7 @@ export class PromptGenerator {
   private getRagEngine: () => Promise<RAGEngine>
   private app: App
   private settings: SmartComposerSettings
-  private MAX_CONTEXT_MESSAGES = 20
+  private MAX_CONTEXT_TURNS = 10
 
   constructor(
     getRagEngine: () => Promise<RAGEngine>,
@@ -122,10 +123,9 @@ export class PromptGenerator {
   }: {
     messages: ChatMessage[]
   }): RequestMessage[] {
-    // Get the last MAX_CONTEXT_MESSAGES messages and parse them into request messages
-    const requestMessages: RequestMessage[] = messages
-      .slice(-this.MAX_CONTEXT_MESSAGES)
-      .flatMap((message): RequestMessage[] => {
+    const contextMessages = getLastChatTurns(messages, this.MAX_CONTEXT_TURNS)
+    const requestMessages: RequestMessage[] = contextMessages.flatMap(
+      (message): RequestMessage[] => {
         if (message.role === 'user') {
           // We assume that all user messages have been compiled
           return [
@@ -136,11 +136,14 @@ export class PromptGenerator {
           ]
         } else if (message.role === 'assistant') {
           return this.parseAssistantMessage({ message })
-        } else {
+        } else if (message.role === 'tool') {
           // message.role === 'tool'
           return this.parseToolMessage({ message })
+        } else {
+          return [this.parseAgentCommandMessage({ message })]
         }
-      })
+      },
+    )
 
     // TODO: Also verify that tool messages appear right after their corresponding assistant tool calls
     const filteredRequestMessages: RequestMessage[] = requestMessages
@@ -247,6 +250,24 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
           }
       }
     })
+  }
+
+  private parseAgentCommandMessage({
+    message,
+  }: {
+    message: ChatAgentCommandMessage
+  }): RequestMessage {
+    return {
+      role: 'assistant',
+      content: [
+        `>_ ${message.command}`,
+        `Status: ${message.status}`,
+        `Exit code: ${message.exitCode ?? 'running'}`,
+        message.output,
+      ]
+        .filter((line) => line.length > 0)
+        .join('\n'),
+    }
   }
 
   public async compileUserMessagePrompt({
@@ -581,4 +602,28 @@ ${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`
     )
     return chatModel?.promptLevel ?? PromptLevel.Default
   }
+}
+
+export function getLastChatTurns(
+  messages: readonly ChatMessage[],
+  maxTurns: number,
+): ChatMessage[] {
+  if (maxTurns <= 0) {
+    return []
+  }
+
+  let turnsSeen = 0
+  let startIndex = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role !== 'user') {
+      continue
+    }
+    turnsSeen += 1
+    startIndex = index
+    if (turnsSeen === maxTurns) {
+      break
+    }
+  }
+
+  return messages.slice(startIndex)
 }

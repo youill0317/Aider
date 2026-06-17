@@ -25,6 +25,7 @@ import { fileToMentionableImage } from '../../../utils/llm/image'
 import { openMarkdownFile, readTFileContent } from '../../../utils/obsidian'
 import { ObsidianMarkdown } from '../ObsidianMarkdown'
 
+import { AgentChatButton } from './AgentChatButton'
 import { ImageUploadButton } from './ImageUploadButton'
 import LexicalContentEditable from './LexicalContentEditable'
 import MentionableBadge from './MentionableBadge'
@@ -39,10 +40,12 @@ export type ChatUserInputRef = {
   focus: () => void
 }
 
+export type ChatSubmitMode = 'chat' | 'vault' | 'agent'
+
 export type ChatUserInputProps = {
   initialSerializedEditorState: SerializedEditorState | null
   onChange: (content: SerializedEditorState) => void
-  onSubmit: (content: SerializedEditorState, useVaultSearch?: boolean) => void
+  onSubmit: (content: SerializedEditorState, mode?: ChatSubmitMode) => void
   onFocus: () => void
   mentionables: Mentionable[]
   setMentionables: (mentionables: Mentionable[]) => void
@@ -195,9 +198,9 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       handleCreateImageMentionables(mentionableImages)
     }
 
-    const handleSubmit = (options: { useVaultSearch?: boolean } = {}) => {
+    const handleSubmit = (mode: ChatSubmitMode = 'chat') => {
       const content = editorRef.current?.getEditorState()?.toJSON()
-      content && onSubmit(content, options.useVaultSearch)
+      content && onSubmit(content, mode)
     }
 
     return (
@@ -254,7 +257,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           editorRef={editorRef}
           contentEditableRef={contentEditableRef}
           onChange={onChange}
-          onEnter={() => handleSubmit({ useVaultSearch: false })}
+          onEnter={() => handleSubmit()}
           onFocus={onFocus}
           onMentionNodeMutation={handleMentionNodeMutation}
           onCreateImageMentionables={handleCreateImageMentionables}
@@ -262,7 +265,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           plugins={{
             onEnter: {
               onVaultChat: () => {
-                handleSubmit({ useVaultSearch: true })
+                handleSubmit('vault')
               },
             },
             templatePopover: {
@@ -280,7 +283,12 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
             <SubmitButton onClick={() => handleSubmit()} />
             <VaultChatButton
               onClick={() => {
-                handleSubmit({ useVaultSearch: true })
+                handleSubmit('vault')
+              }}
+            />
+            <AgentChatButton
+              onClick={() => {
+                handleSubmit('agent')
               }}
             />
           </div>

@@ -5,6 +5,7 @@ import { ChatView } from './ChatView'
 import { ChatProps } from './components/chat-view/Chat'
 import { InstallerUpdateRequiredModal } from './components/modals/InstallerUpdateRequiredModal'
 import { APPLY_VIEW_TYPE, CHAT_VIEW_TYPE } from './constants'
+import { CodexToolRunner } from './core/agent/CodexToolRunner'
 import { McpManager } from './core/mcp/mcpManager'
 import { RAGEngine } from './core/rag/ragEngine'
 import { DatabaseManager } from './database/DatabaseManager'
@@ -25,12 +26,18 @@ import {
 } from './settings/schema/setting.types'
 import { parseSmartComposerSettings } from './settings/schema/settings'
 import { SmartComposerSettingTab } from './settings/SettingTab'
+import {
+  ToolDispatcher,
+  createToolDispatcher,
+} from './utils/chat/tool-dispatcher'
 import { getMentionableBlockData } from './utils/obsidian'
 
 export default class SmartComposerPlugin extends Plugin {
   settings: SmartComposerSettings
   initialChatProps?: ChatProps // TODO: change this to use view state like ApplyView
   settingsChangeListeners: ((newSettings: SmartComposerSettings) => void)[] = []
+  codexToolRunner: CodexToolRunner | null = null
+  toolDispatcher: ToolDispatcher | null = null
   mcpManager: McpManager | null = null
   dbManager: DatabaseManager | null = null
   ragEngine: RAGEngine | null = null
@@ -162,6 +169,10 @@ export default class SmartComposerPlugin extends Plugin {
     // McpManager cleanup
     this.mcpManager?.cleanup()
     this.mcpManager = null
+
+    this.codexToolRunner?.cleanup()
+    this.codexToolRunner = null
+    this.toolDispatcher = null
   }
 
   async loadSettings() {
@@ -344,6 +355,33 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       this.mcpManager = null
       throw error
     }
+  }
+
+  getCodexToolRunner(): CodexToolRunner {
+    if (this.codexToolRunner) {
+      return this.codexToolRunner
+    }
+
+    this.codexToolRunner = new CodexToolRunner({
+      app: this.app,
+      settings: this.settings,
+      registerSettingsListener: (
+        listener: (settings: SmartComposerSettings) => void,
+      ) => this.addSettingsChangeListener(listener),
+    })
+    return this.codexToolRunner
+  }
+
+  async getToolDispatcher(): Promise<ToolDispatcher> {
+    if (this.toolDispatcher) {
+      return this.toolDispatcher
+    }
+
+    this.toolDispatcher = createToolDispatcher({
+      mcpManager: await this.getMcpManager(),
+      codexToolRunner: this.getCodexToolRunner(),
+    })
+    return this.toolDispatcher
   }
 
   private registerTimeout(callback: () => void, timeout: number): void {

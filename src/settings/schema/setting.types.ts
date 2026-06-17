@@ -23,6 +23,48 @@ const ragOptionsSchema = z.object({
   includePatterns: z.array(z.string()).catch([]),
 })
 
+type CodexAgentSettingsDefaults = {
+  enabled: boolean
+  command: string
+  defaultSandbox: 'read-only' | 'workspace-write' | 'danger-full-access'
+  approvalPolicy: 'default' | 'untrusted' | 'on-request' | 'never'
+  cwdMode: 'vault' | 'custom'
+  customCwd: string
+  resume: boolean
+}
+
+const defaultCodexAgentSettings: CodexAgentSettingsDefaults = {
+  enabled: true,
+  command: 'codex',
+  defaultSandbox: 'workspace-write',
+  approvalPolicy: 'never',
+  cwdMode: 'vault',
+  customCwd: '',
+  resume: true,
+}
+
+const codexAgentSettingsSchema = z.object({
+  enabled: z.boolean().catch(true),
+  command: z.string().catch('codex'),
+  defaultSandbox: z
+    .enum(['read-only', 'workspace-write', 'danger-full-access'])
+    .catch('workspace-write'),
+  approvalPolicy: z
+    .enum(['default', 'untrusted', 'on-request', 'never'])
+    .catch('never'),
+  cwdMode: z.enum(['vault', 'custom']).catch('vault'),
+  customCwd: z.string().catch(''),
+  resume: z.boolean().catch(true),
+})
+
+const agentSettingsSchema = z
+  .object({
+    codex: codexAgentSettingsSchema.catch(defaultCodexAgentSettings),
+  })
+  .catch({
+    codex: defaultCodexAgentSettings,
+  })
+
 /**
  * Settings
  */
@@ -87,6 +129,8 @@ export const smartComposerSettingsSchema = z.object({
       enableTools: true,
       maxAutoIterations: 1,
     }),
+
+  agent: agentSettingsSchema,
 })
 export type SmartComposerSettings = z.infer<typeof smartComposerSettingsSchema>
 

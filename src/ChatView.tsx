@@ -14,6 +14,7 @@ import { McpProvider } from './contexts/mcp-context'
 import { PluginProvider } from './contexts/plugin-context'
 import { RAGProvider } from './contexts/rag-context'
 import { SettingsProvider } from './contexts/settings-context'
+import { ToolDispatcherProvider } from './contexts/tool-dispatcher-context'
 import SmartComposerPlugin from './main'
 import { MentionableBlockData } from './types/mentionable'
 
@@ -39,7 +40,7 @@ export class ChatView extends ItemView {
   }
 
   getDisplayText() {
-    return 'Smart composer chat'
+    return 'Chat'
   }
 
   async onOpen() {
@@ -91,20 +92,26 @@ export class ChatView extends ItemView {
                     <McpProvider
                       getMcpManager={() => this.plugin.getMcpManager()}
                     >
-                      <QueryClientProvider client={queryClient}>
-                        <React.StrictMode>
-                          <DialogContainerProvider
-                            container={
-                              this.containerEl.children[1] as HTMLElement
-                            }
-                          >
-                            <Chat
-                              ref={this.chatRef}
-                              {...this.initialChatProps}
-                            />
-                          </DialogContainerProvider>
-                        </React.StrictMode>
-                      </QueryClientProvider>
+                      <ToolDispatcherProvider
+                        getToolDispatcher={() =>
+                          this.plugin.getToolDispatcher()
+                        }
+                      >
+                        <QueryClientProvider client={queryClient}>
+                          <React.StrictMode>
+                            <DialogContainerProvider
+                              container={
+                                this.containerEl.children[1] as HTMLElement
+                              }
+                            >
+                              <Chat
+                                ref={this.chatRef}
+                                {...this.initialChatProps}
+                              />
+                            </DialogContainerProvider>
+                          </React.StrictMode>
+                        </QueryClientProvider>
+                      </ToolDispatcherProvider>
                     </McpProvider>
                   </RAGProvider>
                 </DatabaseProvider>

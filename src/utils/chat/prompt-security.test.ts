@@ -6,6 +6,7 @@ import { ChatMessage, ChatToolMessage, ChatUserMessage } from '../../types/chat'
 import { RequestMessage } from '../../types/llm/request'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
+import { buildAgentChatMessages } from './agent-chat'
 import { PromptGenerator } from './promptGenerator'
 
 describe('prompt security boundaries', () => {
@@ -196,6 +197,136 @@ describe('prompt security boundaries', () => {
       content: expect.stringContaining('<custom_instructions>'),
     })
   })
+
+  it('keeps Agent Chat tool results paired before the next normal chat request', async () => {
+    // Given: Agent Chat has produced a Codex tool result and the user then sends
+    // a normal chat request in the same conversation.
+    const promptGenerator = createPromptGenerator()
+    const [agentAssistantMessage, agentToolMessage] = buildAgentChatMessages({
+      conversationId: 'conversation-1',
+      prompt: 'Inspect the project',
+      isExecutionAllowed: () => true,
+    })
+    const completedAgentToolMessage: ChatToolMessage = {
+      ...agentToolMessage,
+      toolCalls: agentToolMessage.toolCalls.map((toolCall) => ({
+        ...toolCall,
+        response: {
+          status: ToolCallResponseStatus.Success,
+          data: {
+            type: 'text',
+            text: 'Codex inspected the project.',
+          },
+        },
+      })),
+    }
+
+    // When: chat history is converted for the next normal provider request.
+    const requestMessages = await promptGenerator.generateRequestMessages({
+      messages: [
+        createCompiledUserMessage('Inspect the project'),
+        agentAssistantMessage,
+        completedAgentToolMessage,
+        createCompiledUserMessage('Now summarize it for me.', 'user-next'),
+      ],
+    })
+    const assistantIndex = requestMessages.findIndex(
+      (message) =>
+        message.role === 'assistant' &&
+        message.tool_calls?.[0]?.name === 'run_codex',
+    )
+    const toolIndex = requestMessages.findIndex(
+      (message) =>
+        message.role === 'tool' && message.tool_call.name === 'run_codex',
+    )
+    const lastUserIndex = requestMessages.findLastIndex(
+      (message) => message.role === 'user',
+    )
+
+    // Then: the Codex tool result is not orphaned and remains before the new
+    // user request.
+    expect(assistantIndex).toBeGreaterThan(-1)
+    expect(toolIndex).toBe(assistantIndex + 1)
+    expect(lastUserIndex).toBeGreaterThan(toolIndex)
+  })
+
+  it('preserves normal, vault, and Agent Chat history in one request sequence', async () => {
+    const promptGenerator = createPromptGenerator()
+    const [agentAssistantMessage, agentToolMessage] = buildAgentChatMessages({
+      conversationId: 'conversation-1',
+      prompt: 'Inspect the project after the vault answer.',
+      isExecutionAllowed: () => true,
+    })
+    const completedAgentToolMessage: ChatToolMessage = {
+      ...agentToolMessage,
+      toolCalls: agentToolMessage.toolCalls.map((toolCall) => ({
+        ...toolCall,
+        response: {
+          status: ToolCallResponseStatus.Success,
+          data: {
+            type: 'text',
+            text: 'Codex found the relevant files.',
+          },
+        },
+      })),
+    }
+
+    const requestMessages = await promptGenerator.generateRequestMessages({
+      messages: [
+        createCompiledUserMessage('Start with a normal answer.', 'user-normal'),
+        {
+          role: 'assistant',
+          id: 'assistant-normal',
+          content: 'Normal answer.',
+        },
+        createCompiledUserMessage(
+          'Use vault context for this answer.',
+          'user-vault',
+        ),
+        {
+          role: 'assistant',
+          id: 'assistant-vault',
+          content: 'Vault-aware answer.',
+        },
+        createCompiledUserMessage(
+          'Inspect the project after the vault answer.',
+          'user-agent',
+        ),
+        agentAssistantMessage,
+        completedAgentToolMessage,
+        createCompiledUserMessage('Continue from all prior work.', 'user-next'),
+      ],
+    })
+    const userMessages = requestMessages.filter(
+      (message) => message.role === 'user',
+    )
+    const codexAssistantIndex = requestMessages.findIndex(
+      (message) =>
+        message.role === 'assistant' &&
+        message.tool_calls?.[0]?.name === 'run_codex',
+    )
+    const codexToolIndex = requestMessages.findIndex(
+      (message) =>
+        message.role === 'tool' && message.tool_call.name === 'run_codex',
+    )
+
+    expect(userMessages.map((message) => message.content)).toEqual(
+      expect.arrayContaining([
+        'Start with a normal answer.',
+        'Use vault context for this answer.',
+        'Inspect the project after the vault answer.',
+        'Continue from all prior work.',
+      ]),
+    )
+    expect(codexAssistantIndex).toBeGreaterThan(-1)
+    expect(codexToolIndex).toBe(codexAssistantIndex + 1)
+    expect(requestMessages.at(-1)).toEqual(
+      expect.objectContaining({
+        role: 'user',
+        content: 'Continue from all prior work.',
+      }),
+    )
+  })
 })
 
 function createPromptGenerator({
@@ -218,7 +349,7 @@ function createSettings(
   overrides: Partial<SmartComposerSettings>,
 ): SmartComposerSettings {
   return {
-    version: 16,
+    version: 17,
     providers: [],
     chatModels: [
       {
@@ -248,6 +379,17 @@ function createSettings(
       includeCurrentFileContent: true,
       enableTools: true,
       maxAutoIterations: 1,
+    },
+    agent: {
+      codex: {
+        enabled: true,
+        command: 'codex',
+        defaultSandbox: 'workspace-write',
+        approvalPolicy: 'default',
+        cwdMode: 'vault',
+        customCwd: '',
+        resume: true,
+      },
     },
     ...overrides,
   }
@@ -302,12 +444,15 @@ function getTextContent(
   return promptContent?.find((part) => part.type === 'text')?.text ?? ''
 }
 
-function createCompiledUserMessage(): ChatUserMessage {
+function createCompiledUserMessage(
+  promptContent = 'Hello',
+  id = 'user-compiled',
+): ChatUserMessage {
   return {
     role: 'user',
-    id: 'user-compiled',
+    id,
     content: null,
-    promptContent: 'Hello',
+    promptContent,
     mentionables: [],
   }
 }

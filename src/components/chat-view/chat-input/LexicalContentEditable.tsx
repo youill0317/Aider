@@ -40,9 +40,12 @@ export type LexicalContentEditableProps = {
   initialEditorState?: InitialEditorStateType
   autoFocus?: boolean
   plugins?: {
+    image?: boolean
+    mention?: boolean
     onEnter?: {
       onVaultChat: () => void
     }
+    template?: boolean
     templatePopover?: {
       anchorElement: HTMLElement | null
     }
@@ -62,6 +65,9 @@ export default function LexicalContentEditable({
   plugins,
 }: LexicalContentEditableProps) {
   const app = useApp()
+  const mentionPluginsEnabled = plugins?.mention ?? true
+  const imagePluginsEnabled = plugins?.image ?? true
+  const templatePluginsEnabled = plugins?.template ?? true
 
   const initialConfig: InitialConfigType = {
     namespace: 'LexicalContentEditable',
@@ -118,7 +124,9 @@ export default function LexicalContentEditable({
         ErrorBoundary={LexicalErrorBoundary}
       />
       <HistoryPlugin />
-      <MentionPlugin searchResultByQuery={searchResultByQuery} />
+      {mentionPluginsEnabled && (
+        <MentionPlugin searchResultByQuery={searchResultByQuery} />
+      )}
       <OnChangePlugin
         onChange={(editorState) => {
           onChange?.(editorState.toJSON())
@@ -130,19 +138,27 @@ export default function LexicalContentEditable({
           onVaultChat={plugins?.onEnter?.onVaultChat}
         />
       )}
-      <OnMutationPlugin
-        nodeClass={MentionNode}
-        onMutation={(mutations) => {
-          onMentionNodeMutation?.(mutations)
-        }}
-      />
+      {mentionPluginsEnabled && (
+        <OnMutationPlugin
+          nodeClass={MentionNode}
+          onMutation={(mutations) => {
+            onMentionNodeMutation?.(mutations)
+          }}
+        />
+      )}
       <EditorRefPlugin editorRef={editorRef} />
       <NoFormatPlugin />
-      <AutoLinkMentionPlugin />
-      <ImagePastePlugin onCreateImageMentionables={onCreateImageMentionables} />
-      <DragDropPaste onCreateImageMentionables={onCreateImageMentionables} />
-      <TemplatePlugin />
-      {plugins?.templatePopover && (
+      {mentionPluginsEnabled && <AutoLinkMentionPlugin />}
+      {imagePluginsEnabled && (
+        <ImagePastePlugin
+          onCreateImageMentionables={onCreateImageMentionables}
+        />
+      )}
+      {imagePluginsEnabled && (
+        <DragDropPaste onCreateImageMentionables={onCreateImageMentionables} />
+      )}
+      {templatePluginsEnabled && <TemplatePlugin />}
+      {templatePluginsEnabled && plugins?.templatePopover && (
         <CreateTemplatePopoverPlugin
           app={app}
           anchorElement={plugins.templatePopover.anchorElement}

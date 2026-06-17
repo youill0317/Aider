@@ -2,6 +2,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: var(--size-4-2);
   margin-bottom: var(--size-4-2);
 }
 
@@ -9,6 +10,28 @@
   font-size: var(--font-ui-medium);
   font-weight: var(--font-medium);
   margin: 0;
+  white-space: nowrap;
+}
+
+button.smtcmp-chat-mode-title {
+  height: auto !important;
+  min-height: 0;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+button.smtcmp-chat-mode-title:hover,
+button.smtcmp-chat-mode-title:focus,
+button.smtcmp-chat-mode-title:active {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--interactive-accent) !important;
 }
 
 .smtcmp-chat-header-buttons {
@@ -129,6 +152,14 @@
     align-items: center;
     gap: var(--size-4-1);
   }
+}
+
+.smtcmp-chat-user-input-controls button.smtcmp-chat-user-input-submit-button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  height: auto;
+  line-height: inherit;
 }
 
 .smtcmp-chat-messages {
@@ -267,6 +298,12 @@
     display: flex;
     justify-content: center;
     align-items: center;
+  }
+
+  .smtcmp-agent-chat-button-symbol {
+    font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
+    line-height: 1;
   }
 }
 

@@ -39,15 +39,25 @@ export type ChatToolMessage = {
     response: ToolCallResponse
   }[]
 }
+export type ChatAgentCommandMessage = {
+  role: 'agent-command'
+  id: string
+  command: string
+  output: string
+  exitCode: number | null
+  status: 'running' | 'success' | 'error'
+}
 
 export type ChatMessage =
   | ChatUserMessage
   | ChatAssistantMessage
   | ChatToolMessage
+  | ChatAgentCommandMessage
 
 export type AssistantToolMessageGroup = (
   | ChatAssistantMessage
   | ChatToolMessage
+  | ChatAgentCommandMessage
 )[]
 
 export type SerializedChatUserMessage = {
@@ -81,10 +91,12 @@ export type SerializedChatToolMessage = {
   }[]
   id: string
 }
+export type SerializedChatAgentCommandMessage = ChatAgentCommandMessage
 export type SerializedChatMessage =
   | SerializedChatUserMessage
   | SerializedChatAssistantMessage
   | SerializedChatToolMessage
+  | SerializedChatAgentCommandMessage
 
 export type ChatConversation = {
   schemaVersion: number

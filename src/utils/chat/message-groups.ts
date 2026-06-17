@@ -19,11 +19,7 @@ export function groupAssistantAndToolMessages(
         // For assistant or tool messages, check if we can add to an existing group
         const lastItem = acc[acc.length - 1]
 
-        // If last item is an array (a group), and current message is an assistant or tool message, add to group
-        if (
-          Array.isArray(lastItem) &&
-          (message.role === 'assistant' || message.role === 'tool')
-        ) {
+        if (Array.isArray(lastItem)) {
           lastItem.push(message)
         } else {
           // Otherwise, create a new group

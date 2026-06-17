@@ -1,10 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
 
 import { BaseLLMProvider } from '../../core/llm/base'
-import { McpManager } from '../../core/mcp/mcpManager'
 import { ChatMessage, ChatToolMessage } from '../../types/chat'
 import { ChatModel } from '../../types/chat-model.types'
-import { RequestTool } from '../../types/llm/request'
 import {
   Annotation,
   LLMResponseStreaming,
@@ -18,6 +16,7 @@ import {
 
 import { fetchAnnotationTitles } from './fetch-annotation-titles'
 import { PromptGenerator } from './promptGenerator'
+import type { ToolDispatcher } from './tool-dispatcher'
 
 export type ResponseGeneratorParams = {
   providerClient: BaseLLMProvider<LLMProvider>
@@ -27,7 +26,7 @@ export type ResponseGeneratorParams = {
   enableTools: boolean
   maxAutoIterations: number
   promptGenerator: PromptGenerator
-  mcpManager: McpManager
+  toolDispatcher: ToolDispatcher
   abortSignal?: AbortSignal
 }
 
@@ -37,7 +36,7 @@ export class ResponseGenerator {
   private readonly conversationId: string
   private readonly enableTools: boolean
   private readonly promptGenerator: PromptGenerator
-  private readonly mcpManager: McpManager
+  private readonly toolDispatcher: ToolDispatcher
   private readonly abortSignal?: AbortSignal
   private readonly receivedMessages: ChatMessage[]
   private readonly maxAutoIterations: number
@@ -53,7 +52,7 @@ export class ResponseGenerator {
     this.maxAutoIterations = Math.max(1, params.maxAutoIterations) // Ensure maxAutoIterations is at least 1
     this.receivedMessages = params.messages
     this.promptGenerator = params.promptGenerator
-    this.mcpManager = params.mcpManager
+    this.toolDispatcher = params.toolDispatcher
     this.abortSignal = params.abortSignal
   }
 
@@ -66,7 +65,7 @@ export class ResponseGenerator {
   }
 
   public async run() {
-    for (let i = 0; i < this.maxAutoIterations; i++) {
+    for (let i = 0; i <= this.maxAutoIterations; i++) {
       const { toolCallRequests } = await this.streamSingleResponse()
       if (toolCallRequests.length === 0) {
         return
@@ -78,8 +77,9 @@ export class ResponseGenerator {
         toolCalls: toolCallRequests.map((toolCall) => ({
           request: toolCall,
           response: {
-            status: this.mcpManager.isToolExecutionAllowed({
+            status: this.toolDispatcher.isToolExecutionAllowed({
               requestToolName: toolCall.name,
+              requestArgs: toolCall.arguments,
               conversationId: this.conversationId,
             })
               ? ToolCallResponseStatus.Running
@@ -97,7 +97,7 @@ export class ResponseGenerator {
               toolCall.response.status === ToolCallResponseStatus.Running,
           )
           .map(async (toolCall) => {
-            const response = await this.mcpManager.callTool({
+            const response = await this.toolDispatcher.callTool({
               name: toolCall.request.name,
               args: toolCall.request.arguments,
               id: toolCall.request.id,
@@ -148,33 +148,17 @@ export class ResponseGenerator {
       messages: [...this.receivedMessages, ...this.responseMessages],
     })
 
-    const availableTools = this.enableTools
-      ? await this.mcpManager.listAvailableTools()
+    const tools = this.enableTools
+      ? await this.toolDispatcher.listAvailableTools()
       : []
-
-    // Set tools to undefined when no tools are available since some providers
-    // reject empty tools arrays.
-    const tools: RequestTool[] | undefined =
-      availableTools.length > 0
-        ? availableTools.map((tool) => ({
-            type: 'function',
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: {
-                ...tool.inputSchema,
-                properties: tool.inputSchema.properties ?? {},
-              },
-            },
-          }))
-        : undefined
+    const requestTools = tools.length > 0 ? tools : undefined
 
     const stream = await this.providerClient.streamResponse(
       this.model,
       {
         model: this.model.model,
         messages: requestMessages,
-        tools,
+        tools: requestTools,
         stream: true,
       },
       {

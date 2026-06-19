@@ -10,7 +10,7 @@ import {
 
 function createSettings(providers: LLMProvider[]): SmartComposerSettings {
   return {
-    version: 18,
+    version: 20,
     providers,
     chatModels: [
       {

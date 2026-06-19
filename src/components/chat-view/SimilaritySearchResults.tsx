@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import { useApp } from '../../contexts/app-context'
 import { SelectEmbedding } from '../../database/schema'
+import { getVectorLineRange } from '../../database/vector-metadata'
 import { openMarkdownFile } from '../../utils/obsidian'
 
 function SimiliartySearchItem({
@@ -14,9 +15,10 @@ function SimiliartySearchItem({
   }
 }) {
   const app = useApp()
+  const lineRange = getVectorLineRange(chunk.metadata)
 
   const handleClick = () => {
-    openMarkdownFile(app, chunk.path, chunk.metadata.startLine)
+    openMarkdownFile(app, chunk.path, lineRange?.startLine)
   }
   return (
     <div onClick={handleClick} className="smtcmp-similarity-search-item">
@@ -27,7 +29,9 @@ function SimiliartySearchItem({
         {path.basename(chunk.path)}
       </div>
       <div className="smtcmp-similarity-search-item__line-numbers">
-        {`${chunk.metadata.startLine} - ${chunk.metadata.endLine}`}
+        {lineRange
+          ? `${lineRange.startLine} - ${lineRange.endLine}`
+          : 'File only'}
       </div>
     </div>
   )

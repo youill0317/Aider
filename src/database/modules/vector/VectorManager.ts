@@ -12,16 +12,18 @@ import {
   LLMBaseUrlNotSetException,
   LLMRateLimitExceededException,
 } from '../../../core/llm/exception'
-import {
-  InsertEmbedding,
-  SelectEmbedding,
-  VectorMetaData,
-} from '../../../database/schema'
+import { isVoyageContextualAutoChunkModel } from '../../../core/rag/contextual-embedding'
+import { InsertEmbedding, SelectEmbedding } from '../../../database/schema'
 import {
   EmbeddingDbStats,
   EmbeddingModelClient,
 } from '../../../types/embedding'
 import { chunkArray } from '../../../utils/common/chunk-array'
+import {
+  VectorMetaData,
+  createVoyageContextualMetadata,
+  hasMatchingVoyageContextualIndexProfile,
+} from '../../vector-metadata'
 
 import { VectorRepository } from './VectorRepository'
 
@@ -129,6 +131,15 @@ export class VectorManager {
       return
     }
 
+    if (isVoyageContextualAutoChunkModel(embeddingModel)) {
+      await this.updateVaultIndexWithContextualAutoChunk({
+        embeddingModel,
+        filesToIndex,
+        updateProgress,
+      })
+      return
+    }
+
     const textSplitter = RecursiveCharacterTextSplitter.fromLanguage(
       'markdown',
       {
@@ -147,9 +158,7 @@ export class VectorManager {
         filesToIndex.map(async (file) => {
           try {
             const fileContent = await this.app.vault.cachedRead(file)
-            // Remove null bytes from the content
-            // eslint-disable-next-line no-control-regex
-            const sanitizedContent = fileContent.replace(/\x00/g, '')
+            const sanitizedContent = this.sanitizeFileContent(fileContent)
 
             const fileDocuments = await textSplitter.createDocuments([
               sanitizedContent,
@@ -337,6 +346,147 @@ Please report this issue to the developer if it persists.`,
     await this.requestSave()
   }
 
+  private async updateVaultIndexWithContextualAutoChunk({
+    embeddingModel,
+    filesToIndex,
+    updateProgress,
+  }: {
+    embeddingModel: EmbeddingModelClient
+    filesToIndex: TFile[]
+    updateProgress?: (indexProgress: IndexProgress) => void
+  }): Promise<void> {
+    if (!embeddingModel.getContextualEmbeddings) {
+      throw new Error(
+        `Embedding model ${embeddingModel.id} does not support contextual document embeddings.`,
+      )
+    }
+
+    const failedFiles: { path: string; error: string }[] = []
+    const embeddingChunks: InsertEmbedding[] = []
+    let completedFiles = 0
+
+    updateProgress?.({
+      completedChunks: 0,
+      totalChunks: filesToIndex.length,
+      totalFiles: filesToIndex.length,
+    })
+
+    for (const file of filesToIndex) {
+      try {
+        const fileContent = await this.app.vault.cachedRead(file)
+        const sanitizedContent = this.sanitizeFileContent(fileContent)
+        if (sanitizedContent.length === 0) {
+          completedFiles += 1
+          updateProgress?.({
+            completedChunks: completedFiles,
+            totalChunks: filesToIndex.length,
+            totalFiles: filesToIndex.length,
+          })
+          continue
+        }
+
+        const result = await backOff(
+          async () =>
+            embeddingModel.getContextualEmbeddings?.(sanitizedContent, {
+              inputType: 'document',
+            }),
+          {
+            numOfAttempts: 8,
+            startingDelay: 2000,
+            timeMultiple: 2,
+            maxDelay: 60000,
+            retry: (error) => {
+              if (
+                error instanceof LLMRateLimitExceededException ||
+                error.status === 429
+              ) {
+                updateProgress?.({
+                  completedChunks: completedFiles,
+                  totalChunks: filesToIndex.length,
+                  totalFiles: filesToIndex.length,
+                  waitingForRateLimit: true,
+                })
+                return true
+              }
+              return false
+            },
+          },
+        )
+        if (!result || result.chunks.length === 0) {
+          throw new Error(
+            `Contextual embedding response did not include chunks for file: ${file.path}`,
+          )
+        }
+
+        embeddingChunks.push(
+          ...result.chunks.map((chunk): InsertEmbedding => {
+            if (chunk.text.length === 0) {
+              throw new Error(
+                `Contextual chunk content is empty in file: ${file.path}`,
+              )
+            }
+            if (chunk.text.includes('\x00')) {
+              throw new Error(
+                `Contextual chunk content contains null bytes in file: ${file.path}`,
+              )
+            }
+
+            return {
+              path: file.path,
+              mtime: file.stat.mtime,
+              content: chunk.text,
+              model: embeddingModel.id,
+              dimension: embeddingModel.dimension,
+              embedding: chunk.embedding,
+              metadata: createVoyageContextualMetadata({
+                chunkerVersion: result.chunkerVersion,
+                dimension: embeddingModel.dimension,
+                modelId: embeddingModel.id,
+              }),
+            }
+          }),
+        )
+      } catch (error) {
+        failedFiles.push({
+          path: file.path,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+
+      completedFiles += 1
+      updateProgress?.({
+        completedChunks: completedFiles,
+        totalChunks: filesToIndex.length,
+        totalFiles: filesToIndex.length,
+      })
+    }
+
+    if (failedFiles.length > 0) {
+      const errorDetails =
+        `Failed to process ${failedFiles.length} file(s):\n\n` +
+        failedFiles
+          .map(({ path, error }) => `File: ${path}\nError: ${error}`)
+          .join('\n\n')
+
+      new ErrorModal(
+        this.app,
+        'Error: contextual embedding failed',
+        `Some files failed to process. Please report this issue to the developer if it persists.`,
+        `[Error Log]\n\n${errorDetails}`,
+        {
+          showReportBugButton: true,
+        },
+      ).open()
+    }
+
+    if (embeddingChunks.length === 0) {
+      throw new Error('All files failed to process. Stopping indexing process.')
+    }
+
+    await this.repository.insertVectors(embeddingChunks)
+    await this.requestSave()
+  }
+
   private async deleteVectorsForDeletedFiles(
     embeddingModel: EmbeddingModelClient,
   ) {
@@ -401,6 +551,16 @@ Please report this issue to the developer if it persists.`,
           // File has changed, so we need to re-index it
           return file
         }
+        if (
+          isVoyageContextualAutoChunkModel(embeddingModel) &&
+          !hasMatchingVoyageContextualIndexProfile({
+            dimension: embeddingModel.dimension,
+            metadata: fileChunks[0].metadata,
+            modelId: embeddingModel.id,
+          })
+        ) {
+          return file
+        }
         return null
       }),
     ).then((files) => files.filter(Boolean) as TFile[])
@@ -410,5 +570,10 @@ Please report this issue to the developer if it persists.`,
 
   async getEmbeddingStats(): Promise<EmbeddingDbStats[]> {
     return await this.repository.getEmbeddingStats()
+  }
+
+  private sanitizeFileContent(fileContent: string): string {
+    // eslint-disable-next-line no-control-regex
+    return fileContent.replace(/\x00/g, '')
   }
 }

@@ -172,6 +172,6 @@ function createSettings(): SmartComposerSettings {
       thresholdTokens: 8192,
     },
     systemPrompt: '',
-    version: 18,
+    version: 20,
   }
 }

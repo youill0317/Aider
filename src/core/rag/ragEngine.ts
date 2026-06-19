@@ -6,6 +6,7 @@ import { SelectEmbedding } from '../../database/schema'
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import { EmbeddingModelClient } from '../../types/embedding'
 
+import { isVoyageContextualAutoChunkModel } from './contextual-embedding'
 import { getEmbeddingModelClient } from './embedding'
 
 // TODO: do we really need this class? It seems like unnecessary abstraction.
@@ -117,6 +118,21 @@ export class RAGEngine {
   private async getQueryEmbedding(query: string): Promise<number[]> {
     if (!this.embeddingModel) {
       throw new Error('Embedding model is not set')
+    }
+    if (isVoyageContextualAutoChunkModel(this.embeddingModel)) {
+      if (!this.embeddingModel.getContextualEmbeddings) {
+        throw new Error(
+          `Embedding model ${this.embeddingModel.id} does not support contextual query embeddings.`,
+        )
+      }
+      const result = await this.embeddingModel.getContextualEmbeddings(query, {
+        inputType: 'query',
+      })
+      const firstEmbedding = result.chunks[0]?.embedding
+      if (!firstEmbedding || firstEmbedding.length === 0) {
+        throw new Error('Contextual query embedding response is empty.')
+      }
+      return firstEmbedding
     }
     return this.embeddingModel.getEmbedding(query)
   }

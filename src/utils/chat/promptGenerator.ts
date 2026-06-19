@@ -4,6 +4,7 @@ import { editorStateToPlainText } from '../../components/chat-view/chat-input/ut
 import { QueryProgressState } from '../../components/chat-view/QueryProgress'
 import { RAGEngine } from '../../core/rag/ragEngine'
 import { SelectEmbedding } from '../../database/schema'
+import { getVectorLineRange } from '../../database/vector-metadata'
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import {
   ChatAgentCommandMessage,
@@ -92,8 +93,12 @@ export class PromptGenerator {
       throw new Error('No user messages found')
     }
     const shouldUseRAG = lastUserMessage.similaritySearchResults !== undefined
+    const hasFileOnlyRag =
+      lastUserMessage.similaritySearchResults?.some(
+        ({ metadata }) => getVectorLineRange(metadata) === null,
+      ) ?? false
 
-    const systemMessage = this.getSystemMessage(shouldUseRAG)
+    const systemMessage = this.getSystemMessage(shouldUseRAG, hasFileOnlyRag)
 
     const customInstructionMessage = this.getCustomInstructionMessage()
 
@@ -111,7 +116,7 @@ export class PromptGenerator {
       ...(currentFileMessage ? [currentFileMessage] : []),
       ...this.getChatHistoryMessages({ messages: compiledMessages }),
       ...(shouldUseRAG && this.getModelPromptLevel() == PromptLevel.Default
-        ? [this.getRagInstructionMessage()]
+        ? [this.getRagInstructionMessage(hasFileOnlyRag)]
         : []),
     ]
 
@@ -357,11 +362,12 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
 ${wrapUntrustedContext(
   similaritySearchResults
     .map(({ path, content, metadata }) => {
+      const lineRange = getVectorLineRange(metadata)
       const newContent =
-        this.getModelPromptLevel() == PromptLevel.Default
+        this.getModelPromptLevel() == PromptLevel.Default && lineRange
           ? this.addLineNumbersToContent({
               content,
-              startLine: metadata.startLine,
+              startLine: lineRange.startLine,
             })
           : content
       return `\`\`\`${path}\n${newContent}\n\`\`\`\n`
@@ -447,7 +453,10 @@ ${await this.getWebsiteContent(url)}
     }
   }
 
-  private getSystemMessage(shouldUseRAG: boolean): RequestMessage {
+  private getSystemMessage(
+    shouldUseRAG: boolean,
+    hasFileOnlyRag: boolean,
+  ): RequestMessage {
     const modelPromptLevel = this.getModelPromptLevel()
     const systemPrompt = `You are an intelligent assistant to help answer any questions that the user has${modelPromptLevel == PromptLevel.Default ? `, particularly about editing and organizing markdown files in Obsidian` : ''}.
 
@@ -511,8 +520,12 @@ ${
   {{ content }}
   </smtcmp_block>
 
-  d. When referencing a markdown block the user gives you, only add the startLine and endLine attributes to the <smtcmp_block> tags. Write related content outside of the <smtcmp_block> tags. The content inside the <smtcmp_block> tags will be ignored and replaced with the actual content of the markdown block. For example:
+  d. ${
+    hasFileOnlyRag
+      ? `Some referenced snippets are file-only contextual snippets without exact line ranges. Cite those snippets by filename/path and relevant content only; do not invent startLine or endLine attributes for file-only snippets.`
+      : `When referencing a markdown block the user gives you, only add the startLine and endLine attributes to the <smtcmp_block> tags. Write related content outside of the <smtcmp_block> tags. The content inside the <smtcmp_block> tags will be ignored and replaced with the actual content of the markdown block. For example:
   <smtcmp_block filename="path/to/file.md" language="markdown" startLine="2" endLine="30"></smtcmp_block>`
+  }`
     : ''
 }`
 
@@ -551,7 +564,15 @@ ${fileContent}
     }
   }
 
-  private getRagInstructionMessage(): RequestMessage {
+  private getRagInstructionMessage(hasFileOnlyRag: boolean): RequestMessage {
+    if (hasFileOnlyRag) {
+      return {
+        role: 'user',
+        content: `Some markdown snippets I gave you are file-only contextual snippets. If you reference them, cite the filename/path and relevant content in prose, and do not include startLine or endLine attributes for those file-only snippets.
+
+When writing out new markdown blocks, remember not to include "line_number|" at the beginning of each line.`,
+      }
+    }
     return {
       role: 'user',
       content: `If you need to reference any of the markdown blocks I gave you, add the startLine and endLine attributes to the <smtcmp_block> tags without any content inside. For example:

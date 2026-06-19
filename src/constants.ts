@@ -63,6 +63,7 @@ export const RECOMMENDED_MODELS_FOR_APPLY = ['gpt-4.1-mini']
 export const RECOMMENDED_MODELS_FOR_EMBEDDING = [
   'openai/text-embedding-3-small',
   'voyage/voyage-4',
+  'voyage/voyage-context-4',
 ]
 
 export const PLAN_PROVIDER_TYPES: readonly LLMProviderType[] = [
@@ -480,6 +481,13 @@ export const DEFAULT_EMBEDDING_MODELS: readonly EmbeddingModel[] = [
     providerId: PROVIDER_TYPES_INFO.voyage.defaultProviderId,
     id: 'voyage/voyage-4-lite',
     model: 'voyage-4-lite',
+    dimension: 1024,
+  },
+  {
+    providerType: 'voyage',
+    providerId: PROVIDER_TYPES_INFO.voyage.defaultProviderId,
+    id: 'voyage/voyage-context-4',
+    model: 'voyage-context-4',
     dimension: 1024,
   },
   {

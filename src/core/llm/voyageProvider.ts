@@ -2,6 +2,10 @@ import { z } from 'zod'
 
 import { ChatModel } from '../../types/chat-model.types'
 import {
+  ContextualEmbeddingInputType,
+  ContextualEmbeddingsResult,
+} from '../../types/embedding'
+import {
   LLMOptions,
   LLMRequestNonStreaming,
   LLMRequestStreaming,
@@ -25,6 +29,20 @@ const voyageEmbeddingResponseSchema = z.object({
       embedding: z.array(z.number()),
     }),
   ),
+})
+
+const voyageContextualEmbeddingResponseSchema = z.object({
+  data: z.array(
+    z.object({
+      data: z.array(
+        z.object({
+          embedding: z.array(z.number()),
+          text: z.string().optional(),
+        }),
+      ),
+    }),
+  ),
+  chunker_version: z.string().optional(),
 })
 
 export class VoyageProvider extends BaseLLMProvider<
@@ -110,5 +128,80 @@ export class VoyageProvider extends BaseLLMProvider<
     }
 
     return firstEmbedding
+  }
+
+  async getContextualEmbeddings(
+    model: string,
+    text: string,
+    options: {
+      inputType: ContextualEmbeddingInputType
+      dimensions?: number
+    },
+  ): Promise<ContextualEmbeddingsResult> {
+    if (!this.apiKey) {
+      throw new LLMAPIKeyNotSetException(
+        `Provider ${this.provider.id} API key is missing. Please set it in settings menu.`,
+      )
+    }
+
+    const response = await fetch(`${this.baseUrl}/contextualizedembeddings`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        inputs: [text],
+        model,
+        input_type: options.inputType,
+        ...(options.inputType === 'document' && {
+          enable_auto_chunking: true,
+        }),
+        ...(options.dimensions && {
+          output_dimension: options.dimensions,
+        }),
+      }),
+    })
+
+    if (response.status === 401 || response.status === 403) {
+      throw new LLMAPIKeyInvalidException(
+        `Provider ${this.provider.id} API key is invalid. Please update it in settings menu.`,
+      )
+    }
+    if (response.status === 429) {
+      throw new LLMRateLimitExceededException(
+        'Voyage AI API rate limit exceeded. Please try again later.',
+      )
+    }
+    if (!response.ok) {
+      throw new Error(
+        `Voyage AI contextual embedding request failed with status ${response.status}.`,
+      )
+    }
+
+    const parsed = voyageContextualEmbeddingResponseSchema.parse(
+      await response.json(),
+    )
+    const chunks = parsed.data.flatMap((item) =>
+      item.data.map((chunk) => ({
+        embedding: chunk.embedding,
+        text: chunk.text ?? text,
+      })),
+    )
+    if (
+      chunks.length === 0 ||
+      chunks.some((chunk) => chunk.embedding.length === 0)
+    ) {
+      throw new Error(
+        'Voyage AI contextual embedding response did not include a vector.',
+      )
+    }
+
+    return {
+      chunks,
+      ...(parsed.chunker_version
+        ? { chunkerVersion: parsed.chunker_version }
+        : {}),
+    }
   }
 }

@@ -14,6 +14,8 @@ import {
 import { SerializedLexicalNode } from 'lexical'
 import { z } from 'zod'
 
+import { VectorMetaData } from './vector-metadata'
+
 // custom vector type for dynamic dimension
 const customVector = customType<{ data: number[] }>({
   dataType() {
@@ -30,11 +32,6 @@ const customVector = customType<{ data: number[] }>({
     return parsed
   },
 })
-
-export type VectorMetaData = {
-  startLine: number
-  endLine: number
-}
 
 // important: dimensions must be less than 2000!
 export const supportedDimensionsForIndex = [

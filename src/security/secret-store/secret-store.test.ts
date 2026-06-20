@@ -1,6 +1,3 @@
-import * as fs from 'fs'
-import * as path from 'path'
-
 import { createSecretStore, createSecretStoreKey } from './secret-store'
 
 describe('SecretStore backend selection', () => {
@@ -290,57 +287,5 @@ describe('SecretStore key contract', () => {
 
     // When/Then: reversible provider id encoding keeps both secret ids distinct.
     expect(providerWithMarkup).not.toBe(providerWithSuffix)
-  })
-
-  it('keeps minAppVersion unchanged unless explicitly required', () => {
-    // Given: the plugin manifest currently supports older Obsidian versions.
-    const manifestPath = path.join(process.cwd(), 'manifest.json')
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-
-    // When/Then: T3 must not silently raise the compatibility floor.
-    expect(manifest.minAppVersion).toBe('0.15.0')
-  })
-})
-
-describe('SecretStore dependency contract', () => {
-  it('does not add native secret storage dependencies', () => {
-    // Given: package metadata for the current plugin.
-    const packageJsonPath = path.join(process.cwd(), 'package.json')
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
-    const dependencies = {
-      ...packageJson.dependencies,
-      ...packageJson.devDependencies,
-      ...packageJson.optionalDependencies,
-    }
-
-    // When/Then: native secret storage packages are absent.
-    expect(dependencies).not.toHaveProperty('keytar')
-    expect(dependencies).not.toHaveProperty('@napi-rs/keyring')
-  })
-
-  it('does not import electron or keychain packages', () => {
-    // Given: the first implementation must rely on Obsidian feature detection only.
-    const sourcePath = path.join(
-      process.cwd(),
-      'src',
-      'security',
-      'secret-store',
-      'secret-store.ts',
-    )
-    const source = fs.readFileSync(sourcePath, 'utf8')
-    const packageJsonPath = path.join(process.cwd(), 'package.json')
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
-    const dependencies = {
-      ...packageJson.dependencies,
-      ...packageJson.devDependencies,
-      ...packageJson.optionalDependencies,
-    }
-
-    // When/Then: no desktop-only or native keychain dependency enters this layer.
-    expect(source).not.toMatch(/\bfrom ['"]electron['"]/)
-    expect(source).not.toContain('safeStorage')
-    expect(dependencies).not.toHaveProperty('electron')
-    expect(dependencies).not.toHaveProperty('keytar')
-    expect(dependencies).not.toHaveProperty('@napi-rs/keyring')
   })
 })

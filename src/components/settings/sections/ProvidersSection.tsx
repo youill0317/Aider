@@ -92,7 +92,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
         <span>Configure API providers (usage-based billing).</span>
         <br />
         <a
-          href="https://github.com/glowingjade/obsidian-smart-composer/wiki/1.2-Initial-Setup#getting-your-api-key"
+          href="https://github.com/youill0317/Aider/wiki/Initial-Setup#getting-your-api-key"
           target="_blank"
           rel="noopener noreferrer"
         >

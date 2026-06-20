@@ -107,7 +107,7 @@ export class CodexToolRunner {
               type: 'string',
               enum: ['read-only', 'workspace-write', 'danger-full-access'],
               description:
-                'Execution sandbox for Codex. Omit to use the Smart Composer default.',
+                'Execution sandbox for Codex. Omit to use the Aider default.',
             },
             cwd: {
               type: 'string',

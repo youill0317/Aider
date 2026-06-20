@@ -21,6 +21,10 @@ jobs:
         run: |
           echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
 
+      - name: Validate release tag
+        run: |
+          node -e "const tag = process.env.TAG; if (!/^\\d+\\.\\d+\\.\\d+$/.test(tag)) { console.error('Release tags must be exact versions like 2.0.0 without a leading v.'); process.exit(1); }"
+
       - name: Bump version
         run: npm run version $TAG
 

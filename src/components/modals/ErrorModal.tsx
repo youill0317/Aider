@@ -75,7 +75,7 @@ function ErrorModalComponent({
             onClick={() => {
               onClose()
               window.open(
-                'https://github.com/glowingjade/obsidian-smart-composer/issues',
+                'https://github.com/youill0317/Aider/issues',
                 '_blank',
               )
             }}
@@ -91,7 +91,7 @@ function ErrorModalComponent({
               // @ts-expect-error: setting property exists in Obsidian's App but is not typed
               app.setting.open()
               // @ts-expect-error: setting property exists in Obsidian's App but is not typed
-              app.setting.openTabById('smart-composer')
+              app.setting.openTabById('aider')
             }}
           >
             Open Settings

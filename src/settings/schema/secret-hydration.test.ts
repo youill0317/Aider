@@ -7,79 +7,13 @@ import {
   sanitizeSettingsForPersistence,
 } from '../../security/secret-store/settings-secrets'
 
-import { SETTINGS_SCHEMA_VERSION } from './migrations'
-import { SmartComposerSettings } from './setting.types'
-
-function createTestSettings(): SmartComposerSettings {
-  return {
-    version: SETTINGS_SCHEMA_VERSION,
-    providers: [
-      {
-        id: 'openai',
-        type: 'openai',
-        apiKey: 'sk-test-openai-secret',
-      },
-      {
-        id: 'openai-plan',
-        type: 'openai-plan',
-        oauth: {
-          accessToken: 'test-access-token',
-          refreshToken: 'test-refresh-token',
-          expiresAt: 1_893_456_000_000,
-          accountId: 'account-id',
-        },
-      },
-    ],
-    chatModels: [],
-    embeddingModels: [],
-    chatModelId: '',
-    applyModelId: '',
-    embeddingModelId: '',
-    systemPrompt: '',
-    ragOptions: {
-      chunkSize: 1000,
-      thresholdTokens: 8192,
-      minSimilarity: 0,
-      limit: 10,
-      excludePatterns: [],
-      includePatterns: [],
-    },
-    mcp: {
-      servers: [],
-    },
-    chatOptions: {
-      includeCurrentFileContent: true,
-      enableTools: true,
-      maxAutoIterations: 1,
-    },
-    agent: {
-      codex: {
-        enabled: true,
-        command: 'codex',
-        defaultSandbox: 'workspace-write',
-        approvalPolicy: 'default',
-        cwdMode: 'vault',
-        customCwd: '',
-        resume: true,
-      },
-    },
-  }
-}
-
-function createObsidianSecretStore() {
-  const secretStorageValues = new Map<string, string>()
-
-  return createSecretStore({
-    app: {
-      secretStorage: {
-        getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
-        setSecret: async (key: string, value: string) => {
-          secretStorageValues.set(key, value)
-        },
-      },
-    },
-  })
-}
+import {
+  AIDER_OPENAI_API_KEY,
+  AIDER_OPENAI_PLAN_ACCESS_TOKEN,
+  AIDER_OPENAI_PLAN_REFRESH_TOKEN,
+  createObsidianSecretStore,
+  createTestSettings,
+} from './secret-hydration.test-support'
 
 describe('settings secret hydration boundary', () => {
   it('persists provider settings without raw api keys', async () => {
@@ -146,6 +80,20 @@ describe('settings secret hydration boundary', () => {
     expect(hydratedSettings.providers[0].apiKey).toBe('sk-test-openai-secret')
   })
 
+  it('writes provider api keys into Aider secret ids', async () => {
+    // Given: runtime settings contain a provider API key.
+    const settings = createTestSettings()
+    const secretStore = createObsidianSecretStore()
+
+    // When: settings cross the persistence boundary.
+    await sanitizeSettingsForPersistence(settings, secretStore)
+
+    // Then: the new Aider secret id stores the API key.
+    await expect(secretStore.getSecret(AIDER_OPENAI_API_KEY)).resolves.toBe(
+      'sk-test-openai-secret',
+    )
+  })
+
   it('migrates OAuth refresh tokens into Obsidian secretStorage', async () => {
     // Given: a plan provider still has OAuth tokens in ordinary settings.
     const settings = createTestSettings()
@@ -161,6 +109,12 @@ describe('settings secret hydration boundary', () => {
     expect(JSON.stringify(persistedSettings)).not.toContain(
       'test-refresh-token',
     )
+    await expect(
+      secretStore.getSecret(AIDER_OPENAI_PLAN_ACCESS_TOKEN),
+    ).resolves.toBe('test-access-token')
+    await expect(
+      secretStore.getSecret(AIDER_OPENAI_PLAN_REFRESH_TOKEN),
+    ).resolves.toBe('test-refresh-token')
     const hydratedSettings = await hydrateSettingsSecrets(
       persistedSettings,
       secretStore,

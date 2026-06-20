@@ -58,7 +58,7 @@ export function buildGeminiAuthorizeUrl(params: {
   })
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
   url.search = query.toString()
-  url.hash = 'smart-composer'
+  url.hash = 'aider'
   return url.toString()
 }
 

@@ -27,6 +27,8 @@ type SecretStoreKeyParts = {
   readonly field: string
 }
 
+type SecretStoreKeyNamespace = 'aider' | 'smart-composer'
+
 function normalizeSecretStoreKeyPart(value: string): string {
   const normalizedValue = /[\s_-]/.test(value)
     ? value
@@ -132,9 +134,12 @@ function createObsidianSecretStore(
   }
 }
 
-export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
+function createNamespacedSecretStoreKey(
+  namespace: SecretStoreKeyNamespace,
+  parts: SecretStoreKeyParts,
+): string {
   const keyParts = [
-    normalizeSecretStoreKeyPart('smart-composer'),
+    normalizeSecretStoreKeyPart(namespace),
     normalizeSecretStoreKeyPart('provider'),
     encodeProviderId(parts.providerId),
     normalizeSecretStoreKeyPart(parts.providerType),
@@ -142,6 +147,16 @@ export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
   ]
 
   return keyParts.filter((part) => part.length > 0).join('-')
+}
+
+export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
+  return createNamespacedSecretStoreKey('aider', parts)
+}
+
+export function createLegacySmartComposerSecretStoreKey(
+  parts: SecretStoreKeyParts,
+): string {
+  return createNamespacedSecretStoreKey('smart-composer', parts)
 }
 
 export function createSecretStore(

@@ -64,9 +64,36 @@ body:
   - type: input
     id: plugin-version
     attributes:
-      label: Smart Composer Version
-      description: What version of Smart Composer are you using? (You can find this in Settings > Community plugins menu)
-      placeholder: e.g., 1.0.0
+      label: Aider Version
+      description: What version of Aider are you using? (You can find this in Settings > Community plugins menu)
+      placeholder: e.g., 2.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation-method
+    attributes:
+      label: Installation Method
+      description: How did you install Aider?
+      options:
+        - Manual GitHub release install
+        - Obsidian community plugin catalog
+        - BRAT
+        - Development checkout
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: migration-state
+    attributes:
+      label: Smart Composer Migration State
+      description: Did this vault previously use Smart Composer?
+      options:
+        - Migrated from Smart Composer
+        - Fresh Aider install
+        - Aider and Smart Composer are both enabled
+        - Not sure
     validations:
       required: true
 
@@ -90,9 +117,10 @@ body:
            - Or use View > Toggle Developer Tools from the menu
         2. Go to the "Console" tab
         3. Look for any red error messages or warnings
-        4. Copy and paste them here
+        4. Remove API keys, OAuth tokens, provider headers, private URLs, and sensitive vault content
+        5. Copy and paste the redacted logs here
       render: shell
-      placeholder: Paste your logs here
+      placeholder: Paste redacted logs here
 
   - type: textarea
     id: additional-context

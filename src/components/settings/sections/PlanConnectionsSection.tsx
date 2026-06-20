@@ -59,10 +59,10 @@ export function PlanConnectionsSection({
       title: 'Disconnect subscription',
       message:
         providerType === 'anthropic-plan'
-          ? 'Disconnect Claude from Smart Composer?'
+          ? 'Disconnect Claude from Aider?'
           : providerType === 'openai-plan'
-            ? 'Disconnect OpenAI from Smart Composer?'
-            : 'Disconnect Gemini from Smart Composer?',
+            ? 'Disconnect OpenAI from Aider?'
+            : 'Disconnect Gemini from Aider?',
       ctaText: 'Disconnect',
       onConfirm: async () => {
         await setSettings({
@@ -91,7 +91,7 @@ export function PlanConnectionsSection({
           Anthropic has restricted third-party OAuth access, and there are
           reports of account bans when using subscription OAuth via third-party
           clients. See the{' '}
-          <a href="https://github.com/glowingjade/obsidian-smart-composer?tab=readme-ov-file">
+          <a href="https://github.com/youill0317/Aider?tab=readme-ov-file">
             README
           </a>{' '}
           for full details and use at your own risk.

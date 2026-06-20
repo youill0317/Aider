@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-smart-composer",
-  "version": "1.2.9",
-  "description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+  "name": "aider",
+  "version": "2.0.0",
+  "description": "AI chat with note context, smart writing assistance, and one-click edits for your Obsidian vault.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -14,7 +14,8 @@
     "migrate:compile": "node compile-migration.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "youill0317",
+  "authorUrl": "https://github.com/youill0317",
   "license": "MIT",
   "devDependencies": {
     "@types/jest": "^29.5.13",

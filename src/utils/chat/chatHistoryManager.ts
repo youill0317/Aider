@@ -12,7 +12,8 @@ import { ChatConversation, ChatConversationMeta } from '../../types/chat'
 
 const CURRENT_SCHEMA_VERSION = 3
 const SUPPORTED_SCHEMA_VERSION = 2
-const CHAT_HISTORY_DIR = '.smtcmp_chat_histories'
+export const CHAT_HISTORY_DIR = '.aider_chat_histories'
+export const LEGACY_CHAT_HISTORY_DIR = '.smtcmp_chat_histories'
 const CHAT_LIST_FILE = 'chat_list.json'
 
 export class ChatConversationManager {

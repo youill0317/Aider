@@ -2,7 +2,7 @@
 
 ## Public Distribution Security Model
 
-Credential storage prefers Obsidian `app.secretStorage` through feature detection. When `app.secretStorage` is unavailable, Smart Composer falls back to ordinary plugin settings so existing users on older Obsidian builds do not lose access or see a new setup flow. That fallback must be documented as `insecure-settings-fallback`; it must not be described as secure storage.
+Credential storage prefers Obsidian `app.secretStorage` through feature detection. When `app.secretStorage` is unavailable, Aider falls back to ordinary plugin settings so existing users on older Obsidian builds do not lose access or see a new setup flow. That fallback must be documented as `insecure-settings-fallback`; it must not be described as secure storage.
 
 The current `minAppVersion` can remain unchanged only because fallback support exists. If a release ever requires secure storage for every user, the plugin must require Obsidian 1.11.4+ and update the manifest and release notes together.
 

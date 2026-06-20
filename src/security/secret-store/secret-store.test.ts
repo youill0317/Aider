@@ -229,7 +229,7 @@ describe('SecretStore key contract', () => {
 
     // When/Then: the generated id uses only lowercase letters, numbers, and dashes.
     expect(key).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-    expect(key).toContain('smart-composer-provider-id-')
+    expect(key).toContain('aider-provider-id-')
     expect(key).toContain('openai-plan-refresh-token')
   })
 

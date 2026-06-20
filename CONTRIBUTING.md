@@ -1,19 +1,19 @@
-# Contributing to Obsidian Smart Composer
+# Contributing to Aider
 
-We welcome contributions to Obsidian Smart Composer! This document will guide you through the process of contributing to the project.
+We welcome contributions to Aider! This document will guide you through the process of contributing to the project.
 
 ## Development Workflow
 
 1. Clone the repository to your Obsidian vault's plugins directory:
 
    ```
-   git clone https://github.com/glowingjade/obsidian-smart-composer.git /path/to/your/vault/.obsidian/plugins/obsidian-smart-composer
+   git clone https://github.com/youill0317/Aider.git /path/to/your/vault/.obsidian/plugins/aider
    ```
 
 2. Navigate to the plugin directory:
 
    ```
-   cd /path/to/your/vault/.obsidian/plugins/obsidian-smart-composer
+   cd /path/to/your/vault/.obsidian/plugins/aider
    ```
 
 3. Run the following commands to install dependencies and start the development server:
@@ -79,7 +79,7 @@ This process ensures a clean and organized migration history.
 
 When debugging database-related issues in Obsidian's developer console, you can use the "Store as global variable" feature to interact with the database directly:
 
-1. Look for the console message "Smart composer database initialized." 
+1. Look for the console message "Aider database initialized."
 2. Right-click on this DatabaseManager object and select "Store as global variable" (it will be stored as `tempN`)
 3. You can then run SQL queries directly using the stored variable. For example:
 
@@ -92,7 +92,7 @@ When debugging database-related issues in Obsidian's developer console, you can 
      ORDER BY table_schema, table_name;
    `);
    ```
-4. should call `await temp1.save()` to save the database to disk
+4. Call `await temp1.save()` to save the database to disk
 
 This method allows you to inspect database tables, run queries, and debug database-related issues directly in the console.
 
@@ -121,8 +121,8 @@ The core team is monitoring for pull requests. We will review your pull request 
 For common development issues, their solutions, and other helpful information for contributors, please refer to the following resources:
 
 1. [DEVELOPMENT.md](./DEVELOPMENT.md): Contains detailed information about the development process, common issues, and their solutions.
-2. [Issue Tracker](https://github.com/glowingjade/obsidian-smart-composer/issues): Check our issue tracker for detailed problem descriptions and solutions.
-3. [GitHub Discussions](https://github.com/glowingjade/obsidian-smart-composer/discussions): Join our community discussions for interactive problem-solving and knowledge sharing.
+2. [Issue Tracker](https://github.com/youill0317/Aider/issues): Check our issue tracker for detailed problem descriptions and solutions.
+3. [GitHub Discussions](https://github.com/youill0317/Aider/discussions): Join our community discussions for interactive problem-solving and knowledge sharing.
 
 We encourage contributors to review these resources before starting development and to help keep them updated with new findings.
 
@@ -138,6 +138,10 @@ This project is licensed under the [MIT License](LICENSE). By contributing to th
 
 For maintainers with repository write access, deployments are handled through git tags. To deploy a new version:
 
-1. Create and push a new tag: `git tag <version-number> && git push origin <version-number>`
+1. Confirm `manifest.json`, `package.json`, `package-lock.json`, and `versions.json` all use the intended Aider version.
+2. Run `npm test`, `npm run type:check`, `npm run lint:check`, and `npm run build`.
+3. Create and push a new tag: `git tag <version-number> && git push origin <version-number>`
 
-Github workflow will automatically build, release and create a pull request to bump versions in versions.json, manifest.json and package.json. The pull request needs to be manually reviewed and merged by a maintainer.
+GitHub workflow will automatically build the release from the exact version tag, publish `main.js`, `manifest.json`, and `styles.css`, and create a pull request to bump versions in `versions.json`, `manifest.json`, `package.json`, and `package-lock.json`. The pull request needs to be manually reviewed and merged by a maintainer.
+
+Obsidian community-plugin registration is a separate process. The Aider listing should use plugin id `aider`, repository `youill0317/Aider`, and the release assets `main.js`, `manifest.json`, and `styles.css`.

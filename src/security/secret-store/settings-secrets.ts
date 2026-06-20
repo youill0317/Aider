@@ -1,98 +1,24 @@
-import { SmartComposerSettings } from '../../settings/schema/setting.types'
-import { LLMProvider } from '../../types/provider.types'
+import type { SmartComposerSettings } from '../../settings/schema/setting.types'
+import type { LLMProvider } from '../../types/provider.types'
 
-import { SecretStore, createSecretStoreKey } from './secret-store'
-
-type OAuthSecretField = 'accessToken' | 'refreshToken'
-
-type OAuthState = {
-  readonly accessToken: string
-  readonly refreshToken: string
-  readonly expiresAt: number
-}
-
-type ProviderWithOAuth = Extract<
-  LLMProvider,
-  { readonly type: 'anthropic-plan' | 'openai-plan' | 'gemini-plan' }
-> & {
-  readonly oauth?: OAuthState
-}
-
-const OAUTH_SECRET_FIELDS: readonly OAuthSecretField[] = [
-  'accessToken',
-  'refreshToken',
-]
-
-function isNonEmptySecret(value: string | undefined): value is string {
-  return typeof value === 'string' && value.length > 0
-}
-
-function hasOAuth(provider: LLMProvider): provider is ProviderWithOAuth {
-  switch (provider.type) {
-    case 'anthropic-plan':
-    case 'openai-plan':
-    case 'gemini-plan':
-      return true
-    case 'anthropic':
-    case 'openai':
-    case 'gemini':
-    case 'xai':
-    case 'deepseek':
-    case 'perplexity':
-    case 'mistral':
-    case 'voyage':
-    case 'openrouter':
-    case 'ollama':
-    case 'lm-studio':
-    case 'azure-openai':
-    case 'openai-compatible':
-      return false
-  }
-}
-
-function providerSecretKey(
-  provider: LLMProvider,
-  field: 'apiKey' | OAuthSecretField,
-): string {
-  return createSecretStoreKey({
-    providerId: provider.id,
-    providerType: provider.type,
-    field,
-  })
-}
-
-async function writeSecret(
-  secretStore: SecretStore,
-  key: string,
-  value: string,
-): Promise<boolean> {
-  try {
-    await secretStore.setSecret(key, value)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function readSecret(
-  secretStore: SecretStore,
-  key: string,
-): Promise<string | null> {
-  try {
-    return await secretStore.getSecret(key)
-  } catch {
-    return null
-  }
-}
+import {
+  OAUTH_SECRET_FIELDS,
+  hasOAuth,
+  isNonEmptySecret,
+  providerSecretKeys,
+  readProviderSecret,
+  writeSecret,
+} from './provider-secret-utils'
+import type { SecretStore } from './secret-store'
 
 async function hydrateProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
 ): Promise<LLMProvider> {
   const hydratedProvider = { ...provider }
-  const apiKey = await readSecret(
+  const apiKey = await readProviderSecret(
     secretStore,
-    providerSecretKey(provider, 'apiKey'),
+    providerSecretKeys(provider, 'apiKey'),
   )
 
   if (!isNonEmptySecret(hydratedProvider.apiKey) && apiKey !== null) {
@@ -106,9 +32,9 @@ async function hydrateProvider(
   const hydratedOauth = { ...hydratedProvider.oauth }
 
   for (const field of OAUTH_SECRET_FIELDS) {
-    const secret = await readSecret(
+    const secret = await readProviderSecret(
       secretStore,
-      providerSecretKey(provider, field),
+      providerSecretKeys(provider, field),
     )
     if (!isNonEmptySecret(hydratedOauth[field]) && secret !== null) {
       hydratedOauth[field] = secret
@@ -134,7 +60,7 @@ async function sanitizeProvider(
   if (isNonEmptySecret(provider.apiKey)) {
     const didWriteApiKey = await writeSecret(
       secretStore,
-      providerSecretKey(provider, 'apiKey'),
+      providerSecretKeys(provider, 'apiKey').current,
       provider.apiKey,
     )
     if (didWriteApiKey) {
@@ -155,7 +81,7 @@ async function sanitizeProvider(
 
     const didWriteOAuthSecret = await writeSecret(
       secretStore,
-      providerSecretKey(provider, field),
+      providerSecretKeys(provider, field).current,
       provider.oauth[field],
     )
     if (didWriteOAuthSecret) {
@@ -204,7 +130,7 @@ async function deleteRemovedProviderSecrets(
       !isNonEmptySecret(nextProvider.apiKey)
     ) {
       await secretStore.deleteSecret(
-        providerSecretKey(previousProvider, 'apiKey'),
+        providerSecretKeys(previousProvider, 'apiKey').current,
       )
     }
   }
@@ -214,7 +140,7 @@ async function deleteAllProviderSecrets(
   provider: LLMProvider,
   secretStore: SecretStore,
 ): Promise<void> {
-  await secretStore.deleteSecret(providerSecretKey(provider, 'apiKey'))
+  await secretStore.deleteSecret(providerSecretKeys(provider, 'apiKey').current)
 
   if (hasOAuth(provider)) {
     await deleteOAuthSecrets(provider, secretStore)
@@ -226,7 +152,7 @@ async function deleteOAuthSecrets(
   secretStore: SecretStore,
 ): Promise<void> {
   for (const field of OAUTH_SECRET_FIELDS) {
-    await secretStore.deleteSecret(providerSecretKey(provider, field))
+    await secretStore.deleteSecret(providerSecretKeys(provider, field).current)
   }
 }
 

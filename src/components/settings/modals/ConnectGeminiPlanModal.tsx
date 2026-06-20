@@ -226,7 +226,7 @@ function ConnectGeminiPlanModalComponent({
         <div className="smtcmp-plan-connect-steps-title">How it works</div>
         <ol>
           <li>Login to Google in your browser</li>
-          <li>Smart Composer connects automatically when you return</li>
+          <li>Aider connects automatically when you return</li>
           <li>
             If automatic connect fails, paste the full redirect URL below and
             click &quot;Connect with URL&quot;
@@ -236,7 +236,7 @@ function ConnectGeminiPlanModalComponent({
 
       <ObsidianSetting
         name="Gemini login"
-        desc="Login to Google in your browser. Smart Composer connects automatically when you return."
+        desc="Login to Google in your browser. Aider connects automatically when you return."
       >
         <ObsidianButton
           text="Login to Google"

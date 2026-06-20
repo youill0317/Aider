@@ -1,10 +1,15 @@
 import { Editor, MarkdownView, Notice, Plugin } from 'obsidian'
 
+import {
+  adoptAiderStorage,
+  summarizeAdoptionError,
+} from './adoption/aiderStorageAdoption'
+import { loadAiderMigrationWiring } from './aiderMigrationWiring'
 import { ApplyView } from './ApplyView'
 import { ChatView } from './ChatView'
-import { ChatProps } from './components/chat-view/Chat'
+import type { ChatProps } from './components/chat-view/Chat'
 import { InstallerUpdateRequiredModal } from './components/modals/InstallerUpdateRequiredModal'
-import { APPLY_VIEW_TYPE, CHAT_VIEW_TYPE } from './constants'
+import { CHAT_VIEW_TYPE } from './constants'
 import { CodexToolRunner } from './core/agent/CodexToolRunner'
 import { McpManager } from './core/mcp/mcpManager'
 import { RAGEngine } from './core/rag/ragEngine'
@@ -48,15 +53,21 @@ export default class SmartComposerPlugin extends Plugin {
   private timeoutIds: ReturnType<typeof setTimeout>[] = [] // Use ReturnType instead of number
 
   async onload() {
-    await this.loadSettings()
-
-    this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))
-    this.registerView(APPLY_VIEW_TYPE, (leaf) => new ApplyView(leaf))
+    await loadAiderMigrationWiring(
+      {
+        adoptSmartComposerData: () => this.adoptSmartComposerData(),
+        loadSettings: () => this.loadSettings(),
+        registerView: (type, viewCreator) =>
+          this.registerView(type, viewCreator),
+      },
+      {
+        applyView: (leaf) => new ApplyView(leaf),
+        chatView: (leaf) => new ChatView(leaf, this),
+      },
+    )
 
     // This creates an icon in the left ribbon.
-    this.addRibbonIcon('wand-sparkles', 'Open smart composer', () =>
-      this.openChatView(),
-    )
+    this.addRibbonIcon('wand-sparkles', 'Open Aider', () => this.openChatView())
 
     // This adds a simple command that can be triggered anywhere
     this.addCommand({
@@ -389,6 +400,20 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     this.timeoutIds.push(timeoutId)
   }
 
+  private async adoptSmartComposerData() {
+    try {
+      await adoptAiderStorage(this.app)
+    } catch (error) {
+      console.error(
+        'Failed to adopt Smart Composer data into Aider:',
+        summarizeAdoptionError(error),
+      )
+      new Notice(
+        'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+      )
+    }
+  }
+
   private async migrateToJsonStorage() {
     try {
       const dbManager = await this.getDbManager()
@@ -409,7 +434,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     if (leaves.length === 0 || !(leaves[0].view instanceof ChatView)) {
       return
     }
-    new Notice('Reloading "smart-composer" due to migration', 1000)
+    new Notice('Reloading Aider due to migration', 1000)
     leaves[0].detach()
     await this.activateChatView()
   }

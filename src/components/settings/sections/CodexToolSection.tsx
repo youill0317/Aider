@@ -31,7 +31,7 @@ export function CodexToolSection() {
 
       <ObsidianSetting
         name="Enable Codex tool"
-        desc="Allow Smart Composer chat to ask before running Codex CLI tasks."
+        desc="Allow Aider chat to ask before running Codex CLI tasks."
       >
         <ObsidianToggle
           value={codexSettings.enabled}
@@ -95,7 +95,7 @@ export function CodexToolSection() {
 
       <ObsidianSetting
         name="Default approval"
-        desc="CLI approval behavior after Smart Composer tool approval."
+        desc="CLI approval behavior after Aider tool approval."
       >
         <ObsidianDropdown
           value={codexSettings.approvalPolicy}

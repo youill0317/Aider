@@ -23,16 +23,14 @@ export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
   return (
     <>
       <ObsidianSetting
-        name="Support Smart Composer"
-        desc="If you find Smart Composer valuable, consider supporting its development!"
+        name="Support Aider"
+        desc="If you find Aider valuable, consider supporting its development!"
         heading
         className="smtcmp-settings-support-smart-composer"
       >
         <ObsidianButton
-          text="Buy Me a Coffee"
-          onClick={() =>
-            window.open('https://www.buymeacoffee.com/kevin.on', '_blank')
-          }
+          text="Open Repository"
+          onClick={() => window.open('https://github.com/youill0317/Aider')}
           cta
         />
       </ObsidianSetting>

@@ -24,11 +24,7 @@ export const CODEX_TOOL_NAME = 'run_codex'
 const MAX_CODEX_TOOL_OUTPUT_CHARS = 24_000
 
 const codexToolArgsSchema = z.object({
-  prompt: z.string().min(1),
-  sandbox: z
-    .enum(['read-only', 'workspace-write', 'danger-full-access'])
-    .optional(),
-  cwd: z.string().optional(),
+  prompt: z.string().trim().min(1),
   model: z.string().optional(),
   summary: z.string().optional(),
 })
@@ -47,6 +43,8 @@ type CodexToolRunnerOptions = {
 type CodexExecutionKeyParams = {
   readonly command: string
   readonly cwd: string
+  readonly model?: string
+  readonly prompt: string
   readonly sandbox: CodexSandboxMode
 }
 
@@ -102,17 +100,6 @@ export class CodexToolRunner {
               type: 'string',
               description:
                 'The concrete implementation or investigation task Codex should perform.',
-            },
-            sandbox: {
-              type: 'string',
-              enum: ['read-only', 'workspace-write', 'danger-full-access'],
-              description:
-                'Execution sandbox for Codex. Omit to use the Aider default.',
-            },
-            cwd: {
-              type: 'string',
-              description:
-                'Working directory for Codex. Omit to use the configured vault/project directory.',
             },
             model: {
               type: 'string',
@@ -253,10 +240,10 @@ export class CodexToolRunner {
     return {
       approvalPolicy: this.settings.agent.codex.approvalPolicy,
       command: this.settings.agent.codex.command,
-      cwd: normalizeOptionalString(args.cwd) ?? this.resolveDefaultCwd(),
-      model: args.model,
+      cwd: this.resolveDefaultCwd(),
+      model: normalizeOptionalString(args.model),
       prompt: args.prompt,
-      sandboxMode: args.sandbox ?? this.settings.agent.codex.defaultSandbox,
+      sandboxMode: this.settings.agent.codex.defaultSandbox,
     }
   }
 
@@ -269,8 +256,10 @@ export class CodexToolRunner {
         }
     return buildExecutionKey({
       command: this.settings.agent.codex.command,
-      cwd: normalizeOptionalString(codexArgs.cwd) ?? this.resolveDefaultCwd(),
-      sandbox: codexArgs.sandbox ?? this.settings.agent.codex.defaultSandbox,
+      cwd: this.resolveDefaultCwd(),
+      model: normalizeOptionalString(codexArgs.model),
+      prompt: codexArgs.prompt.trim(),
+      sandbox: this.settings.agent.codex.defaultSandbox,
     })
   }
 
@@ -321,11 +310,15 @@ export class CodexToolRunner {
 function buildExecutionKey({
   command,
   cwd,
+  model,
+  prompt,
   sandbox,
 }: CodexExecutionKeyParams): string {
   return JSON.stringify({
     command,
     cwd,
+    model,
+    prompt,
     sandbox,
     tool: CODEX_TOOL_NAME,
   })

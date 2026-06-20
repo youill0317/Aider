@@ -15,6 +15,8 @@ import {
   parseJsonValue,
 } from './aiderAdoptionUtils'
 
+const SAFE_LEGACY_CHAT_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
 type ChatHistoryMeta = {
   readonly schemaVersion: number
   readonly id: string
@@ -54,6 +56,11 @@ export async function adoptChatHistories(
   let skippedMalformedFiles = 0
 
   for (const legacyMeta of legacyList) {
+    if (!isSafeLegacyChatId(legacyMeta.id)) {
+      skippedMalformedFiles += 1
+      continue
+    }
+
     if (canonicalIds.has(legacyMeta.id)) {
       continue
     }
@@ -172,4 +179,8 @@ function parseChatHistoryMeta(value: unknown): ChatHistoryMeta | null {
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   }
+}
+
+function isSafeLegacyChatId(id: string): boolean {
+  return SAFE_LEGACY_CHAT_ID_PATTERN.test(id)
 }

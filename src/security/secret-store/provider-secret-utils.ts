@@ -104,10 +104,27 @@ export async function readProviderSecret(
   }
 
   if (secretStore.getBackendStatus() !== 'insecure-settings-fallback') {
-    await writeSecret(secretStore, keys.current, legacySecret)
+    const didCopyLegacySecret = await writeSecret(
+      secretStore,
+      keys.current,
+      legacySecret,
+    )
+    if (didCopyLegacySecret) {
+      await secretStore.deleteSecret(keys.legacy)
+    }
   }
 
   return legacySecret
+}
+
+export async function deleteProviderSecrets(
+  secretStore: SecretStore,
+  keys: ProviderSecretKeys,
+): Promise<void> {
+  await Promise.all([
+    secretStore.deleteSecret(keys.current),
+    secretStore.deleteSecret(keys.legacy),
+  ])
 }
 
 async function readSecret(

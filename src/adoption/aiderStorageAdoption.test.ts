@@ -185,6 +185,55 @@ describe('Aider storage adoption', () => {
     })
   })
 
+  it('skips legacy chat histories with unsafe ids before reading paths', async () => {
+    // Given: a legacy chat list contains one path-traversal id and one valid id.
+    const app = createTestApp()
+    const unsafeChatMeta = {
+      schemaVersion: 3,
+      id: '../escaped',
+      title: 'Unsafe chat',
+      createdAt: 10,
+      updatedAt: 20,
+    }
+    const validChatMeta = {
+      schemaVersion: 3,
+      id: 'valid_chat-1',
+      title: 'Valid chat',
+      createdAt: 20,
+      updatedAt: 30,
+    }
+
+    await app.vault.adapter.mkdir('.smtcmp_chat_histories')
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/chat_list.json',
+      jsonFile([unsafeChatMeta, validChatMeta]),
+    )
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/../escaped.json',
+      jsonFile({ ...unsafeChatMeta, messages: [] }),
+    )
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/valid_chat-1.json',
+      jsonFile({ ...validChatMeta, messages: [] }),
+    )
+
+    // When: legacy chat history adoption runs.
+    const marker = await adoptAiderStorage(app)
+
+    // Then: the unsafe id is treated as malformed without copying its file.
+    expect(
+      await app.vault.adapter.exists('.aider_chat_histories/../escaped.json'),
+    ).toBe(false)
+    expect(
+      await app.vault.adapter.exists('.aider_chat_histories/valid_chat-1.json'),
+    ).toBe(true)
+    expect(marker.resources.legacyChatHistories).toMatchObject({
+      status: 'failed',
+      sourcePath: '.smtcmp_chat_histories',
+      targetPath: '.aider_chat_histories',
+    })
+  })
+
   it('does not duplicate chat history entries when adoption is repeated', async () => {
     const app = createTestApp()
     const chatMeta = {

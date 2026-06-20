@@ -3,6 +3,7 @@ import type { LLMProvider } from '../../types/provider.types'
 
 import {
   OAUTH_SECRET_FIELDS,
+  deleteProviderSecrets,
   hasOAuth,
   isNonEmptySecret,
   providerSecretKeys,
@@ -129,8 +130,9 @@ async function deleteRemovedProviderSecrets(
       isNonEmptySecret(previousProvider.apiKey) &&
       !isNonEmptySecret(nextProvider.apiKey)
     ) {
-      await secretStore.deleteSecret(
-        providerSecretKeys(previousProvider, 'apiKey').current,
+      await deleteProviderSecrets(
+        secretStore,
+        providerSecretKeys(previousProvider, 'apiKey'),
       )
     }
   }
@@ -140,7 +142,10 @@ async function deleteAllProviderSecrets(
   provider: LLMProvider,
   secretStore: SecretStore,
 ): Promise<void> {
-  await secretStore.deleteSecret(providerSecretKeys(provider, 'apiKey').current)
+  await deleteProviderSecrets(
+    secretStore,
+    providerSecretKeys(provider, 'apiKey'),
+  )
 
   if (hasOAuth(provider)) {
     await deleteOAuthSecrets(provider, secretStore)
@@ -152,7 +157,10 @@ async function deleteOAuthSecrets(
   secretStore: SecretStore,
 ): Promise<void> {
   for (const field of OAUTH_SECRET_FIELDS) {
-    await secretStore.deleteSecret(providerSecretKeys(provider, field).current)
+    await deleteProviderSecrets(
+      secretStore,
+      providerSecretKeys(provider, field),
+    )
   }
 }
 

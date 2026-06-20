@@ -127,23 +127,14 @@ describe('settings secret hydration boundary', () => {
     ).toBe('test-refresh-token')
   })
 
-  it('partial migration failure keeps failed secret recoverable', async () => {
-    // Given: one provider secret write fails but other settings must survive.
+  it('secure persistence strips provider secrets even when secret writes fail', async () => {
+    // Given: provider secret writes fail but the secure backend is present.
     const settings = createTestSettings()
     const failingSecretStore = {
       getBackendStatus: () => 'obsidian-secret-storage' as const,
       getSecret: async () => null,
-      setSecret: async (key: string) => {
-        if (
-          key ===
-          createSecretStoreKey({
-            providerId: 'openai',
-            providerType: 'openai',
-            field: 'apiKey',
-          })
-        ) {
-          throw new Error('write failed')
-        }
+      setSecret: async () => {
+        throw new Error('write failed')
       },
       deleteSecret: async () => undefined,
     }
@@ -154,8 +145,10 @@ describe('settings secret hydration boundary', () => {
       failingSecretStore,
     )
 
-    // Then: the failed provider remains recoverable and unrelated OAuth values are stripped.
-    expect(persistedSettings.providers[0].apiKey).toBe('sk-test-openai-secret')
+    // Then: ordinary settings do not keep raw provider secrets in data.json.
+    expect(JSON.stringify(persistedSettings)).not.toContain(
+      'sk-test-openai-secret',
+    )
     expect(JSON.stringify(persistedSettings)).not.toContain('test-access-token')
     expect(JSON.stringify(persistedSettings)).not.toContain(
       'test-refresh-token',

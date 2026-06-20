@@ -59,14 +59,12 @@ async function sanitizeProvider(
   const sanitizedProvider = { ...provider }
 
   if (isNonEmptySecret(provider.apiKey)) {
-    const didWriteApiKey = await writeSecret(
+    await writeSecret(
       secretStore,
       providerSecretKeys(provider, 'apiKey').current,
       provider.apiKey,
     )
-    if (didWriteApiKey) {
-      delete sanitizedProvider.apiKey
-    }
+    delete sanitizedProvider.apiKey
   }
 
   if (!hasOAuth(provider) || !provider.oauth || !hasOAuth(sanitizedProvider)) {
@@ -80,14 +78,12 @@ async function sanitizeProvider(
       continue
     }
 
-    const didWriteOAuthSecret = await writeSecret(
+    await writeSecret(
       secretStore,
       providerSecretKeys(provider, field).current,
       provider.oauth[field],
     )
-    if (didWriteOAuthSecret) {
-      sanitizedOauth[field] = ''
-    }
+    sanitizedOauth[field] = ''
   }
 
   return {

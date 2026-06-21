@@ -73,7 +73,7 @@ describe('secret migration compatibility', () => {
     expect(secondPersisted).toEqual(firstPersisted)
   })
 
-  it('secure-store write failure does not persist raw secrets', async () => {
+  it('secure-store write failure aborts migration', async () => {
     // Given: secure storage fails before the old raw API key can be moved.
     const settings = createOldSettings()
     const failingStore = {
@@ -85,16 +85,10 @@ describe('secret migration compatibility', () => {
       deleteSecret: async () => undefined,
     }
 
-    // When: migration attempts to sanitize settings.
-    const persisted = await sanitizeSettingsForPersistence(
-      settings,
-      failingStore,
-    )
-
-    // Then: ordinary settings do not keep raw provider secrets in data.json.
-    expect(JSON.stringify(persisted)).not.toContain('sk-old-api-key')
-    expect(JSON.stringify(persisted)).not.toContain('old-access-token')
-    expect(JSON.stringify(persisted)).not.toContain('old-refresh-token')
+    // When/Then: migration does not produce sanitized settings with missing secrets.
+    await expect(
+      sanitizeSettingsForPersistence(settings, failingStore),
+    ).rejects.toThrow('write failed')
   })
 
   it('secure-store read failure reports bounded reconnect state', async () => {

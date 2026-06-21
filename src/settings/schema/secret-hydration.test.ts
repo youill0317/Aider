@@ -127,7 +127,7 @@ describe('settings secret hydration boundary', () => {
     ).toBe('test-refresh-token')
   })
 
-  it('secure persistence strips provider secrets even when secret writes fail', async () => {
+  it('secure persistence aborts when secret writes fail', async () => {
     // Given: provider secret writes fail but the secure backend is present.
     const settings = createTestSettings()
     const failingSecretStore = {
@@ -139,20 +139,10 @@ describe('settings secret hydration boundary', () => {
       deleteSecret: async () => undefined,
     }
 
-    // When: settings are sanitized for persistence.
-    const persistedSettings = await sanitizeSettingsForPersistence(
-      settings,
-      failingSecretStore,
-    )
-
-    // Then: ordinary settings do not keep raw provider secrets in data.json.
-    expect(JSON.stringify(persistedSettings)).not.toContain(
-      'sk-test-openai-secret',
-    )
-    expect(JSON.stringify(persistedSettings)).not.toContain('test-access-token')
-    expect(JSON.stringify(persistedSettings)).not.toContain(
-      'test-refresh-token',
-    )
+    // When/Then: settings are not sanitized into blank persisted secrets.
+    await expect(
+      sanitizeSettingsForPersistence(settings, failingSecretStore),
+    ).rejects.toThrow('write failed')
   })
 
   it('migration is idempotent', async () => {

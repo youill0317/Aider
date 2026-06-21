@@ -80,11 +80,19 @@ export async function writeSecret(
   value: string,
 ): Promise<boolean> {
   try {
-    await secretStore.setSecret(key, value)
+    await writeRequiredSecret(secretStore, key, value)
     return true
   } catch {
     return false
   }
+}
+
+export async function writeRequiredSecret(
+  secretStore: SecretStore,
+  key: string,
+  value: string,
+): Promise<void> {
+  await secretStore.setSecret(key, value)
 }
 
 export async function readProviderSecret(

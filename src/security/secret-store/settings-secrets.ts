@@ -8,7 +8,7 @@ import {
   isNonEmptySecret,
   providerSecretKeys,
   readProviderSecret,
-  writeSecret,
+  writeRequiredSecret,
 } from './provider-secret-utils'
 import type { SecretStore } from './secret-store'
 
@@ -51,6 +51,7 @@ async function hydrateProvider(
 async function sanitizeProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
+  previousProvider?: LLMProvider,
 ): Promise<LLMProvider> {
   if (secretStore.getBackendStatus() === 'insecure-settings-fallback') {
     return provider
@@ -59,11 +60,13 @@ async function sanitizeProvider(
   const sanitizedProvider = { ...provider }
 
   if (isNonEmptySecret(provider.apiKey)) {
-    await writeSecret(
-      secretStore,
-      providerSecretKeys(provider, 'apiKey').current,
-      provider.apiKey,
-    )
+    if (provider.apiKey !== previousProvider?.apiKey) {
+      await writeRequiredSecret(
+        secretStore,
+        providerSecretKeys(provider, 'apiKey').current,
+        provider.apiKey,
+      )
+    }
     delete sanitizedProvider.apiKey
   }
 
@@ -72,17 +75,23 @@ async function sanitizeProvider(
   }
 
   const sanitizedOauth = { ...provider.oauth }
+  const previousOauth =
+    previousProvider && hasOAuth(previousProvider)
+      ? previousProvider.oauth
+      : undefined
 
   for (const field of OAUTH_SECRET_FIELDS) {
     if (!isNonEmptySecret(provider.oauth[field])) {
       continue
     }
 
-    await writeSecret(
-      secretStore,
-      providerSecretKeys(provider, field).current,
-      provider.oauth[field],
-    )
+    if (provider.oauth[field] !== previousOauth?.[field]) {
+      await writeRequiredSecret(
+        secretStore,
+        providerSecretKeys(provider, field).current,
+        provider.oauth[field],
+      )
+    }
     sanitizedOauth[field] = ''
   }
 
@@ -182,9 +191,13 @@ export async function sanitizeSettingsForPersistence(
   previousSettings?: SmartComposerSettings,
 ): Promise<SmartComposerSettings> {
   const providers = await Promise.all(
-    settings.providers.map((provider) =>
-      sanitizeProvider(provider, secretStore),
-    ),
+    settings.providers.map((provider) => {
+      const previousProvider = previousSettings?.providers.find(
+        (candidate) =>
+          candidate.id === provider.id && candidate.type === provider.type,
+      )
+      return sanitizeProvider(provider, secretStore, previousProvider)
+    }),
   )
   const sanitizedSettings = {
     ...settings,
@@ -210,10 +223,15 @@ export async function persistSettingsUpdate({
   saveData: (settings: SmartComposerSettings) => Promise<void>
 }): Promise<void> {
   publishRuntimeSettings(nextSettings)
-  const persistedSettings = await sanitizeSettingsForPersistence(
-    nextSettings,
-    secretStore,
-    previousSettings,
-  )
-  await saveData(persistedSettings)
+  try {
+    const persistedSettings = await sanitizeSettingsForPersistence(
+      nextSettings,
+      secretStore,
+      previousSettings,
+    )
+    await saveData(persistedSettings)
+  } catch (error) {
+    publishRuntimeSettings(previousSettings)
+    throw error
+  }
 }

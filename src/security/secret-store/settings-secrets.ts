@@ -8,7 +8,7 @@ import {
   isNonEmptySecret,
   providerSecretKeys,
   readProviderSecret,
-  writeRequiredSecret,
+  writeSecret,
 } from './provider-secret-utils'
 import type { SecretStore } from './secret-store'
 
@@ -61,9 +61,9 @@ async function sanitizeProvider(
 
   if (isNonEmptySecret(provider.apiKey)) {
     if (provider.apiKey !== previousProvider?.apiKey) {
-      await writeRequiredSecret(
+      await writeSecret(
         secretStore,
-        providerSecretKeys(provider, 'apiKey').current,
+        providerSecretKeys(provider, 'apiKey'),
         provider.apiKey,
       )
     }
@@ -86,9 +86,9 @@ async function sanitizeProvider(
     }
 
     if (provider.oauth[field] !== previousOauth?.[field]) {
-      await writeRequiredSecret(
+      await writeSecret(
         secretStore,
-        providerSecretKeys(provider, field).current,
+        providerSecretKeys(provider, field),
         provider.oauth[field],
       )
     }

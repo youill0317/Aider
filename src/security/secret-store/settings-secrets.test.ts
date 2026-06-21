@@ -1,7 +1,11 @@
 import type { SmartComposerSettings } from '../../settings/schema/setting.types'
 
+import { createSecretStore } from './secret-store'
 import type { SecretStore } from './secret-store'
-import { persistSettingsUpdate } from './settings-secrets'
+import {
+  hydrateSettingsSecrets,
+  persistSettingsUpdate,
+} from './settings-secrets'
 
 function createSettings(
   providers: SmartComposerSettings['providers'],
@@ -176,5 +180,79 @@ describe('settings secret persistence', () => {
       accessToken: '',
       refreshToken: '',
     })
+  })
+
+  it('saves long plan tokens through chunked Obsidian secrets', async () => {
+    // Given: the Obsidian backend rejects a full OAuth token in one entry.
+    const secretStorageValues = new Map<string, string>()
+    let savedSettings: SmartComposerSettings | undefined
+    const secretStore = createSecretStore({
+      app: {
+        secretStorage: {
+          getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+          setSecret: async (key: string, value: string) => {
+            if (value.length > 1100) {
+              throw new Error('secret value too large')
+            }
+            secretStorageValues.set(key, value)
+          },
+        },
+      },
+    })
+    const accessToken = `${'access-token-part.'.repeat(80)}end`
+    const refreshToken = `${'refresh-token-part.'.repeat(80)}end`
+    const disconnectedSettings = createSettings([
+      {
+        id: 'openai-plan',
+        type: 'openai-plan',
+      },
+    ])
+    const connectedSettings = createSettings([
+      {
+        id: 'openai-plan',
+        type: 'openai-plan',
+        oauth: {
+          accessToken,
+          refreshToken,
+          expiresAt: 1_893_456_000_000,
+        },
+      },
+    ])
+
+    // When: the plan login persists long OAuth credentials.
+    await persistSettingsUpdate({
+      previousSettings: disconnectedSettings,
+      nextSettings: connectedSettings,
+      secretStore,
+      publishRuntimeSettings: () => undefined,
+      saveData: async (settings) => {
+        savedSettings = settings
+      },
+    })
+    const hydratedSettings = await hydrateSettingsSecrets(
+      savedSettings ?? disconnectedSettings,
+      secretStore,
+    )
+
+    // Then: persisted settings stay sanitized and runtime hydration recovers the tokens.
+    const savedProvider = savedSettings?.providers[0]
+    expect(
+      savedProvider?.type === 'openai-plan' ? savedProvider.oauth : undefined,
+    ).toMatchObject({
+      accessToken: '',
+      refreshToken: '',
+    })
+    const hydratedProvider = hydratedSettings.providers[0]
+    expect(
+      hydratedProvider.type === 'openai-plan'
+        ? hydratedProvider.oauth
+        : undefined,
+    ).toMatchObject({
+      accessToken,
+      refreshToken,
+    })
+    expect(
+      [...secretStorageValues.values()].some((value) => value === accessToken),
+    ).toBe(false)
   })
 })

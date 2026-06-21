@@ -46,6 +46,67 @@ describe('SecretStore backend selection', () => {
     await expect(store.getSecret(secretId)).resolves.toBe('sk-test-roundtrip')
   })
 
+  it('chunks long secrets through Obsidian secretStorage backend', async () => {
+    // Given: the host secretStorage rejects values larger than one chunk.
+    const secretStorageValues = new Map<string, string>()
+    const app = {
+      secretStorage: {
+        getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+        setSecret: async (key: string, value: string) => {
+          if (value.length > 1100) {
+            throw new Error('secret value too large')
+          }
+          secretStorageValues.set(key, value)
+        },
+      },
+    }
+    const secretId = 'aider-provider-openai-plan-access-token'
+    const longSecret = `${'access-token-part.'.repeat(80)}end`
+
+    // When: a long OAuth token is stored through the Obsidian backend.
+    const store = createSecretStore({ app })
+    await store.setSecret(secretId, longSecret)
+
+    // Then: the base entry contains only chunk metadata and the full value roundtrips.
+    expect(secretStorageValues.get(secretId)).not.toBe(longSecret)
+    expect(secretStorageValues.get(`${secretId}-chunk-0000`)).toBe(
+      longSecret.slice(0, 1000),
+    )
+    await expect(store.getSecret(secretId)).resolves.toBe(longSecret)
+  })
+
+  it('deletes chunks when a chunked Obsidian secret is replaced by a short value', async () => {
+    // Given: a long secret was stored as multiple SecretStorage entries.
+    const secretStorageValues = new Map<string, string>()
+    const deletedKeys: string[] = []
+    const app = {
+      secretStorage: {
+        getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+        setSecret: async (key: string, value: string) => {
+          secretStorageValues.set(key, value)
+        },
+        deleteSecret: async (key: string) => {
+          deletedKeys.push(key)
+          secretStorageValues.delete(key)
+        },
+      },
+    }
+    const secretId = 'aider-provider-openai-plan-refresh-token'
+    const store = createSecretStore({ app })
+    await store.setSecret(secretId, 'refresh-token-part.'.repeat(80))
+
+    // When: the same secret id is updated to a short value.
+    await store.setSecret(secretId, 'short-refresh-token')
+
+    // Then: stale chunk entries are removed and the new value roundtrips.
+    expect(deletedKeys).toEqual([
+      `${secretId}-chunk-0000`,
+      `${secretId}-chunk-0001`,
+    ])
+    expect(secretStorageValues.has(`${secretId}-chunk-0000`)).toBe(false)
+    await expect(store.getSecret(secretId)).resolves.toBe('short-refresh-token')
+  })
+
   it('treats null from Obsidian secretStorage as missing secret', async () => {
     // Given: Obsidian secretStorage reports a missing secret as null.
     const store = createSecretStore({
@@ -228,6 +289,18 @@ describe('SecretStore key contract', () => {
     expect(key).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
     expect(key).toContain('aider-provider-id-')
     expect(key).toContain('openai-plan-refresh-token')
+  })
+
+  it('keeps generated keys within Obsidian secret id limits', () => {
+    const key = createSecretStoreKey({
+      providerId: 'openai-plan',
+      providerType: 'openai-plan',
+      field: 'refreshToken',
+    })
+
+    expect(key).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+    expect(key.length).toBeLessThanOrEqual(64)
+    expect(key).toContain('aider-provider-id-')
   })
 
   it('does not serialize secret values in store references', () => {

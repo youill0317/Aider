@@ -1,8 +1,11 @@
 import type { LLMProvider } from '../../types/provider.types'
 
 import {
+  createLegacyAiderSecretStoreKey,
   createLegacySmartComposerSecretStoreKey,
   createSecretStoreKey,
+  createUnversionedLegacyAiderSecretStoreKey,
+  createUnversionedLegacySmartComposerSecretStoreKey,
 } from './secret-store'
 import type { SecretStore } from './secret-store'
 
@@ -23,7 +26,7 @@ export type ProviderWithOAuth = Extract<
 
 type ProviderSecretKeys = {
   readonly current: string
-  readonly legacy: string
+  readonly legacy: readonly string[]
 }
 
 export const OAUTH_SECRET_FIELDS: readonly OAuthSecretField[] = [
@@ -33,6 +36,25 @@ export const OAUTH_SECRET_FIELDS: readonly OAuthSecretField[] = [
 
 export function isNonEmptySecret(value: string | undefined): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+function isProviderSecretKeys(
+  key: string | readonly string[] | ProviderSecretKeys,
+): key is ProviderSecretKeys {
+  if (typeof key !== 'object' || key === null) {
+    return false
+  }
+
+  const candidate = key as {
+    current?: unknown
+    legacy?: unknown
+  }
+
+  return (
+    typeof candidate.current === 'string' &&
+    Array.isArray(candidate.legacy) &&
+    candidate.legacy.every((entry) => typeof entry === 'string')
+  )
 }
 
 export function hasOAuth(provider: LLMProvider): provider is ProviderWithOAuth {
@@ -70,21 +92,48 @@ export function providerSecretKeys(
 
   return {
     current: createSecretStoreKey(keyParts),
-    legacy: createLegacySmartComposerSecretStoreKey(keyParts),
+    legacy: Array.from(
+      new Set([
+        createLegacySmartComposerSecretStoreKey(keyParts),
+        createLegacyAiderSecretStoreKey(keyParts),
+        createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
+        createUnversionedLegacyAiderSecretStoreKey(keyParts),
+      ]).values(),
+    ).filter((legacyKey) => legacyKey !== createSecretStoreKey(keyParts)),
   }
 }
 
 export async function writeSecret(
   secretStore: SecretStore,
-  key: string,
+  key: string | readonly string[] | ProviderSecretKeys,
   value: string,
 ): Promise<boolean> {
-  try {
-    await writeRequiredSecret(secretStore, key, value)
-    return true
-  } catch {
+  const keys: readonly string[] = Array.isArray(key)
+    ? key
+    : isProviderSecretKeys(key)
+      ? [key.current, ...key.legacy]
+      : [key]
+  let lastError: unknown
+
+  for (const candidateKey of new Set(keys)) {
+    try {
+      await writeRequiredSecret(secretStore, candidateKey, value)
+      return true
+    } catch (error) {
+      lastError = error
+      continue
+    }
+  }
+
+  if (lastError === undefined) {
     return false
   }
+
+  if (lastError instanceof Error) {
+    throw lastError
+  }
+
+  throw new Error('Failed to write secret')
 }
 
 export async function writeRequiredSecret(
@@ -99,40 +148,42 @@ export async function readProviderSecret(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<string | null> {
-  const currentSecret = await readSecret(secretStore, keys.current)
+  const allKeys = [keys.current, ...keys.legacy]
 
-  if (currentSecret !== null) {
-    return currentSecret
-  }
-
-  const legacySecret = await readSecret(secretStore, keys.legacy)
-
-  if (legacySecret === null) {
-    return null
-  }
-
-  if (secretStore.getBackendStatus() !== 'insecure-settings-fallback') {
-    const didCopyLegacySecret = await writeSecret(
-      secretStore,
-      keys.current,
-      legacySecret,
-    )
-    if (didCopyLegacySecret) {
-      await secretStore.deleteSecret(keys.legacy)
+  for (const key of allKeys) {
+    const secret = await readSecret(secretStore, key)
+    if (secret === null) {
+      continue
     }
+
+    if (
+      key !== keys.current &&
+      secretStore.getBackendStatus() !== 'insecure-settings-fallback'
+    ) {
+      try {
+        await writeSecret(secretStore, keys.current, secret)
+        await Promise.all(
+          keys.legacy.map((legacyKey) => secretStore.deleteSecret(legacyKey)),
+        )
+      } catch (error) {
+        void error
+      }
+    }
+
+    return secret
   }
 
-  return legacySecret
+  return null
 }
 
 export async function deleteProviderSecrets(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<void> {
-  await Promise.all([
-    secretStore.deleteSecret(keys.current),
-    secretStore.deleteSecret(keys.legacy),
-  ])
+  const allKeys = [keys.current, ...keys.legacy]
+  await Promise.all(
+    allKeys.map((secretKey) => secretStore.deleteSecret(secretKey)),
+  )
 }
 
 async function readSecret(

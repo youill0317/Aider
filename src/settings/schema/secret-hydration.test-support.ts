@@ -7,26 +7,23 @@ import type { SecretStore } from '../../security/secret-store/secret-store'
 import { SETTINGS_SCHEMA_VERSION } from './migrations'
 import { SmartComposerSettings } from './setting.types'
 
-export const AIDER_OPENAI_API_KEY =
-  createSecretStoreKey({
-    providerId: 'openai',
-    providerType: 'openai',
-    field: 'apiKey',
-  })
+export const AIDER_OPENAI_API_KEY = createSecretStoreKey({
+  providerId: 'openai',
+  providerType: 'openai',
+  field: 'apiKey',
+})
 export const LEGACY_OPENAI_API_KEY =
   'smart-composer-provider-id-006f-0070-0065-006e-0061-0069-openai-api-key'
-export const AIDER_OPENAI_PLAN_ACCESS_TOKEN =
-  createSecretStoreKey({
-    providerId: 'openai-plan',
-    providerType: 'openai-plan',
-    field: 'accessToken',
-  })
-export const AIDER_OPENAI_PLAN_REFRESH_TOKEN =
-  createSecretStoreKey({
-    providerId: 'openai-plan',
-    providerType: 'openai-plan',
-    field: 'refreshToken',
-  })
+export const AIDER_OPENAI_PLAN_ACCESS_TOKEN = createSecretStoreKey({
+  providerId: 'openai-plan',
+  providerType: 'openai-plan',
+  field: 'accessToken',
+})
+export const AIDER_OPENAI_PLAN_REFRESH_TOKEN = createSecretStoreKey({
+  providerId: 'openai-plan',
+  providerType: 'openai-plan',
+  field: 'refreshToken',
+})
 export const LEGACY_OPENAI_PLAN_ACCESS_TOKEN =
   'smart-composer-provider-id-006f-0070-0065-006e-0061-0069-002d-0070-006c-0061-006e-openai-plan-access-token'
 export const LEGACY_OPENAI_PLAN_REFRESH_TOKEN =

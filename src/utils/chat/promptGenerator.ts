@@ -358,13 +358,14 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
               },
               onQueryProgressChange: onQueryProgressChange,
             })
+        const modelPromptLevel = this.getModelPromptLevel()
         filePrompt = `## Potentially Relevant Snippets from the current vault
 ${wrapUntrustedContext(
   similaritySearchResults
     .map(({ path, content, metadata }) => {
       const lineRange = getVectorLineRange(metadata)
       const newContent =
-        this.getModelPromptLevel() == PromptLevel.Default && lineRange
+        modelPromptLevel == PromptLevel.Default && lineRange
           ? this.addLineNumbersToContent({
               content,
               startLine: lineRange.startLine,

@@ -182,16 +182,20 @@ export class VoyageProvider extends BaseLLMProvider<
     const parsed = voyageContextualEmbeddingResponseSchema.parse(
       await response.json(),
     )
-    const chunks = parsed.data.flatMap((item) =>
-      item.data.map((chunk) => ({
-        embedding: chunk.embedding,
-        text: chunk.text ?? text,
-      })),
-    )
-    if (
-      chunks.length === 0 ||
-      chunks.some((chunk) => chunk.embedding.length === 0)
-    ) {
+    const chunks: ContextualEmbeddingsResult['chunks'] = []
+    let hasEmptyEmbedding = false
+    for (const item of parsed.data) {
+      for (const chunk of item.data) {
+        if (chunk.embedding.length === 0) {
+          hasEmptyEmbedding = true
+        }
+        chunks.push({
+          embedding: chunk.embedding,
+          text: chunk.text ?? text,
+        })
+      }
+    }
+    if (chunks.length === 0 || hasEmptyEmbedding) {
       throw new Error(
         'Voyage AI contextual embedding response did not include a vector.',
       )

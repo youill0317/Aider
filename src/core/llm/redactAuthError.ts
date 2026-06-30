@@ -7,12 +7,11 @@ export function redactAuthError(
   if (!(error instanceof Error)) {
     return undefined
   }
-  const redactedMessage = secretValues.reduce(
-    (message, secretValue) =>
-      secretValue.length > 0
-        ? message.split(secretValue).join('[REDACTED]')
-        : message,
-    redactSecrets(error.message),
-  )
+  let redactedMessage = redactSecrets(error.message)
+  for (const secretValue of secretValues) {
+    if (secretValue.length > 0) {
+      redactedMessage = redactedMessage.split(secretValue).join('[REDACTED]')
+    }
+  }
   return new Error(redactedMessage)
 }

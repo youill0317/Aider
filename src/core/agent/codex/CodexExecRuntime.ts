@@ -157,8 +157,9 @@ export class CodexExecRuntime implements CodexRuntime {
             handlers.onEvent(event)
           }
         } catch (error) {
-          handlers.onError?.(normalizeParserError(error))
-          reject(normalizeParserError(error))
+          const parserError = normalizeParserError(error)
+          handlers.onError?.(parserError)
+          reject(parserError)
           return
         }
 
@@ -230,11 +231,13 @@ function appendBounded(
   next: string,
   maxBytes: number,
 ): string {
-  const combined = `${previous}${next}`
-  if (combined.length <= maxBytes) {
-    return combined
+  if (maxBytes <= 0) {
+    return ''
   }
-  return combined.slice(combined.length - maxBytes)
+  if (next.length >= maxBytes) {
+    return next.slice(next.length - maxBytes)
+  }
+  return `${previous.slice(next.length - maxBytes)}${next}`
 }
 
 function clearKillTimer(timer: ReturnType<typeof setTimeout> | null): void {

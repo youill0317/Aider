@@ -260,10 +260,7 @@ export function buildWindowsSpawnOptions(
   },
   'windowsHide' | 'windowsVerbatimArguments'
 > {
-  return {
-    windowsHide: true,
-    ...(spawnSpec.windowsVerbatimArguments
-      ? { windowsVerbatimArguments: true }
-      : {}),
-  }
+  return spawnSpec.windowsVerbatimArguments
+    ? { windowsHide: true, windowsVerbatimArguments: true }
+    : { windowsHide: true }
 }

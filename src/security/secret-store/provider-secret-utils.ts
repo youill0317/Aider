@@ -89,17 +89,18 @@ export function providerSecretKeys(
     providerType: provider.type,
     field,
   }
+  const current = createSecretStoreKey(keyParts)
 
   return {
-    current: createSecretStoreKey(keyParts),
+    current,
     legacy: Array.from(
       new Set([
         createLegacySmartComposerSecretStoreKey(keyParts),
         createLegacyAiderSecretStoreKey(keyParts),
         createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
         createUnversionedLegacyAiderSecretStoreKey(keyParts),
-      ]).values(),
-    ).filter((legacyKey) => legacyKey !== createSecretStoreKey(keyParts)),
+      ]),
+    ).filter((legacyKey) => legacyKey !== current),
   }
 }
 
@@ -148,7 +149,7 @@ export async function readProviderSecret(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<string | null> {
-  const allKeys = [keys.current, ...keys.legacy]
+  const allKeys = new Set([keys.current, ...keys.legacy])
 
   for (const key of allKeys) {
     const secret = await readSecret(secretStore, key)
@@ -180,9 +181,9 @@ export async function deleteProviderSecrets(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<void> {
-  const allKeys = [keys.current, ...keys.legacy]
+  const allKeys = new Set([keys.current, ...keys.legacy])
   await Promise.all(
-    allKeys.map((secretKey) => secretStore.deleteSecret(secretKey)),
+    Array.from(allKeys, (secretKey) => secretStore.deleteSecret(secretKey)),
   )
 }
 

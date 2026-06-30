@@ -6,6 +6,9 @@ import {
 } from '../../types/mcp.types'
 import { redactSecrets } from '../../utils/security/redact-secrets'
 
+const SECRET_ENV_KEY_PATTERN =
+  /(access[-_]?key|api[-_]?key|auth|bearer|credential|pat|password|private[-_]?key|secret|ssh|token)/i
+
 function equalOptionalRecords(
   left?: Record<string, string>,
   right?: Record<string, string>,
@@ -40,9 +43,7 @@ export function equalServerParameters(
 }
 
 function isSecretEnvKey(key: string): boolean {
-  return /(access[-_]?key|api[-_]?key|auth|bearer|credential|pat|password|private[-_]?key|secret|ssh|token)/i.test(
-    key,
-  )
+  return SECRET_ENV_KEY_PATTERN.test(key)
 }
 
 export function hasAdvertisedTool(
@@ -90,11 +91,11 @@ export function redactMcpError(
   const redactedMessage =
     typeof redacted.message === 'string' ? redacted.message : value
 
-  return Object.entries(env).reduce(
-    (message, [envKey, envValue]) =>
-      isSecretEnvKey(envKey) && envValue.length > 0
-        ? message.split(envValue).join('[REDACTED]')
-        : message,
-    redactedMessage,
-  )
+  let message = redactedMessage
+  for (const [envKey, envValue] of Object.entries(env)) {
+    if (isSecretEnvKey(envKey) && envValue.length > 0) {
+      message = message.split(envValue).join('[REDACTED]')
+    }
+  }
+  return message
 }

@@ -207,15 +207,19 @@ export function withCurrentFileMentionable(
   message: ChatUserMessage,
   currentFile: TFile | null,
 ): ChatUserMessage {
-  const mentionables = message.mentionables.map((mentionable) =>
-    mentionable.type === 'current-file'
-      ? {
-          ...mentionable,
-          file: currentFile,
-        }
-      : mentionable,
-  )
-  if (mentionables.some((mentionable) => mentionable.type === 'current-file')) {
+  let hasCurrentFile = false
+  const mentionables = message.mentionables.map((mentionable) => {
+    if (mentionable.type !== 'current-file') {
+      return mentionable
+    }
+
+    hasCurrentFile = true
+    return {
+      ...mentionable,
+      file: currentFile,
+    }
+  })
+  if (hasCurrentFile) {
     return {
       ...message,
       mentionables,
@@ -241,18 +245,20 @@ export function isAgentChatTerminalMessage(message: ChatMessage): boolean {
 export function getRunningAgentChatToolCallIds(
   messages: readonly ChatMessage[],
 ): readonly string[] {
-  return messages.flatMap((message) => {
+  const toolCallIds: string[] = []
+  for (const message of messages) {
     if (message.role !== 'tool' || !isAgentChatToolMessage(message)) {
-      return []
+      continue
     }
 
-    return message.toolCalls
-      .filter(
-        (toolCall) =>
-          toolCall.response.status === ToolCallResponseStatus.Running,
-      )
-      .map((toolCall) => toolCall.request.id)
-  })
+    for (const toolCall of message.toolCalls) {
+      if (toolCall.response.status === ToolCallResponseStatus.Running) {
+        toolCallIds.push(toolCall.request.id)
+      }
+    }
+  }
+
+  return toolCallIds
 }
 
 export function isAgentChatToolMessage(message: ChatToolMessage): boolean {

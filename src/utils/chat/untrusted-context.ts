@@ -6,10 +6,8 @@ const UNTRUSTED_TOOL_OUTPUT_GUARD =
 
 function escapeUntrustedContent(content: string): string {
   return content
-    .split('</untrusted_context>')
-    .join('<\\/untrusted_context>')
-    .split('</untrusted_tool_output>')
-    .join('<\\/untrusted_tool_output>')
+    .replace(/<\/untrusted_context>/g, '<\\/untrusted_context>')
+    .replace(/<\/untrusted_tool_output>/g, '<\\/untrusted_tool_output>')
 }
 
 export function wrapUntrustedContext(content: string): string {

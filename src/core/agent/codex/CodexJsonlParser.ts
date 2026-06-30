@@ -23,21 +23,26 @@ export class CodexJsonlParser {
     this.buffer += chunk
     const events: CodexAgentEvent[] = []
 
-    let newlineIndex = this.buffer.indexOf('\n')
-    while (newlineIndex >= 0) {
-      const line = this.buffer.slice(0, newlineIndex)
-      this.buffer = this.buffer.slice(newlineIndex + 1)
-      const event = parseLine(line, this.nextLine)
-      this.nextLine += 1
+    let lineStartIndex = 0
+    try {
+      let newlineIndex = this.buffer.indexOf('\n', lineStartIndex)
+      while (newlineIndex >= 0) {
+        const line = this.buffer.slice(lineStartIndex, newlineIndex)
+        lineStartIndex = newlineIndex + 1
+        const event = parseLine(line, this.nextLine)
+        this.nextLine += 1
 
-      if (event !== undefined) {
-        events.push(event)
+        if (event !== undefined) {
+          events.push(event)
+        }
+
+        newlineIndex = this.buffer.indexOf('\n', lineStartIndex)
       }
 
-      newlineIndex = this.buffer.indexOf('\n')
+      return events
+    } finally {
+      this.buffer = this.buffer.slice(lineStartIndex)
     }
-
-    return events
   }
 
   flush(): CodexAgentEvent[] {
@@ -74,12 +79,19 @@ function parseLine(
       }
     case 'turn.started':
     case 'turn.completed':
-    case 'turn.failed':
-      return removeUndefinedValues({
-        kind: raw.type,
-        line: lineNumber,
-        turnId: readOptionalString(raw.value, 'turn_id', lineNumber),
-      })
+    case 'turn.failed': {
+      const turnId = readOptionalString(raw.value, 'turn_id', lineNumber)
+      return turnId === undefined
+        ? {
+            kind: raw.type,
+            line: lineNumber,
+          }
+        : {
+            kind: raw.type,
+            line: lineNumber,
+            turnId,
+          }
+    }
     case 'item.started':
     case 'item.updated':
     case 'item.completed':
@@ -195,10 +207,4 @@ function readRequiredRecord(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function removeUndefinedValues<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
-  ) as T
 }

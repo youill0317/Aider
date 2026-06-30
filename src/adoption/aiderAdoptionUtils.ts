@@ -61,7 +61,8 @@ export async function ensureFolderTree(
 }
 
 export function relativePath(rootDir: string, filePath: string): string {
-  return normalizePath(filePath).slice(normalizePath(rootDir).length + 1)
+  const normalizedRootDir = normalizePath(rootDir)
+  return normalizePath(filePath).slice(normalizedRootDir.length + 1)
 }
 
 export function relativeDirectory(rootDir: string, filePath: string): string {
@@ -69,9 +70,9 @@ export function relativeDirectory(rootDir: string, filePath: string): string {
 }
 
 export function parentPath(filePath: string): string {
-  const pathParts = normalizePath(filePath).split('/')
-  pathParts.pop()
-  return pathParts.join('/')
+  const normalizedPath = normalizePath(filePath)
+  const slashIndex = normalizedPath.lastIndexOf('/')
+  return slashIndex === -1 ? '' : normalizedPath.slice(0, slashIndex)
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

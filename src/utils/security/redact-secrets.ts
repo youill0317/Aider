@@ -1,25 +1,14 @@
 const REDACTED = '[REDACTED]'
 
-const SECRET_KEY_PATTERNS = [
-  /api[_-]?key/i,
-  /access[_-]?key/i,
-  /access[_-]?token/i,
-  /refresh[_-]?token/i,
-  /^code$/i,
-  /authorization/i,
-  /private[_-]?key/i,
-  /secret/i,
-  /ssh/i,
-  /password/i,
-  /token/i,
-] as const
+const SECRET_KEY_PATTERN =
+  /api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|^code$|authorization|private[_-]?key|secret|ssh|password|token/i
 
 const BEARER_TOKEN_PATTERN = /(Authorization:\s*Bearer\s+)[^\s'",}]+/gi
 const QUERY_SECRET_PATTERN =
   /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|secret|token|code)=)[^&\s'",}]+/gi
 
 function isSecretKey(key: string): boolean {
-  return SECRET_KEY_PATTERNS.some((pattern) => pattern.test(key))
+  return SECRET_KEY_PATTERN.test(key)
 }
 
 function redactString(value: string): string {
@@ -44,12 +33,11 @@ function redactString(value: string): string {
 }
 
 function redactRecord(value: object): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value).map(([key, nestedValue]) => [
-      key,
-      isSecretKey(key) ? REDACTED : redactSecrets(nestedValue),
-    ]),
-  )
+  const redacted: Record<string, unknown> = {}
+  for (const [key, nestedValue] of Object.entries(value)) {
+    redacted[key] = isSecretKey(key) ? REDACTED : redactSecrets(nestedValue)
+  }
+  return redacted
 }
 
 export function redactSecrets(value: string): string

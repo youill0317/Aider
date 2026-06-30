@@ -287,11 +287,9 @@ export class CodexToolRunner {
   }
 
   private resolveDefaultCwd(): string {
-    if (
-      this.settings.agent.codex.cwdMode === 'custom' &&
-      this.settings.agent.codex.customCwd.trim()
-    ) {
-      return this.settings.agent.codex.customCwd.trim()
+    const customCwd = this.settings.agent.codex.customCwd.trim()
+    if (this.settings.agent.codex.cwdMode === 'custom' && customCwd) {
+      return customCwd
     }
     if (this.app.vault.adapter instanceof FileSystemAdapter) {
       return this.app.vault.adapter.getBasePath()

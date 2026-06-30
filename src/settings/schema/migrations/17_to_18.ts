@@ -43,6 +43,10 @@ const DEFAULT_VOYAGE_EMBEDDING_MODELS = [
   },
 ] as const
 
+const DEFAULT_VOYAGE_EMBEDDING_MODEL_IDS = new Set<string>(
+  DEFAULT_VOYAGE_EMBEDDING_MODELS.map((model) => model.id),
+)
+
 export const migrateFrom17To18: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 18
@@ -57,11 +61,10 @@ function getMigratedEmbeddingModels(data: Record<string, unknown>): unknown[] {
     return [...DEFAULT_VOYAGE_EMBEDDING_MODELS]
   }
 
-  const defaultModelIds = new Set<string>(
-    DEFAULT_VOYAGE_EMBEDDING_MODELS.map((model) => model.id),
-  )
   const customModels = data.embeddingModels.filter(
-    (model) => !isRecord(model) || !defaultModelIds.has(String(model.id)),
+    (model) =>
+      !isRecord(model) ||
+      !DEFAULT_VOYAGE_EMBEDDING_MODEL_IDS.has(String(model.id)),
   )
 
   return [...customModels, ...DEFAULT_VOYAGE_EMBEDDING_MODELS]

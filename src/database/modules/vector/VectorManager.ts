@@ -418,34 +418,32 @@ Please report this issue to the developer if it persists.`,
           )
         }
 
-        embeddingChunks.push(
-          ...result.chunks.map((chunk): InsertEmbedding => {
-            if (chunk.text.length === 0) {
-              throw new Error(
-                `Contextual chunk content is empty in file: ${file.path}`,
-              )
-            }
-            if (chunk.text.includes('\x00')) {
-              throw new Error(
-                `Contextual chunk content contains null bytes in file: ${file.path}`,
-              )
-            }
+        for (const chunk of result.chunks) {
+          if (chunk.text.length === 0) {
+            throw new Error(
+              `Contextual chunk content is empty in file: ${file.path}`,
+            )
+          }
+          if (chunk.text.includes('\x00')) {
+            throw new Error(
+              `Contextual chunk content contains null bytes in file: ${file.path}`,
+            )
+          }
 
-            return {
-              path: file.path,
-              mtime: file.stat.mtime,
-              content: chunk.text,
-              model: embeddingModel.id,
+          embeddingChunks.push({
+            path: file.path,
+            mtime: file.stat.mtime,
+            content: chunk.text,
+            model: embeddingModel.id,
+            dimension: embeddingModel.dimension,
+            embedding: chunk.embedding,
+            metadata: createVoyageContextualMetadata({
+              chunkerVersion: result.chunkerVersion,
               dimension: embeddingModel.dimension,
-              embedding: chunk.embedding,
-              metadata: createVoyageContextualMetadata({
-                chunkerVersion: result.chunkerVersion,
-                dimension: embeddingModel.dimension,
-                modelId: embeddingModel.id,
-              }),
-            }
-          }),
-        )
+              modelId: embeddingModel.id,
+            }),
+          })
+        }
       } catch (error) {
         failedFiles.push({
           path: file.path,

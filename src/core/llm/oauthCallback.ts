@@ -28,11 +28,11 @@ export function decideOAuthCallback(
     return { kind: 'not-found' }
   }
 
-  const code = params.requestUrl.searchParams.get('code')
-  const incomingState = params.requestUrl.searchParams.get('state')
-  const error = params.requestUrl.searchParams.get('error')
-  const errorDescription =
-    params.requestUrl.searchParams.get('error_description')
+  const searchParams = params.requestUrl.searchParams
+  const code = searchParams.get('code')
+  const incomingState = searchParams.get('state')
+  const error = searchParams.get('error')
+  const errorDescription = searchParams.get('error_description')
 
   if (!incomingState) {
     return createErrorDecision({

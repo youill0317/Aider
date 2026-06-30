@@ -95,9 +95,9 @@ export function upsertAgentCommandMessage(
     return [...messages, commandMessage]
   }
 
-  return messages.map((message, index) =>
-    index === existingIndex ? commandMessage : message,
-  )
+  const nextMessages = [...messages]
+  nextMessages[existingIndex] = commandMessage
+  return nextMessages
 }
 
 function parseCodexCommandExecutionItem(

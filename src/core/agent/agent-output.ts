@@ -26,10 +26,14 @@ export function extractAgentText(event: CodexAgentEvent): string {
     return content
   }
   if (Array.isArray(content)) {
-    return content
-      .map((item) => extractContentPartText(item))
-      .filter((text) => text.length > 0)
-      .join('\n')
+    const textParts: string[] = []
+    for (const item of content) {
+      const text = extractContentPartText(item)
+      if (text.length > 0) {
+        textParts.push(text)
+      }
+    }
+    return textParts.join('\n')
   }
 
   const text = event.item.text
@@ -40,10 +44,14 @@ function extractContentPartText(value: unknown): string {
   if (typeof value === 'string') {
     return value
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    !('text' in value)
+  ) {
     return ''
   }
 
-  const part = value as Record<string, unknown>
-  return typeof part.text === 'string' ? part.text : ''
+  return typeof value.text === 'string' ? value.text : ''
 }

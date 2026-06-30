@@ -33,11 +33,9 @@ export async function adoptJsonDatabase(
     adapter,
     paths.canonicalJsonRoot,
   )
-  const legacyFiles = (
-    await listJsonFilesRecursively(adapter, paths.legacyJsonRoot)
-  )
-    .filter((filePath) => filePath.endsWith('.json'))
-    .sort()
+  const legacyFiles = [
+    ...(await listJsonFilesRecursively(adapter, paths.legacyJsonRoot)),
+  ].sort()
   let skippedMalformedFiles = 0
 
   for (const legacyFile of legacyFiles) {
@@ -87,9 +85,7 @@ async function collectJsonRecordKeys(
   }
 
   const keys = new Set<JsonRecordKey>()
-  const files = (await listJsonFilesRecursively(adapter, rootDir)).filter(
-    (filePath) => filePath.endsWith('.json'),
-  )
+  const files = await listJsonFilesRecursively(adapter, rootDir)
   for (const filePath of files) {
     const recordKeys = parseJsonRecordKeys(
       await adapter.read(filePath),

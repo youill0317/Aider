@@ -35,20 +35,24 @@ type SecretStoreIdentifier =
 
 const CHUNKED_SECRET_PREFIX = '__aider_secret_chunked_v1__:'
 const SECRET_CHUNK_SIZE = 1000
+const CAMEL_CASE_BOUNDARY_PATTERN = /([a-z0-9])([A-Z])/g
+const KEY_PART_SEPARATOR_PATTERN = /[\s_-]/
+const NON_ALNUM_KEY_PART_PATTERN = /[^a-z0-9]+/g
+const EDGE_DASHES_PATTERN = /^-+|-+$/g
 
 type ChunkedSecretMetadata = {
   readonly count: number
 }
 
 function normalizeSecretStoreKeyPart(value: string): string {
-  const normalizedValue = /[\s_-]/.test(value)
+  const normalizedValue = KEY_PART_SEPARATOR_PATTERN.test(value)
     ? value
-    : value.replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    : value.replace(CAMEL_CASE_BOUNDARY_PATTERN, '$1-$2')
 
   return normalizedValue
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(NON_ALNUM_KEY_PART_PATTERN, '-')
+    .replace(EDGE_DASHES_PATTERN, '')
 }
 
 function encodeProviderId(value: string): string {

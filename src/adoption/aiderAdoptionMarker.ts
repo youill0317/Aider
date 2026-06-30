@@ -75,11 +75,12 @@ function parseAdoptionMarker(content: string): AiderAdoptionMarker {
     return { resources: {} }
   }
 
-  let resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>> = {}
+  const resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>> =
+    {}
   for (const resource of ADOPTION_RESOURCES) {
     const status = parseAdoptionResourceStatus(value.resources[resource])
     if (status !== null) {
-      resources = { ...resources, [resource]: status }
+      resources[resource] = status
     }
   }
   return { resources }

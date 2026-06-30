@@ -29,7 +29,7 @@ export function createRuntimeNodeAccess(): RuntimeNodeAccess {
   const path = runtimeRequire('path')
 
   return {
-    spawn: (command, args, options) => spawn(command, [...args], options),
+    spawn: (command, args, options) => spawn(command, args, options),
     spawnSpecResolverOptions: {
       comspec: process.env.ComSpec ?? process.env.comspec,
       env: process.env,

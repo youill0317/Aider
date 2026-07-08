@@ -16,9 +16,9 @@ The original Smart Composer README is preserved below for provenance. This top s
 
 ### Current release
 
-- Version: `2.0.4`
+- Version: `2.0.5`
 - Plugin id: `aider`
-- GitHub release: [2.0.4](https://github.com/youill0317/Aider/releases/tag/2.0.4)
+- GitHub release: [2.0.5](https://github.com/youill0317/Aider/releases/tag/2.0.5)
 - Release assets: `main.js`, `manifest.json`, `styles.css`
 
 ### What Aider adds on top of Smart Composer

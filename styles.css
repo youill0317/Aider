@@ -1692,6 +1692,93 @@ button.smtcmp-chat-input-model-select {
   }
 }
 
+button.smtcmp-tool-activity-summary {
+  width: 100%;
+  height: auto;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+button.smtcmp-tool-activity-summary:hover,
+button.smtcmp-tool-activity-summary:focus,
+button.smtcmp-tool-activity-summary:active {
+  border: 0;
+  box-shadow: none;
+  background-color: var(--background-modifier-hover);
+}
+
+.smtcmp-tool-activity-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.smtcmp-tool-activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  padding: 0 var(--size-4-1);
+}
+
+button.smtcmp-tool-activity-step {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  padding: var(--size-2-3) var(--size-4-1);
+  border: 0;
+  border-radius: var(--radius-s);
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+button.smtcmp-tool-activity-step:hover,
+button.smtcmp-tool-activity-step:focus,
+button.smtcmp-tool-activity-step--selected {
+  background-color: var(--background-modifier-hover);
+  border: 0;
+  box-shadow: none;
+}
+
+.smtcmp-tool-activity-step-status {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.smtcmp-tool-activity-step-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-monospace);
+  font-weight: var(--font-medium);
+}
+
+.smtcmp-tool-activity-step-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.smtcmp-tool-activity-detail {
+  border-top: var(--input-border-width) solid var(--background-modifier-border);
+}
+
 .smtcmp-toolcall-footer {
   display: flex;
   justify-content: end;

@@ -60,6 +60,27 @@ describe('public URL fetch boundary', () => {
     expect(mockHttpsRequest).not.toHaveBeenCalled()
   })
 
+  it('falls back to the next validated public DNS answer', async () => {
+    mockLookup.mockResolvedValue([
+      { address: '2606:4700:4700::1111', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ])
+    mockHttpsRequest
+      .mockImplementationOnce(() => {
+        const request = new FakeRequest()
+        queueMicrotask(() => request.emit('error', new Error('unreachable')))
+        return request
+      })
+      .mockImplementationOnce(fakeRequest(200, {}, 'ok'))
+
+    await expect(fetchPublicUrl('https://public.example')).resolves.toEqual(
+      expect.objectContaining({ text: 'ok' }),
+    )
+    expect(
+      mockHttpsRequest.mock.calls.map(([options]) => options.hostname),
+    ).toEqual(['2606:4700:4700::1111', '93.184.216.34'])
+  })
+
   it('validates a redirect before making the next request', async () => {
     mockHttpsRequest.mockImplementation(
       fakeRequest(302, { location: 'http://127.0.0.1/admin' }),

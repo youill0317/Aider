@@ -146,11 +146,12 @@ async function requestPublicUrl(
     throw new Error('URL hostname resolves to a private or special address')
   }
 
-  const destination = addresses[0]
   const client = url.protocol === 'https:' ? https : http
 
   return new Promise((resolve, reject) => {
     let settled = false
+    let activeRequest: import('http').ClientRequest | undefined
+    let addressIndex = 0
     const deadline: { timer?: ReturnType<typeof setTimeout> } = {}
     const clearDeadline = () => {
       if (deadline.timer !== undefined) clearTimeout(deadline.timer)
@@ -162,79 +163,97 @@ async function requestPublicUrl(
         reject(error)
       }
     }
-    const requestOptions: import('https').RequestOptions = {
-      protocol: url.protocol,
-      hostname: destination.address,
-      family: destination.family,
-      port: url.protocol === 'https:' ? 443 : 80,
-      path: `${url.pathname}${url.search}`,
-      method: 'GET',
-      headers: {
-        ...suppliedHeaders,
-        'Accept-Encoding': 'identity',
-        Host: url.host,
-      },
-      ...(url.protocol === 'https:' && !isIpAddress(hostname)
-        ? { servername: hostname }
-        : {}),
-    }
-    const request = client.request(requestOptions, (response) => {
-      const headers = normalizeHeaders(response.headers)
-      const status = response.statusCode ?? 0
-
-      if ([301, 302, 303, 307, 308].includes(status) && headers.location) {
-        settled = true
-        clearDeadline()
-        response.destroy()
-        resolve({ status, headers, text: '' })
-        return
+    const startRequest = () => {
+      const destination = addresses[addressIndex++]
+      let responseStarted = false
+      let attemptFinished = false
+      const requestOptions: import('https').RequestOptions = {
+        protocol: url.protocol,
+        hostname: destination.address,
+        family: destination.family,
+        port: url.protocol === 'https:' ? 443 : 80,
+        path: `${url.pathname}${url.search}`,
+        method: 'GET',
+        headers: {
+          ...suppliedHeaders,
+          'Accept-Encoding': 'identity',
+          Host: url.host,
+        },
+        ...(url.protocol === 'https:' && !isIpAddress(hostname)
+          ? { servername: hostname }
+          : {}),
       }
-      if (
-        headers['content-encoding'] &&
-        headers['content-encoding'] !== 'identity'
-      ) {
-        response.destroy()
-        fail(new Error('Compressed URL responses are not accepted'))
-        return
-      }
+      const request = client.request(requestOptions, (response) => {
+        responseStarted = true
+        const headers = normalizeHeaders(response.headers)
+        const status = response.statusCode ?? 0
 
-      const contentLength = Number(headers['content-length'])
-      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-        response.destroy()
-        fail(new Error('URL response is too large'))
-        return
-      }
+        if ([301, 302, 303, 307, 308].includes(status) && headers.location) {
+          settled = true
+          clearDeadline()
+          response.destroy()
+          resolve({ status, headers, text: '' })
+          return
+        }
+        if (
+          headers['content-encoding'] &&
+          headers['content-encoding'] !== 'identity'
+        ) {
+          response.destroy()
+          fail(new Error('Compressed URL responses are not accepted'))
+          return
+        }
 
-      const chunks: Buffer[] = []
-      let size = 0
-      response.on('data', (chunk: Buffer | string) => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-        size += buffer.length
-        if (size > maxBytes) {
+        const contentLength = Number(headers['content-length'])
+        if (Number.isFinite(contentLength) && contentLength > maxBytes) {
           response.destroy()
           fail(new Error('URL response is too large'))
           return
         }
-        chunks.push(buffer)
+
+        const chunks: Buffer[] = []
+        let size = 0
+        response.on('data', (chunk: Buffer | string) => {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          size += buffer.length
+          if (size > maxBytes) {
+            response.destroy()
+            fail(new Error('URL response is too large'))
+            return
+          }
+          chunks.push(buffer)
+        })
+        response.on('end', () => {
+          if (!settled) {
+            settled = true
+            clearDeadline()
+            resolve({ status, headers, text: Buffer.concat(chunks).toString() })
+          }
+        })
+        response.on('error', fail)
       })
-      response.on('end', () => {
-        if (!settled) {
-          settled = true
-          clearDeadline()
-          resolve({ status, headers, text: Buffer.concat(chunks).toString() })
+
+      activeRequest = request
+      request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        request.destroy(new Error('URL request timed out'))
+      })
+      request.on('error', (error) => {
+        if (attemptFinished || settled) return
+        attemptFinished = true
+        if (!responseStarted && addressIndex < addresses.length) {
+          startRequest()
+        } else {
+          fail(error)
         }
       })
-      response.on('error', fail)
-    })
+      request.end()
+    }
 
-    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
-      request.destroy(new Error('URL request timed out'))
-    })
     deadline.timer = setTimeout(() => {
-      request.destroy(new Error('URL request deadline exceeded'))
+      fail(new Error('URL request deadline exceeded'))
+      activeRequest?.destroy()
     }, REQUEST_TIMEOUT_MS)
-    request.on('error', fail)
-    request.end()
+    startRequest()
   })
 }
 

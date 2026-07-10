@@ -278,6 +278,23 @@ describe('withCurrentFileMentionable', () => {
 })
 
 describe('buildAgentCommandMessageFromEvent', () => {
+  it('bounds activity text before it can be persisted', () => {
+    const message = buildAgentCommandMessageFromEvent({
+      kind: 'item.completed',
+      line: 1,
+      item: {
+        id: 'large-command',
+        type: 'command_execution',
+        command: 'echo output',
+        aggregated_output: 'x'.repeat(30_000),
+        exit_code: 0,
+        status: 'completed',
+      },
+    })
+
+    expect(message?.output).toHaveLength(24_000)
+  })
+
   it('maps Codex command execution events to visible command messages', () => {
     const message = buildAgentCommandMessageFromEvent({
       kind: 'item.completed',

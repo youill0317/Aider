@@ -1,6 +1,6 @@
 export type SecretBackendStatus =
   | 'obsidian-secret-storage'
-  | 'insecure-settings-fallback'
+  | 'memory-only-fallback'
 
 export type SecretStore = {
   readonly getSecret: (key: string) => Promise<string | null>
@@ -131,7 +131,7 @@ function createFallbackSecretStore(): SecretStore {
   const values = new Map<string, string>()
 
   return {
-    getBackendStatus: () => 'insecure-settings-fallback',
+    getBackendStatus: () => 'memory-only-fallback',
     getSecret: async (key) => {
       const value = values.get(key)
       return value === undefined || value === '' ? null : value
@@ -311,6 +311,10 @@ function createNamespacedSecretStoreKey(
 
 export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
   return createNamespacedSecretStoreKey('aider', parts)
+}
+
+export function createMcpEnvSecretStoreKey(serverId: string): string {
+  return `aider-mcp-server-${encodeProviderId(serverId)}-env`
 }
 
 function createProviderIdParts(

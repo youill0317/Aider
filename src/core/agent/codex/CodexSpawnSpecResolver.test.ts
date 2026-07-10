@@ -55,11 +55,49 @@ describe('CodexSpawnSpecResolver', () => {
 
     // Then: Node does not spawn the .cmd file directly.
     expect(spawnSpec.command).toBe('C:\\Windows\\System32\\cmd.exe')
-    expect(spawnSpec.args[0]).toBe('/d')
-    expect(spawnSpec.args).toContain('/c')
-    expect(spawnSpec.args.join(' ')).toContain('codex.cmd')
+    expect(spawnSpec.args).toEqual([
+      '/d',
+      '/s',
+      '/c',
+      '"C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd ^^^"exec^^^" ^^^"--cd^^^" ^^^"C:\\My^^^ Vault^^^""',
+    ])
     expect(spawnSpec.windowsVerbatimArguments).toBe(true)
   })
+
+  it.each([
+    [
+      'environment expansion',
+      '%CMDCMDLINE% & echo injected',
+      '^^^"^^^%CMDCMDLINE^^^%^^^ ^^^&^^^ echo^^^ injected^^^"',
+    ],
+    [
+      'delayed environment expansion',
+      '!ComSpec! | echo injected',
+      '^^^"^^^!ComSpec^^^!^^^ ^^^|^^^ echo^^^ injected^^^"',
+    ],
+    [
+      'quote breakout',
+      'gpt-5" & echo injected & "',
+      '^^^"gpt-5\\^^^"^^^ ^^^&^^^ echo^^^ injected^^^ ^^^&^^^ \\^^^"^^^"',
+    ],
+  ])(
+    'escapes model arguments containing %s payloads',
+    (_kind, model, escaped) => {
+      const resolver = new CodexSpawnSpecResolver()
+      const command = 'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd'
+
+      const spawnSpec = resolver.resolve(['codex', 'exec', '--model', model], {
+        env: { APPDATA: 'C:\\Users\\me\\AppData\\Roaming', PATH: '' },
+        fileSystem: { existsFile: (filePath) => filePath === command },
+        pathTools: windowsPathTools,
+        platform: 'win32',
+      })
+
+      expect(spawnSpec.args[3]).toBe(
+        `"${command} ^^^"exec^^^" ^^^"--model^^^" ${escaped}"`,
+      )
+    },
+  )
 })
 
 const windowsPathTools = {

@@ -1,5 +1,8 @@
 import { Annotation } from '../../types/llm/response'
-import { fetchUrlTitle } from '../fetch-utils'
+import { fetchUrlTitle, isPublicHttpUrl } from '../fetch-utils'
+
+const MAX_TITLE_FETCHES_PER_BATCH = 5
+const MAX_CACHED_TITLES = 100
 
 // global cache for URL titles
 const urlTitleCache = new Map<
@@ -17,8 +20,11 @@ export function fetchAnnotationTitles(
   annotations
     .filter(
       (annotation) =>
-        annotation.type === 'url_citation' && !annotation.url_citation.title,
+        annotation.type === 'url_citation' &&
+        !annotation.url_citation.title &&
+        isPublicHttpUrl(annotation.url_citation.url),
     )
+    .slice(0, MAX_TITLE_FETCHES_PER_BATCH)
     .forEach((annotation) => {
       const url = annotation.url_citation.url
       if (urlTitleCache.has(url)) {
@@ -26,7 +32,7 @@ export function fetchAnnotationTitles(
         if (cached?.status === 'fetched') {
           annotation.url_citation.title = cached.title ?? undefined
         }
-      } else {
+      } else if (urlTitleCache.size < MAX_CACHED_TITLES) {
         urlTitleCache.set(url, { status: 'pending' })
         fetchUrlTitle(url)
           .then((title) => {

@@ -107,6 +107,7 @@ export class VectorManager {
     updateProgress?: (indexProgress: IndexProgress) => void,
   ): Promise<void> {
     let filesToIndex: TFile[]
+    let indexChanged = false
     if (options.reindexAll) {
       filesToIndex = await this.getFilesToIndex({
         embeddingModel: embeddingModel,
@@ -115,9 +116,15 @@ export class VectorManager {
         reindexAll: true,
       })
       await this.repository.clearAllVectors(embeddingModel)
+      indexChanged = true
     } else {
       const indexedFiles = await this.repository.getIndexedFiles(embeddingModel)
-      await this.deleteVectorsForDeletedFiles(indexedFiles, embeddingModel)
+      indexChanged = await this.deleteVectorsForStaleFiles(
+        indexedFiles,
+        embeddingModel,
+        options.excludePatterns,
+        options.includePatterns,
+      )
       filesToIndex = await this.getFilesToIndex({
         embeddingModel: embeddingModel,
         excludePatterns: options.excludePatterns,
@@ -129,10 +136,14 @@ export class VectorManager {
           filesToIndex.map((file) => file.path),
           embeddingModel,
         )
+        indexChanged = true
       }
     }
 
     if (filesToIndex.length === 0) {
+      if (indexChanged) {
+        await this.requestSave()
+      }
       return
     }
 
@@ -490,19 +501,27 @@ Please report this issue to the developer if it persists.`,
     await this.requestSave()
   }
 
-  private async deleteVectorsForDeletedFiles(
+  private async deleteVectorsForStaleFiles(
     indexedFiles: IndexedVectorFile[],
     embeddingModel: EmbeddingModelClient,
+    excludePatterns: string[],
+    includePatterns: string[],
   ) {
-    const deletedFilePaths = [
+    const staleFilePaths = [
       ...new Set(indexedFiles.map(({ path }) => path)),
-    ].filter((filePath) => !this.app.vault.getAbstractFileByPath(filePath))
-    if (deletedFilePaths.length > 0) {
-      await this.repository.deleteVectorsForMultipleFiles(
-        deletedFilePaths,
-        embeddingModel,
-      )
+    ].filter(
+      (filePath) =>
+        !this.app.vault.getAbstractFileByPath(filePath) ||
+        !this.matchesIndexFilters(filePath, excludePatterns, includePatterns),
+    )
+    if (staleFilePaths.length === 0) {
+      return false
     }
+    await this.repository.deleteVectorsForMultipleFiles(
+      staleFilePaths,
+      embeddingModel,
+    )
+    return true
   }
 
   private async getFilesToIndex({
@@ -520,15 +539,9 @@ Please report this issue to the developer if it persists.`,
   }): Promise<TFile[]> {
     let filesToIndex = this.app.vault.getMarkdownFiles()
 
-    filesToIndex = filesToIndex.filter((file) => {
-      return !excludePatterns.some((pattern) => minimatch(file.path, pattern))
-    })
-
-    if (includePatterns.length > 0) {
-      filesToIndex = filesToIndex.filter((file) => {
-        return includePatterns.some((pattern) => minimatch(file.path, pattern))
-      })
-    }
+    filesToIndex = filesToIndex.filter((file) =>
+      this.matchesIndexFilters(file.path, excludePatterns, includePatterns),
+    )
 
     if (reindexAll) {
       return filesToIndex
@@ -576,6 +589,18 @@ Please report this issue to the developer if it persists.`,
     ).then((files) => files.filter(Boolean) as TFile[])
 
     return filesToIndex
+  }
+
+  private matchesIndexFilters(
+    filePath: string,
+    excludePatterns: string[],
+    includePatterns: string[],
+  ): boolean {
+    return (
+      !excludePatterns.some((pattern) => minimatch(filePath, pattern)) &&
+      (includePatterns.length === 0 ||
+        includePatterns.some((pattern) => minimatch(filePath, pattern)))
+    )
   }
 
   async getEmbeddingStats(): Promise<EmbeddingDbStats[]> {

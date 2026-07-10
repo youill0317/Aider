@@ -1,4 +1,4 @@
-const WINDOWS_CMD_ARGUMENT_CHARS = /[\s"&<>|{}^=;!'+,`~()%@[\]]/u
+const WINDOWS_CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g
 
 type CodexFileSystem = {
   readonly existsFile: (filePath: string) => boolean
@@ -50,9 +50,10 @@ export class CodexSpawnSpecResolver {
       }) ?? requestedCommand
 
     if (platform === 'win32' && command.toLowerCase().endsWith('.cmd')) {
-      const shellCommand = [command, ...args]
-        .map(quoteWindowsShellArgument)
-        .join(' ')
+      const shellCommand = [
+        escapeWindowsShellCommand(command),
+        ...args.map(escapeWindowsCmdShimArgument),
+      ].join(' ')
 
       return {
         args: ['/d', '/s', '/c', `"${shellCommand}"`],
@@ -241,14 +242,17 @@ function defaultPathTools(platform: NodeJS.Platform): CodexPathTools {
   }
 }
 
-function quoteWindowsShellArgument(value: string): string {
-  if (!value.length) {
-    return '""'
-  }
-  if (!WINDOWS_CMD_ARGUMENT_CHARS.test(value)) {
-    return value
-  }
-  return `"${value.replace(/"/g, '""')}"`
+function escapeWindowsShellCommand(value: string): string {
+  return value.replace(WINDOWS_CMD_META_CHARS, '^$1')
+}
+
+function escapeWindowsCmdShimArgument(value: string): string {
+  const quotedValue = `"${value
+    .replace(/(?=(\\+?)?)\1"/g, '$1$1\\"')
+    .replace(/(?=(\\+?)?)\1$/, '$1$1')}"`
+
+  // npm .cmd shims parse forwarded arguments twice.
+  return escapeWindowsShellCommand(escapeWindowsShellCommand(quotedValue))
 }
 
 export function buildWindowsSpawnOptions(

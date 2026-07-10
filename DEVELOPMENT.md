@@ -2,16 +2,14 @@
 
 ## Public Distribution Security Model
 
-Credential storage prefers Obsidian `app.secretStorage` through feature detection. When `app.secretStorage` is unavailable, Aider falls back to ordinary plugin settings so existing users on older Obsidian builds do not lose access or see a new setup flow. That fallback must be documented as `insecure-settings-fallback`; it must not be described as secure storage.
-
-The current `minAppVersion` can remain unchanged only because fallback support exists. If a release ever requires secure storage for every user, the plugin must require Obsidian 1.11.4+ and update the manifest and release notes together.
+Credential storage uses Obsidian `app.secretStorage`. Aider requires Obsidian 1.11.4+; unsupported runtimes use a memory-only fallback so credentials are never written to ordinary plugin settings.
 
 Security-sensitive data flow to preserve in future changes:
 
 - API keys and OAuth tokens should be persisted through the secret boundary, not raw settings, whenever Obsidian `app.secretStorage` is available.
 - Subscription OAuth uses third-party/internal endpoints and remains use-at-your-own-risk.
 - MCP tools run local commands with structured `{ command, args, env }` parameters. Do not convert them to shell strings.
-- MCP server `env` values remain ordinary plugin settings and are not migrated into Obsidian `app.secretStorage`.
+- MCP server `env` values are persisted as one SecretStorage entry per server and hydrated only at runtime.
 - MCP tool output, web content, selected vault content, current-file content, and Vault Search/RAG snippets can be sent to LLM providers and must be treated as untrusted model input.
 
 ## PGlite in Obsidian Environment

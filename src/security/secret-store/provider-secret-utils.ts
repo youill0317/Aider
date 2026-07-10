@@ -159,7 +159,7 @@ export async function readProviderSecret(
 
     if (
       key !== keys.current &&
-      secretStore.getBackendStatus() !== 'insecure-settings-fallback'
+      secretStore.getBackendStatus() !== 'memory-only-fallback'
     ) {
       try {
         await writeSecret(secretStore, keys.current, secret)

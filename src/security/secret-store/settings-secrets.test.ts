@@ -4,15 +4,21 @@ import {
   deleteProviderSecrets,
   providerSecretKeys,
 } from './provider-secret-utils'
-import { createSecretStore, createSecretStoreKey } from './secret-store'
+import {
+  createMcpEnvSecretStoreKey,
+  createSecretStore,
+  createSecretStoreKey,
+} from './secret-store'
 import type { SecretStore } from './secret-store'
 import {
   hydrateSettingsSecrets,
   persistSettingsUpdate,
+  sanitizeSettingsForPersistence,
 } from './settings-secrets'
 
 function createSettings(
   providers: SmartComposerSettings['providers'],
+  servers: SmartComposerSettings['mcp']['servers'] = [],
 ): SmartComposerSettings {
   return {
     version: 20,
@@ -32,7 +38,7 @@ function createSettings(
       includePatterns: [],
     },
     mcp: {
-      servers: [],
+      servers,
     },
     chatOptions: {
       includeCurrentFileContent: true,
@@ -54,6 +60,38 @@ function createSettings(
 }
 
 describe('settings secret persistence', () => {
+  it('stores MCP environment values outside ordinary settings', async () => {
+    const secretStore = createSecretStore({ app: {} })
+    const server = {
+      id: 'github',
+      enabled: true,
+      parameters: {
+        command: 'node',
+        env: { GITHUB_TOKEN: 'mcp-secret-token' },
+      },
+      toolOptions: {},
+    }
+    const runtimeSettings = createSettings([], [server])
+
+    const persistedSettings = await sanitizeSettingsForPersistence(
+      runtimeSettings,
+      secretStore,
+    )
+    const hydratedSettings = await hydrateSettingsSecrets(
+      persistedSettings,
+      secretStore,
+    )
+
+    expect(JSON.stringify(persistedSettings)).not.toContain('mcp-secret-token')
+    expect(persistedSettings.mcp.servers[0].parameters.env).toBeUndefined()
+    expect(hydratedSettings.mcp.servers[0].parameters.env).toEqual(
+      server.parameters.env,
+    )
+    await expect(
+      secretStore.getSecret(createMcpEnvSecretStoreKey(server.id)),
+    ).resolves.toContain('mcp-secret-token')
+  })
+
   it('does not save blank tokens when secret persistence fails', async () => {
     // Given: Obsidian reports SecretStorage support but rejects secret writes.
     let runtimeSettings: SmartComposerSettings | undefined

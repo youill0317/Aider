@@ -2,6 +2,7 @@ import type { CodexAgentEvent } from '../../core/agent/types'
 import type { ChatAgentCommandMessage, ChatMessage } from '../../types/chat'
 
 type AgentActivityStatus = ChatAgentCommandMessage['status']
+const MAX_AGENT_ACTIVITY_CHARS = 24_000
 
 type CodexCommandExecutionItem = {
   readonly id: string
@@ -44,9 +45,9 @@ export function buildAgentCommandMessageFromEvent(
       role: 'agent-command',
       id: `agent-command:${item.id}`,
       title: '>_',
-      detail: item.command,
+      detail: boundActivityText(item.command),
       input: '',
-      output: item.aggregatedOutput,
+      output: boundActivityText(item.aggregatedOutput),
       exitCode: item.exitCode,
       kind: 'command',
       status: getCommandStatus(item),
@@ -59,9 +60,9 @@ export function buildAgentCommandMessageFromEvent(
       role: 'agent-command',
       id: `agent-command:${webSearchItem.id}`,
       title: 'Web search',
-      detail: webSearchItem.query || 'Searching',
+      detail: boundActivityText(webSearchItem.query || 'Searching'),
       input: formatUnknown(webSearchItem.action),
-      output: webSearchItem.query,
+      output: boundActivityText(webSearchItem.query),
       kind: 'web-search',
       status: getLifecycleStatus(event.kind),
     }
@@ -72,10 +73,12 @@ export function buildAgentCommandMessageFromEvent(
     return {
       role: 'agent-command',
       id: `agent-command:${mcpToolItem.id}`,
-      title: `${mcpToolItem.server}:${mcpToolItem.tool}`,
-      detail: mcpToolItem.status,
+      title: boundActivityText(`${mcpToolItem.server}:${mcpToolItem.tool}`),
+      detail: boundActivityText(mcpToolItem.status),
       input: formatUnknown(mcpToolItem.arguments),
-      output: mcpToolItem.error ?? formatUnknown(mcpToolItem.result),
+      output: boundActivityText(
+        mcpToolItem.error ?? formatUnknown(mcpToolItem.result),
+      ),
       kind: 'mcp-tool',
       status: getToolStatus(mcpToolItem.status),
     }
@@ -196,9 +199,13 @@ function formatUnknown(value: unknown): string {
     return ''
   }
   if (typeof value === 'string') {
-    return value
+    return boundActivityText(value)
   }
-  return JSON.stringify(value, null, 2)
+  return boundActivityText(JSON.stringify(value, null, 2) ?? '')
+}
+
+function boundActivityText(value: string): string {
+  return value.slice(0, MAX_AGENT_ACTIVITY_CHARS)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

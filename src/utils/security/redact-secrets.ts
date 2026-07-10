@@ -68,3 +68,16 @@ export function redactSecrets(value: unknown): unknown {
 
   return value
 }
+
+export function redactEnvironmentSecrets(
+  value: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  let redacted = redactString(value)
+  for (const [key, secret] of Object.entries(env)) {
+    if (isSecretKey(key) && secret) {
+      redacted = redacted.split(secret).join(REDACTED)
+    }
+  }
+  return redacted
+}

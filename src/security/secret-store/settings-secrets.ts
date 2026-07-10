@@ -1,4 +1,5 @@
 import type { SmartComposerSettings } from '../../settings/schema/setting.types'
+import type { McpServerConfig } from '../../types/mcp.types'
 import type { LLMProvider } from '../../types/provider.types'
 
 import {
@@ -11,6 +12,7 @@ import {
   writeSecret,
 } from './provider-secret-utils'
 import type { SecretStore } from './secret-store'
+import { createMcpEnvSecretStoreKey } from './secret-store'
 
 type ProviderSecretKeys = ReturnType<typeof providerSecretKeys>
 type SecretSnapshot = {
@@ -25,9 +27,16 @@ async function captureSecretSnapshot(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<SecretSnapshot> {
+  return captureKeySnapshot(secretStore, allSecretKeys(keys))
+}
+
+async function captureKeySnapshot(
+  secretStore: SecretStore,
+  keys: readonly string[],
+): Promise<SecretSnapshot> {
   return {
     values: await Promise.all(
-      allSecretKeys(keys).map(async (key) => ({
+      [...new Set(keys)].map(async (key) => ({
         key,
         value: await secretStore.getSecret(key),
       })),
@@ -104,16 +113,55 @@ async function hydrateProvider(
   }
 }
 
+function parseMcpEnv(value: string): Record<string, string> {
+  const parsed: unknown = JSON.parse(value)
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    Object.values(parsed).some((entry) => typeof entry !== 'string')
+  ) {
+    throw new Error('Invalid MCP environment secret')
+  }
+  return parsed as Record<string, string>
+}
+
+function serializeMcpEnv(env: Record<string, string>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(env).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  )
+}
+
+async function hydrateMcpServer(
+  server: McpServerConfig,
+  secretStore: SecretStore,
+): Promise<McpServerConfig> {
+  const storedEnv = await secretStore.getSecret(
+    createMcpEnvSecretStoreKey(server.id),
+  )
+  if (storedEnv === null) {
+    return server
+  }
+  return {
+    ...server,
+    parameters: {
+      ...server.parameters,
+      env: {
+        ...parseMcpEnv(storedEnv),
+        ...(server.parameters.env ?? {}),
+      },
+    },
+  }
+}
+
 async function sanitizeProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
   snapshots: SecretSnapshot[],
   previousProvider?: LLMProvider,
 ): Promise<LLMProvider> {
-  if (secretStore.getBackendStatus() === 'insecure-settings-fallback') {
-    return provider
-  }
-
   const sanitizedProvider = { ...provider }
 
   if (isNonEmptySecret(provider.apiKey)) {
@@ -166,10 +214,7 @@ async function deleteRemovedProviderSecrets(
   secretStore: SecretStore,
   snapshots?: SecretSnapshot[],
 ): Promise<void> {
-  if (
-    !previousSettings ||
-    secretStore.getBackendStatus() === 'insecure-settings-fallback'
-  ) {
+  if (!previousSettings) {
     return
   }
 
@@ -256,19 +301,48 @@ async function deleteSecretKeys(
   await deleteProviderSecrets(secretStore, keys)
 }
 
+async function writeMcpEnvSecret(
+  secretStore: SecretStore,
+  serverId: string,
+  value: string,
+  snapshots: SecretSnapshot[],
+): Promise<void> {
+  const key = createMcpEnvSecretStoreKey(serverId)
+  snapshots.push(await captureKeySnapshot(secretStore, [key]))
+  await secretStore.setSecret(key, value)
+}
+
+async function deleteMcpEnvSecret(
+  secretStore: SecretStore,
+  serverId: string,
+  snapshots: SecretSnapshot[],
+): Promise<void> {
+  const key = createMcpEnvSecretStoreKey(serverId)
+  snapshots.push(await captureKeySnapshot(secretStore, [key]))
+  await secretStore.deleteSecret(key)
+}
+
 export async function hydrateSettingsSecrets(
   settings: SmartComposerSettings,
   secretStore: SecretStore,
 ): Promise<SmartComposerSettings> {
-  const providers = await Promise.all(
-    settings.providers.map((provider) =>
-      hydrateProvider(provider, secretStore),
+  const [providers, servers] = await Promise.all([
+    Promise.all(
+      settings.providers.map((provider) =>
+        hydrateProvider(provider, secretStore),
+      ),
     ),
-  )
+    Promise.all(
+      settings.mcp.servers.map((server) =>
+        hydrateMcpServer(server, secretStore),
+      ),
+    ),
+  ])
 
   return {
     ...settings,
     providers,
+    mcp: { ...settings.mcp, servers },
   }
 }
 
@@ -280,13 +354,25 @@ export async function sanitizeSettingsForPersistence(
   const snapshots: SecretSnapshot[] = []
 
   try {
-    const sanitizedSettings = await sanitizeSettingsProviders(
+    let sanitizedSettings = await sanitizeSettingsProviders(
       settings,
       secretStore,
       snapshots,
       previousSettings,
     )
+    sanitizedSettings = await sanitizeSettingsMcp(
+      sanitizedSettings,
+      secretStore,
+      snapshots,
+      previousSettings,
+    )
     await deleteRemovedProviderSecrets(
+      previousSettings,
+      settings,
+      secretStore,
+      snapshots,
+    )
+    await deleteRemovedMcpSecrets(
       previousSettings,
       settings,
       secretStore,
@@ -332,6 +418,57 @@ async function sanitizeSettingsProviders(
   }
 }
 
+async function sanitizeSettingsMcp(
+  settings: SmartComposerSettings,
+  secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
+  previousSettings?: SmartComposerSettings,
+): Promise<SmartComposerSettings> {
+  const servers: McpServerConfig[] = []
+
+  for (const server of settings.mcp.servers) {
+    const env = server.parameters.env ?? {}
+    const value = serializeMcpEnv(env)
+    const key = createMcpEnvSecretStoreKey(server.id)
+    const storedValue = await secretStore.getSecret(key)
+    if (Object.keys(env).length > 0 && storedValue !== value) {
+      await writeMcpEnvSecret(secretStore, server.id, value, snapshots)
+    } else if (
+      Object.keys(env).length === 0 &&
+      previousSettings?.mcp.servers.some(
+        (previous) =>
+          previous.id === server.id &&
+          Object.keys(previous.parameters.env ?? {}).length > 0,
+      )
+    ) {
+      await deleteMcpEnvSecret(secretStore, server.id, snapshots)
+    }
+
+    const parameters = { ...server.parameters }
+    delete parameters.env
+    servers.push({ ...server, parameters })
+  }
+
+  return { ...settings, mcp: { ...settings.mcp, servers } }
+}
+
+async function deleteRemovedMcpSecrets(
+  previousSettings: SmartComposerSettings | undefined,
+  nextSettings: SmartComposerSettings,
+  secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
+): Promise<void> {
+  if (!previousSettings) return
+
+  for (const server of previousSettings.mcp.servers) {
+    if (
+      !nextSettings.mcp.servers.some((candidate) => candidate.id === server.id)
+    ) {
+      await deleteMcpEnvSecret(secretStore, server.id, snapshots)
+    }
+  }
+}
+
 export async function persistSettingsUpdate({
   previousSettings,
   nextSettings,
@@ -349,13 +486,25 @@ export async function persistSettingsUpdate({
   const snapshots: SecretSnapshot[] = []
 
   try {
-    const persistedSettings = await sanitizeSettingsProviders(
+    let persistedSettings = await sanitizeSettingsProviders(
       nextSettings,
       secretStore,
       snapshots,
       previousSettings,
     )
+    persistedSettings = await sanitizeSettingsMcp(
+      persistedSettings,
+      secretStore,
+      snapshots,
+      previousSettings,
+    )
     await deleteRemovedProviderSecrets(
+      previousSettings,
+      nextSettings,
+      secretStore,
+      snapshots,
+    )
+    await deleteRemovedMcpSecrets(
       previousSettings,
       nextSettings,
       secretStore,

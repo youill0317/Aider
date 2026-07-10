@@ -1,4 +1,4 @@
-import { App, TFile, htmlToMarkdown, requestUrl } from 'obsidian'
+import { App, TFile, htmlToMarkdown } from 'obsidian'
 
 import { editorStateToPlainText } from '../../components/chat-view/chat-input/utils/editor-state-to-plain-text'
 import { QueryProgressState } from '../../components/chat-view/QueryProgress'
@@ -24,6 +24,7 @@ import {
 } from '../../types/mentionable'
 import { PromptLevel } from '../../types/prompt-level.types'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
+import { fetchPublicUrl, isPublicHttpUrl } from '../fetch-utils'
 import { tokenCount } from '../llm/token'
 import {
   getNestedFiles,
@@ -36,6 +37,9 @@ import {
   wrapUntrustedToolOutput,
 } from './untrusted-context'
 import { YoutubeTranscript, isYoutubeUrl } from './youtube-transcript'
+
+const MAX_URL_MENTIONS = 5
+const MAX_WEBSITE_CONTENT_CHARS = 200_000
 
 export class PromptGenerator {
   private getRagEngine: () => Promise<RAGEngine>
@@ -395,9 +399,15 @@ ${wrapUntrustedContext(
           })
           .join(''),
       )
-      const urls = message.mentionables.filter(
-        (m): m is MentionableUrl => m.type === 'url',
-      )
+      const urls = [
+        ...new Map(
+          message.mentionables
+            .filter((m): m is MentionableUrl => m.type === 'url')
+            .map((mentionable) => [mentionable.url, mentionable]),
+        ).values(),
+      ]
+        .filter(({ url }) => isPublicHttpUrl(url))
+        .slice(0, MAX_URL_MENTIONS)
 
       const urlPrompt =
         urls.length > 0
@@ -603,22 +613,26 @@ When writing out new markdown blocks, remember not to include "line_number|" at 
    * ...
    */
   private async getWebsiteContent(url: string): Promise<string> {
-    if (isYoutubeUrl(url)) {
-      try {
+    try {
+      if (isYoutubeUrl(url)) {
         // TODO: pass language based on user preferences
         const { title, transcript } =
           await YoutubeTranscript.fetchTranscriptAndMetadata(url)
 
         return `Title: ${title}
 Video Transcript:
-${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`
-      } catch (error) {
-        console.error('Error fetching YouTube transcript', error)
+${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`.slice(
+          0,
+          MAX_WEBSITE_CONTENT_CHARS,
+        )
       }
-    }
 
-    const response = await requestUrl({ url })
-    return htmlToMarkdown(response.text)
+      const response = await fetchPublicUrl(url)
+      return htmlToMarkdown(response.text).slice(0, MAX_WEBSITE_CONTENT_CHARS)
+    } catch (error) {
+      console.warn('Website content could not be fetched safely:', error)
+      return 'Website content unavailable.'
+    }
   }
 
   private getModelPromptLevel(): PromptLevel {

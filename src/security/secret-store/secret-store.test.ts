@@ -166,19 +166,19 @@ describe('SecretStore backend selection', () => {
     const store = createSecretStore({ app })
     await store.setSecret('smart-composer-provider-openai-api-key', 'secret')
 
-    // Then: the explicit insecure fallback remains functional.
-    expect(store.getBackendStatus()).toBe('insecure-settings-fallback')
+    // Then: the explicit memory-only fallback remains functional.
+    expect(store.getBackendStatus()).toBe('memory-only-fallback')
     await expect(
       store.getSecret('smart-composer-provider-openai-api-key'),
     ).resolves.toBe('secret')
   })
 
-  it('marks fallback as insecure-settings-fallback', () => {
+  it('marks fallback as memory-only', () => {
     // Given: a runtime without the Obsidian secure storage API.
     const store = createSecretStore({ app: undefined })
 
     // When/Then: backend status is explicit and not reported as secure.
-    expect(store.getBackendStatus()).toBe('insecure-settings-fallback')
+    expect(store.getBackendStatus()).toBe('memory-only-fallback')
   })
 
   it('reports fallback without throwing', async () => {
@@ -189,7 +189,7 @@ describe('SecretStore backend selection', () => {
     await store.setSecret('smart-composer-provider-openai-api-key', 'secret')
 
     // Then: the backend is explicit and remains usable.
-    expect(store.getBackendStatus()).toBe('insecure-settings-fallback')
+    expect(store.getBackendStatus()).toBe('memory-only-fallback')
     await expect(
       store.getSecret('smart-composer-provider-openai-api-key'),
     ).resolves.toBe('secret')
@@ -206,7 +206,7 @@ describe('SecretStore backend selection', () => {
     await store.setSecret('smart-composer-provider-openai-api-key', 'secret')
 
     // Then: the malformed shape is not reported as secure.
-    expect(store.getBackendStatus()).toBe('insecure-settings-fallback')
+    expect(store.getBackendStatus()).toBe('memory-only-fallback')
     await expect(
       store.getSecret('smart-composer-provider-openai-api-key'),
     ).resolves.toBe('secret')
@@ -226,7 +226,7 @@ describe('SecretStore backend selection', () => {
 
     // When/Then: callers can branch on explicit backend status.
     expect(secureStore.getBackendStatus()).toBe('obsidian-secret-storage')
-    expect(fallbackStore.getBackendStatus()).toBe('insecure-settings-fallback')
+    expect(fallbackStore.getBackendStatus()).toBe('memory-only-fallback')
   })
 
   it('calls Obsidian secretStorage methods with original receiver', async () => {

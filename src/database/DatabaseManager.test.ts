@@ -1,8 +1,16 @@
-import { App } from 'obsidian'
+import type { App } from 'obsidian'
+import { requestUrl } from 'obsidian'
 
 import { DatabaseManager } from './DatabaseManager'
 
-jest.mock('obsidian')
+jest.mock('obsidian', () => ({
+  ...jest.requireActual<typeof import('../../__mocks__/obsidian')>(
+    '../../__mocks__/obsidian',
+  ),
+  requestUrl: jest.fn(),
+}))
+
+const requestUrlMock = jest.mocked(requestUrl)
 
 function createManager(adapter: Record<string, jest.Mock>) {
   return new DatabaseManager(
@@ -23,7 +31,9 @@ function setPgClient(
 
 describe('DatabaseManager integrity', () => {
   beforeEach(() => {
+    requestUrlMock.mockReset()
     jest.spyOn(console, 'log').mockImplementation(() => undefined)
+    jest.spyOn(console, 'error').mockImplementation(() => undefined)
   })
 
   afterEach(() => {
@@ -87,4 +97,92 @@ describe('DatabaseManager integrity', () => {
 
     await expect(manager.save()).rejects.toBe(saveError)
   })
+
+  it('passes only SHA-256 verified resource bytes to PGlite', async () => {
+    const fsBundleBytes = Uint8Array.of(1).buffer
+    const wasmBytes = Uint8Array.of(2).buffer
+    const vectorBytes = Uint8Array.of(3).buffer
+    requestUrlMock
+      .mockResolvedValueOnce({ arrayBuffer: fsBundleBytes } as never)
+      .mockResolvedValueOnce({ arrayBuffer: wasmBytes } as never)
+      .mockResolvedValueOnce({ arrayBuffer: vectorBytes } as never)
+    const digest = jest
+      .spyOn(crypto.subtle, 'digest')
+      .mockResolvedValueOnce(
+        hexToArrayBuffer(
+          '8bbecccbe044329462c8fd5148019ba0f82daa95e7f7737e2e71f9ce1f8c9528',
+        ),
+      )
+      .mockResolvedValueOnce(
+        hexToArrayBuffer(
+          '6999f4a272f2c7a3ec9be4268f5c184dec973145ff0a3735b0f459a1a906e451',
+        ),
+      )
+      .mockResolvedValueOnce(
+        hexToArrayBuffer(
+          'd04da95473fd2706f2fe6147c260e2ed087fbe282791d0301a19ae89dcc5d5e1',
+        ),
+      )
+    const wasmModule = {} as WebAssembly.Module
+    const compile = jest
+      .spyOn(WebAssembly, 'compile')
+      .mockResolvedValue(wasmModule)
+
+    const resources = await loadPGliteResources(createManager({}))
+
+    expect(digest).toHaveBeenNthCalledWith(1, 'SHA-256', fsBundleBytes)
+    expect(digest).toHaveBeenNthCalledWith(2, 'SHA-256', wasmBytes)
+    expect(digest).toHaveBeenNthCalledWith(3, 'SHA-256', vectorBytes)
+    expect(compile).toHaveBeenCalledWith(wasmBytes)
+    expect(resources.wasmModule).toBe(wasmModule)
+    expect(new Uint8Array(await resources.fsBundle.arrayBuffer())).toEqual(
+      new Uint8Array(fsBundleBytes),
+    )
+    expect(
+      Buffer.from(
+        resources.vectorExtensionBundlePath.href.split(',')[1],
+        'base64',
+      ),
+    ).toEqual(Buffer.from(vectorBytes))
+    expect(resources.vectorExtensionBundlePath.protocol).toBe('data:')
+  })
+
+  it('fails closed when a PGlite resource hash does not match', async () => {
+    requestUrlMock.mockResolvedValue({
+      arrayBuffer: Uint8Array.of(1).buffer,
+    } as never)
+    jest
+      .spyOn(crypto.subtle, 'digest')
+      .mockResolvedValue(new Uint8Array(32).buffer)
+    const compile = jest.spyOn(WebAssembly, 'compile')
+
+    await expect(loadPGliteResources(createManager({}))).rejects.toThrow(
+      'PGlite resource integrity check failed',
+    )
+    expect(compile).not.toHaveBeenCalled()
+  })
 })
+
+function loadPGliteResources(manager: DatabaseManager): Promise<{
+  fsBundle: Blob
+  wasmModule: WebAssembly.Module
+  vectorExtensionBundlePath: URL
+}> {
+  return (
+    manager as unknown as {
+      loadPGliteResources(): Promise<{
+        fsBundle: Blob
+        wasmModule: WebAssembly.Module
+        vectorExtensionBundlePath: URL
+      }>
+    }
+  ).loadPGliteResources()
+}
+
+function hexToArrayBuffer(hex: string): ArrayBuffer {
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16)
+  }
+  return bytes.buffer
+}

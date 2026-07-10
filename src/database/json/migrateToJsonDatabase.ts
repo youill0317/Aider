@@ -44,7 +44,7 @@ async function transferChatHistoryFromLegacy(app: App): Promise<number> {
     try {
       const oldChat = await oldChatManager.findChatConversation(chatMeta.id)
       if (!oldChat) {
-        throw new Error(`Legacy chat ${chatMeta.id} was not found`)
+        continue
       }
 
       const existingChat = await newChatManager.findById(oldChat.id)

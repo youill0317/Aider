@@ -165,13 +165,12 @@ async function sanitizeProvider(
   const sanitizedProvider = { ...provider }
 
   if (isNonEmptySecret(provider.apiKey)) {
-    if (provider.apiKey !== previousProvider?.apiKey) {
-      await writeProviderSecret(
-        secretStore,
-        providerSecretKeys(provider, 'apiKey'),
-        provider.apiKey,
-        snapshots,
-      )
+    const keys = providerSecretKeys(provider, 'apiKey')
+    if (
+      provider.apiKey !== previousProvider?.apiKey ||
+      (await readProviderSecret(secretStore, keys)) === null
+    ) {
+      await writeProviderSecret(secretStore, keys, provider.apiKey, snapshots)
     }
     delete sanitizedProvider.apiKey
   }
@@ -191,10 +190,14 @@ async function sanitizeProvider(
       continue
     }
 
-    if (provider.oauth[field] !== previousOauth?.[field]) {
+    const keys = providerSecretKeys(provider, field)
+    if (
+      provider.oauth[field] !== previousOauth?.[field] ||
+      (await readProviderSecret(secretStore, keys)) === null
+    ) {
       await writeProviderSecret(
         secretStore,
-        providerSecretKeys(provider, field),
+        keys,
         provider.oauth[field],
         snapshots,
       )

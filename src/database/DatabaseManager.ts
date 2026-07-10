@@ -202,13 +202,30 @@ export class DatabaseManager {
   }
 
   async cleanup() {
-    // save before cleanup
-    await this.save()
-    // WeakMap cleanup
+    let saveError: unknown
+    let saveFailed = false
+    try {
+      await this.save()
+    } catch (error) {
+      saveError = error
+      saveFailed = true
+    }
+
     DatabaseManager.managers.delete(this)
-    await this.pgClient?.close()
+    const pgClient = this.pgClient
     this.pgClient = null
     this.db = null
+    try {
+      await pgClient?.close()
+    } catch (error) {
+      if (!saveFailed) {
+        throw error
+      }
+      console.error('Failed to close database after save failure:', error)
+    }
+    if (saveFailed) {
+      throw saveError
+    }
   }
 
   // TODO: This function is a temporary workaround chosen due to the difficulty of bundling postgres.wasm and postgres.data from node_modules into a single JS file. The ultimate goal is to bundle everything into one JS file in the future.

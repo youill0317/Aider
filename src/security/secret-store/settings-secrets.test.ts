@@ -154,7 +154,8 @@ describe('settings secret persistence', () => {
     let savedSettings: SmartComposerSettings | undefined
     const secretStore: SecretStore = {
       getBackendStatus: () => 'obsidian-secret-storage',
-      getSecret: async () => null,
+      getSecret: async (key) =>
+        key.endsWith('openai-api-key') ? 'sk-existing-openai-key' : null,
       setSecret: async (key, value) => {
         writtenSecrets.set(key, value)
         if (key.endsWith('openai-api-key')) {
@@ -229,6 +230,54 @@ describe('settings secret persistence', () => {
       accessToken: '',
       refreshToken: '',
     })
+  })
+
+  it('stores unchanged plaintext secrets when secure entries are missing', async () => {
+    const secretStore = createSecretStore({ app: {} })
+    const settings = createSettings([
+      {
+        id: 'openai',
+        type: 'openai',
+        apiKey: 'sk-plaintext-api-key',
+      },
+      {
+        id: 'openai-plan',
+        type: 'openai-plan',
+        oauth: {
+          accessToken: 'plaintext-access-token',
+          refreshToken: 'plaintext-refresh-token',
+          expiresAt: 1_893_456_000_000,
+        },
+      },
+    ])
+    let savedSettings: SmartComposerSettings | undefined
+
+    await persistSettingsUpdate({
+      previousSettings: settings,
+      nextSettings: settings,
+      secretStore,
+      publishRuntimeSettings: () => undefined,
+      saveData: async (persistedSettings) => {
+        savedSettings = persistedSettings
+      },
+    })
+
+    await expect(
+      secretStore.getSecret(
+        providerSecretKeys(settings.providers[0], 'apiKey').current,
+      ),
+    ).resolves.toBe('sk-plaintext-api-key')
+    await expect(
+      secretStore.getSecret(
+        providerSecretKeys(settings.providers[1], 'accessToken').current,
+      ),
+    ).resolves.toBe('plaintext-access-token')
+    await expect(
+      secretStore.getSecret(
+        providerSecretKeys(settings.providers[1], 'refreshToken').current,
+      ),
+    ).resolves.toBe('plaintext-refresh-token')
+    expect(JSON.stringify(savedSettings)).not.toContain('plaintext-')
   })
 
   it('saves long plan tokens through chunked Obsidian secrets', async () => {

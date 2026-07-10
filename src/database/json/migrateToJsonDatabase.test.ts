@@ -88,6 +88,29 @@ describe('migrateToJsonDatabase', () => {
     expect(adapter.write).not.toHaveBeenCalled()
   })
 
+  it('skips stale chat list entries and completes migration', async () => {
+    const { app, adapter } = createApp()
+    const { getDatabaseManager } = createDatabaseGetter()
+    jest
+      .spyOn(ChatConversationManager.prototype, 'getChatList')
+      .mockResolvedValue([legacyChat])
+    jest
+      .spyOn(ChatConversationManager.prototype, 'findChatConversation')
+      .mockResolvedValue(null)
+    const importChat = jest
+      .spyOn(ChatManager.prototype, 'importChat')
+      .mockResolvedValue()
+
+    await migrateToJsonDatabase(app, getDatabaseManager)
+
+    expect(importChat).not.toHaveBeenCalled()
+    expect(getDatabaseManager).toHaveBeenCalledTimes(1)
+    expect(adapter.rename).toHaveBeenCalledWith(
+      expect.stringContaining(INITIAL_MIGRATION_MARKER),
+      expect.stringContaining(INITIAL_MIGRATION_MARKER),
+    )
+  })
+
   it('deletes a source only after verification and atomically marks success', async () => {
     const { app, adapter } = createApp()
     const { getDatabaseManager } = createDatabaseGetter()

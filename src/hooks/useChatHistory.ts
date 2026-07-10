@@ -58,6 +58,17 @@ export function useChatHistory(): UseChatHistory {
   const persistConversation = useCallback(
     async (id: string, messages: ChatMessage[]) => {
       const serializedMessages = messages.map(serializeChatMessage)
+      const existingConversation = await chatManager.findById(id)
+      if (
+        existingConversation &&
+        serializedMessagesEqual(
+          existingConversation.messages,
+          serializedMessages,
+        )
+      ) {
+        return
+      }
+
       let conversation = await chatManager.updateChat(id, {
         messages: serializedMessages,
       })
@@ -195,6 +206,19 @@ const serializeChatMessage = (message: ChatMessage): SerializedChatMessage => {
     case 'agent-command':
       return normalizeAgentCommandMessage(message)
   }
+}
+
+const serializedMessagesEqual = (
+  left: SerializedChatMessage[],
+  right: SerializedChatMessage[],
+): boolean => {
+  const keys = new Set<string>()
+  JSON.stringify([left, right], (key, value: unknown) => {
+    keys.add(key)
+    return value
+  })
+  const sortedKeys = [...keys].sort()
+  return JSON.stringify(left, sortedKeys) === JSON.stringify(right, sortedKeys)
 }
 
 const normalizeAgentCommandMessage = (

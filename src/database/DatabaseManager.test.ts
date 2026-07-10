@@ -21,10 +21,10 @@ function createManager(adapter: Record<string, jest.Mock>) {
 
 function setPgClient(
   manager: DatabaseManager,
-  pgClient: { dumpDataDir: jest.Mock },
+  pgClient: { dumpDataDir: jest.Mock; close?: jest.Mock },
 ): void {
   const writableManager = manager as unknown as {
-    pgClient: { dumpDataDir: jest.Mock }
+    pgClient: { dumpDataDir: jest.Mock; close?: jest.Mock }
   }
   writableManager.pgClient = pgClient
 }
@@ -96,6 +96,28 @@ describe('DatabaseManager integrity', () => {
     })
 
     await expect(manager.save()).rejects.toBe(saveError)
+  })
+
+  it('closes and clears the database when the final save fails', async () => {
+    const saveError = new Error('disk full')
+    const close = jest.fn().mockResolvedValue(undefined)
+    const manager = createManager({
+      writeBinary: jest.fn().mockRejectedValue(saveError),
+    })
+    setPgClient(manager, {
+      dumpDataDir: jest.fn().mockResolvedValue(new Blob(['database'])),
+      close,
+    })
+    const state = manager as unknown as {
+      pgClient: unknown
+      db: unknown
+    }
+    state.db = {}
+
+    await expect(manager.cleanup()).rejects.toBe(saveError)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(state.pgClient).toBeNull()
+    expect(state.db).toBeNull()
   })
 
   it('passes only SHA-256 verified resource bytes to PGlite', async () => {

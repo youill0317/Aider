@@ -4,8 +4,8 @@ import { sanitizeSettingsForPersistence } from '../../security/secret-store/sett
 import { SETTINGS_SCHEMA_VERSION } from './migrations'
 import { parseSmartComposerSettings } from './settings'
 
-describe('security baseline documents provider and MCP secret fields', () => {
-  it('documents current ordinary settings serialization of provider and MCP secrets', async () => {
+describe('security baseline protects provider and MCP secret fields', () => {
+  it('keeps provider and MCP secrets out of ordinary settings', async () => {
     // Given: current-version settings containing representative fake secrets.
     const storedSettings = {
       version: SETTINGS_SCHEMA_VERSION,
@@ -56,7 +56,7 @@ describe('security baseline documents provider and MCP secret fields', () => {
       },
     })
 
-    // When: settings cross the T7 provider secret persistence boundary.
+    // When: settings cross the secret persistence boundary.
     const parsedSettings = parseSmartComposerSettings(storedSettings)
     const persistedSettings = await sanitizeSettingsForPersistence(
       parsedSettings,
@@ -64,11 +64,14 @@ describe('security baseline documents provider and MCP secret fields', () => {
     )
     const serializedSettings = JSON.stringify(persistedSettings)
 
-    // Then: provider secrets are stripped, while MCP env remains for T10.
+    // Then: provider and MCP secrets are stripped from ordinary settings.
     expect(serializedSettings).not.toContain('sk-baseline-openai-secret')
     expect(serializedSettings).not.toContain('baseline-access-token')
     expect(serializedSettings).not.toContain('baseline-refresh-token')
-    expect(serializedSettings).toContain(
+    expect(serializedSettings).not.toContain(
+      'github-baseline-personal-access-token',
+    )
+    expect([...secretStorageValues.values()].join('\n')).toContain(
       'github-baseline-personal-access-token',
     )
   })

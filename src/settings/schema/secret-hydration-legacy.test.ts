@@ -99,7 +99,7 @@ describe('Aider legacy Smart Composer secret hydration', () => {
     const copyCalls: string[] = []
     const values = new Map([[LEGACY_OPENAI_API_KEY, 'sk-legacy-api-key']])
     const secretStore: SecretStore = {
-      getBackendStatus: () => 'insecure-settings-fallback',
+      getBackendStatus: () => 'memory-only-fallback',
       getSecret: async (key) => values.get(key) ?? null,
       setSecret: async (key, value) => {
         copyCalls.push(`${key}:${value}`)

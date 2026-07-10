@@ -129,15 +129,75 @@ describe('VectorManager contextual embedding route', () => {
     )
     expect(getEmbedding).not.toHaveBeenCalled()
   })
+
+  it('deletes and saves indexed files excluded by current filters', async () => {
+    const repository = createRepository()
+    repository.getIndexedFiles.mockResolvedValue([
+      { path: 'private/secret.md', mtime: 100, metadata: {}, dimension: 1024 },
+    ])
+    const save = jest.fn().mockResolvedValue(undefined)
+    const manager = createVectorManager(
+      createApp({ 'private/secret.md': 'Secret' }),
+      repository,
+      save,
+    )
+
+    await manager.updateVaultIndex(
+      {
+        id: 'voyage/voyage-4',
+        providerType: 'voyage',
+        model: 'voyage-4',
+        dimension: 1024,
+        getEmbedding: jest.fn(),
+      },
+      {
+        chunkSize: 1000,
+        excludePatterns: ['private/**'],
+        includePatterns: [],
+      },
+    )
+
+    expect(repository.deleteVectorsForMultipleFiles).toHaveBeenCalledWith(
+      ['private/secret.md'],
+      expect.objectContaining({ id: 'voyage/voyage-4' }),
+    )
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves a full-index clear when no files remain to index', async () => {
+    const repository = createRepository()
+    const save = jest.fn().mockResolvedValue(undefined)
+    const manager = createVectorManager(createApp({}), repository, save)
+
+    await manager.updateVaultIndex(
+      {
+        id: 'voyage/voyage-4',
+        providerType: 'voyage',
+        model: 'voyage-4',
+        dimension: 1024,
+        getEmbedding: jest.fn(),
+      },
+      {
+        chunkSize: 1000,
+        excludePatterns: [],
+        includePatterns: [],
+        reindexAll: true,
+      },
+    )
+
+    expect(repository.clearAllVectors).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledTimes(1)
+  })
 })
 
 function createVectorManager(
   app: App,
   repository: ReturnType<typeof createRepository>,
+  saveCallback = jest.fn().mockResolvedValue(undefined),
 ): VectorManager {
   const manager = new VectorManager(app, undefined as never)
   Object.assign(manager as unknown as { repository: unknown }, { repository })
-  manager.setSaveCallback(jest.fn().mockResolvedValue(undefined))
+  manager.setSaveCallback(saveCallback)
   return manager
 }
 

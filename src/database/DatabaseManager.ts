@@ -9,6 +9,16 @@ import migrations from './migrations.json'
 import { LegacyTemplateManager } from './modules/template/TemplateManager'
 import { VectorManager } from './modules/vector/VectorManager'
 
+const PGLITE_VERSION = '0.2.12'
+const PGLITE_RESOURCE_SHA256 = {
+  'postgres.data':
+    '8bbecccbe044329462c8fd5148019ba0f82daa95e7f7737e2e71f9ce1f8c9528',
+  'postgres.wasm':
+    '6999f4a272f2c7a3ec9be4268f5c184dec973145ff0a3735b0f459a1a906e451',
+  'vector.tar.gz':
+    'd04da95473fd2706f2fe6147c260e2ed087fbe282791d0301a19ae89dcc5d5e1',
+} as const
+
 export class DatabaseManager {
   private app: App
   private dbPath: string
@@ -208,22 +218,34 @@ export class DatabaseManager {
     vectorExtensionBundlePath: URL
   }> {
     try {
-      const PGLITE_VERSION = '0.2.12'
-      const [fsBundleResponse, wasmResponse] = await Promise.all([
-        requestUrl(
-          `https://unpkg.com/@electric-sql/pglite@${PGLITE_VERSION}/dist/postgres.data`,
-        ),
-        requestUrl(
-          `https://unpkg.com/@electric-sql/pglite@${PGLITE_VERSION}/dist/postgres.wasm`,
-        ),
-      ])
+      const loadResource = async (
+        resource: keyof typeof PGLITE_RESOURCE_SHA256,
+      ) => {
+        const response = await requestUrl(
+          `https://unpkg.com/@electric-sql/pglite@${PGLITE_VERSION}/dist/${resource}`,
+        )
+        await verifySha256(
+          resource,
+          response.arrayBuffer,
+          PGLITE_RESOURCE_SHA256[resource],
+        )
+        return response.arrayBuffer
+      }
+      const [fsBundleBytes, wasmBytes, vectorExtensionBytes] =
+        await Promise.all([
+          loadResource('postgres.data'),
+          loadResource('postgres.wasm'),
+          loadResource('vector.tar.gz'),
+        ])
 
-      const fsBundle = new Blob([fsBundleResponse.arrayBuffer], {
+      const fsBundle = new Blob([fsBundleBytes], {
         type: 'application/octet-stream',
       })
-      const wasmModule = await WebAssembly.compile(wasmResponse.arrayBuffer)
+      const wasmModule = await WebAssembly.compile(wasmBytes)
       const vectorExtensionBundlePath = new URL(
-        `https://unpkg.com/@electric-sql/pglite@${PGLITE_VERSION}/dist/vector.tar.gz`,
+        `data:application/gzip;base64,${Buffer.from(
+          vectorExtensionBytes,
+        ).toString('base64')}`,
       )
 
       return { fsBundle, wasmModule, vectorExtensionBundlePath }
@@ -231,5 +253,19 @@ export class DatabaseManager {
       console.error('Error loading PGlite resources:', error)
       throw error
     }
+  }
+}
+
+async function verifySha256(
+  resource: string,
+  bytes: ArrayBuffer,
+  expected: string,
+): Promise<void> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const actual = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+  if (actual !== expected) {
+    throw new Error(`PGlite resource integrity check failed: ${resource}`)
   }
 }

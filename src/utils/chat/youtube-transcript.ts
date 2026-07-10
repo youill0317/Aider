@@ -5,7 +5,7 @@
  * Modified from the original code
  */
 
-import { requestUrl } from 'obsidian'
+import { fetchPublicUrl } from '../fetch-utils'
 
 const RE_YOUTUBE =
   /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i
@@ -88,13 +88,16 @@ export class YoutubeTranscript {
     config?: TranscriptConfig,
   ): Promise<TranscriptAndMetadataResponse> {
     const identifier = this.retrieveVideoId(videoId)
-    const videoPageResponse = await requestUrl({
-      url: `https://www.youtube.com/watch?v=${identifier}`,
-      headers: {
-        ...(config?.lang && { 'Accept-Language': config.lang }),
-        'User-Agent': USER_AGENT,
+    const videoPageResponse = await fetchPublicUrl(
+      `https://www.youtube.com/watch?v=${identifier}`,
+      {
+        maxBytes: 2 * 1024 * 1024,
+        headers: {
+          ...(config?.lang && { 'Accept-Language': config.lang }),
+          'User-Agent': USER_AGENT,
+        },
       },
-    })
+    )
     const videoPageBody = videoPageResponse.text
 
     // Extract title using regex from <title> tags
@@ -158,8 +161,7 @@ export class YoutubeTranscript {
         : captions.captionTracks[0]
     ).baseUrl
 
-    const transcriptResponse = await requestUrl({
-      url: transcriptURL,
+    const transcriptResponse = await fetchPublicUrl(transcriptURL, {
       headers: {
         ...(config?.lang && { 'Accept-Language': config.lang }),
         'User-Agent': USER_AGENT,

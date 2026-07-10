@@ -1,6 +1,7 @@
 import { App } from 'obsidian'
 
 import { Mentionable, SerializedMentionable } from '../../types/mentionable'
+import { isPublicHttpUrl } from '../fetch-utils'
 
 export const serializeMentionable = (
   mentionable: Mentionable,
@@ -105,6 +106,9 @@ export const deserializeMentionable = (
         }
       }
       case 'url': {
+        if (!isPublicHttpUrl(mentionable.url)) {
+          return null
+        }
         return {
           type: 'url',
           url: mentionable.url,

@@ -1,4 +1,9 @@
+import {
+  redactEnvironmentSecrets,
+  redactSecrets,
+} from '../../../utils/security/redact-secrets'
 import type {
+  CodexAgentEvent,
   CodexExecRequest,
   CodexRunHandle,
   CodexRunResult,
@@ -52,6 +57,8 @@ type CodexExecRuntimeOptions = {
   readonly spawnSpecResolver?: CodexSpawnSpecResolver
   readonly spawnSpecResolverOptions?: CodexSpawnSpecResolverOptions
 }
+
+const MAX_EVENT_STRING_CHARS = 24_000
 
 export class CodexExecRuntime implements CodexRuntime {
   private readonly commandBuilder: CodexCommandBuilder
@@ -123,7 +130,7 @@ export class CodexExecRuntime implements CodexRuntime {
             if (event.kind === 'turn.failed') {
               failedTurnLine = event.line
             }
-            handlers.onEvent(event)
+            handlers.onEvent(sanitizeEvent(event, spawnSpec.env))
           }
         } catch (error) {
           childProcess.kill('SIGTERM')
@@ -154,7 +161,7 @@ export class CodexExecRuntime implements CodexRuntime {
             if (event.kind === 'turn.failed') {
               failedTurnLine = event.line
             }
-            handlers.onEvent(event)
+            handlers.onEvent(sanitizeEvent(event, spawnSpec.env))
           }
         } catch (error) {
           const parserError = normalizeParserError(error)
@@ -163,9 +170,11 @@ export class CodexExecRuntime implements CodexRuntime {
           return
         }
 
+        const safeStderr = redactEnvironmentSecrets(stderr, spawnSpec.env)
+
         if (failedTurnLine !== null) {
           const error = new Error(
-            `Codex turn failed at JSONL line ${failedTurnLine}${stderr ? `: ${stderr}` : ''}`,
+            `Codex turn failed at JSONL line ${failedTurnLine}${safeStderr ? `: ${safeStderr}` : ''}`,
           )
           handlers.onError?.(error)
           reject(error)
@@ -179,7 +188,7 @@ export class CodexExecRuntime implements CodexRuntime {
           exitCode !== 0
         ) {
           const error = new Error(
-            `Codex process exited with code ${exitCode}${stderr ? `: ${stderr}` : ''}`,
+            `Codex process exited with code ${exitCode}${safeStderr ? `: ${safeStderr}` : ''}`,
           )
           handlers.onError?.(error)
           reject(error)
@@ -196,7 +205,7 @@ export class CodexExecRuntime implements CodexRuntime {
           exitCode,
           signal,
           status,
-          stderr,
+          stderr: safeStderr,
           threadId,
         })
       })
@@ -214,6 +223,31 @@ export class CodexExecRuntime implements CodexRuntime {
       },
     }
   }
+}
+
+function sanitizeEvent(
+  event: CodexAgentEvent,
+  env: NodeJS.ProcessEnv,
+): CodexAgentEvent {
+  return sanitizeEventValue(redactSecrets(event), env) as CodexAgentEvent
+}
+
+function sanitizeEventValue(value: unknown, env: NodeJS.ProcessEnv): unknown {
+  if (typeof value === 'string') {
+    return redactEnvironmentSecrets(value, env).slice(0, MAX_EVENT_STRING_CHARS)
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeEventValue(entry, env))
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        sanitizeEventValue(entry, env),
+      ]),
+    )
+  }
+  return value
 }
 
 function normalizeParserError(error: unknown): Error {

@@ -5,6 +5,8 @@ type CodexRawLine = {
   readonly value: Record<string, unknown>
 }
 
+const MAX_JSONL_LINE_CHARS = 1024 * 1024
+
 export class CodexJsonlParseError extends Error {
   readonly line: number
 
@@ -28,6 +30,7 @@ export class CodexJsonlParser {
       let newlineIndex = this.buffer.indexOf('\n', lineStartIndex)
       while (newlineIndex >= 0) {
         const line = this.buffer.slice(lineStartIndex, newlineIndex)
+        assertLineSize(line, this.nextLine)
         lineStartIndex = newlineIndex + 1
         const event = parseLine(line, this.nextLine)
         this.nextLine += 1
@@ -39,6 +42,12 @@ export class CodexJsonlParser {
         newlineIndex = this.buffer.indexOf('\n', lineStartIndex)
       }
 
+      if (this.buffer.length - lineStartIndex > MAX_JSONL_LINE_CHARS) {
+        throw new CodexJsonlParseError(
+          this.nextLine,
+          `line exceeds ${MAX_JSONL_LINE_CHARS} characters`,
+        )
+      }
       return events
     } finally {
       this.buffer = this.buffer.slice(lineStartIndex)
@@ -52,10 +61,20 @@ export class CodexJsonlParser {
 
     const line = this.buffer
     this.buffer = ''
+    assertLineSize(line, this.nextLine)
     const event = parseLine(line, this.nextLine)
     this.nextLine += 1
 
     return event === undefined ? [] : [event]
+  }
+}
+
+function assertLineSize(line: string, lineNumber: number): void {
+  if (line.length > MAX_JSONL_LINE_CHARS) {
+    throw new CodexJsonlParseError(
+      lineNumber,
+      `line exceeds ${MAX_JSONL_LINE_CHARS} characters`,
+    )
   }
 }
 

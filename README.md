@@ -58,9 +58,9 @@ To rebuild the RAG vector store from scratch, run Aider's `Rebuild entire vault 
 
 ### Security and data flow
 
-Aider stores API keys and OAuth tokens through Obsidian `app.secretStorage` when that API is available. On older Obsidian runtimes without `app.secretStorage`, the plugin keeps working through a fallback settings path; that fallback is less secure because secrets are protected only as ordinary local plugin data. The `minAppVersion` remains unchanged because this fallback exists. Requiring secure storage for every user would require Obsidian 1.11.4+.
+Aider stores API keys, OAuth tokens, and MCP server environment values through Obsidian `app.secretStorage`. The supported minimum Obsidian version is 1.11.4; unsupported runtimes keep credentials in memory only and never write them to ordinary plugin settings.
 
-Subscription OAuth uses third-party or internal provider endpoints and should be treated as use-at-your-own-risk, separate from official usage-based API keys. MCP tools can run local commands, and MCP tool output may be sent to the selected LLM provider. MCP server `env` values are ordinary plugin settings, not Obsidian `app.secretStorage` entries. Vault content is also sent to providers when you include files, folders, current-file context, Vault Search/RAG results, web content, images, or tool results in a chat.
+Subscription OAuth uses third-party or internal provider endpoints and should be treated as use-at-your-own-risk, separate from official usage-based API keys. MCP tools can run local commands, and MCP tool output may be sent to the selected LLM provider. Vault content is also sent to providers when you include files, folders, current-file context, Vault Search/RAG results, web content, images, or tool results in a chat.
 
 ### Upstream provenance
 

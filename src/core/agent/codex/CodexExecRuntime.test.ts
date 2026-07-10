@@ -98,6 +98,48 @@ describe('CodexExecRuntime', () => {
     ])
   })
 
+  it('redacts environment secrets and bounds streamed event text', async () => {
+    const childProcess = new FakeChildProcess()
+    const runtime = new CodexExecRuntime({
+      spawnSpecResolverOptions: {
+        env: { PATH: '/usr/bin', SERVICE_TOKEN: 'bare-codex-secret' },
+        platform: 'linux',
+      },
+      spawnProcess: () => childProcess,
+    })
+    const events: CodexAgentEvent[] = []
+    const handle = runtime.execute(
+      {
+        cwd: '/vault',
+        prompt: 'Inspect',
+        sandboxMode: 'workspace-write',
+        approvalPolicy: 'default',
+      },
+      { onEvent: (event) => events.push(event) },
+    )
+    childProcess.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          status: 'completed',
+          command: 'echo bare-codex-secret',
+          aggregated_output: `bare-codex-secret${'x'.repeat(30_000)}`,
+          result: { token: 'nested-secret' },
+        },
+      })}\n`,
+    )
+    childProcess.close(0)
+
+    await handle.done
+    const event = events[0]
+    const item = event?.kind === 'item.completed' ? event.item : {}
+    expect(JSON.stringify(item)).not.toContain('bare-codex-secret')
+    expect(JSON.stringify(item)).not.toContain('nested-secret')
+    expect(String(item.aggregated_output)).toHaveLength(24_000)
+  })
+
   it('cancels the child process when aborted', async () => {
     // Given: a running Codex process.
     const childProcess = new FakeChildProcess()

@@ -1,6 +1,14 @@
 import { CodexJsonlParseError, CodexJsonlParser } from './CodexJsonlParser'
 
 describe('CodexJsonlParser', () => {
+  it('rejects oversized JSONL lines before parsing or persistence', () => {
+    const parser = new CodexJsonlParser()
+
+    expect(() => parser.push('x'.repeat(1024 * 1024 + 1))).toThrow(
+      'line exceeds 1048576 characters',
+    )
+  })
+
   it('emits typed events when chunks contain complete and split JSONL lines', () => {
     // Given: Codex JSONL output split across arbitrary process chunks.
     const parser = new CodexJsonlParser()

@@ -228,7 +228,7 @@ describe('settings secret hydration boundary', () => {
     await expect(secretStore.getSecret(apiKeySecretId)).resolves.toBeNull()
   })
 
-  it('fallback persistence preserves current ordinary settings behavior', async () => {
+  it('fallback keeps credentials in memory instead of ordinary settings', async () => {
     // Given: secure storage is unavailable in the current runtime.
     const settings = createTestSettings()
     const secretStore = createSecretStore({ app: {} })
@@ -239,9 +239,17 @@ describe('settings secret hydration boundary', () => {
       secretStore,
     )
 
-    // Then: fallback does not silently delete credentials it cannot persist securely.
-    expect(secretStore.getBackendStatus()).toBe('insecure-settings-fallback')
-    expect(persistedSettings.providers[0].apiKey).toBe('sk-test-openai-secret')
-    expect(JSON.stringify(persistedSettings)).toContain('test-refresh-token')
+    const hydratedSettings = await hydrateSettingsSecrets(
+      persistedSettings,
+      secretStore,
+    )
+
+    // Then: unsupported runtimes can use credentials only for this process.
+    expect(secretStore.getBackendStatus()).toBe('memory-only-fallback')
+    expect(persistedSettings.providers[0]).not.toHaveProperty('apiKey')
+    expect(JSON.stringify(persistedSettings)).not.toContain(
+      'test-refresh-token',
+    )
+    expect(hydratedSettings.providers[0].apiKey).toBe('sk-test-openai-secret')
   })
 })

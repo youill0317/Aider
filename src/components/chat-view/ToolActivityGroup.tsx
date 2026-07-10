@@ -1,7 +1,7 @@
 import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { ChatAgentCommandMessage, ChatToolMessage } from '../../types/chat'
+import type { ChatAgentCommandMessage } from '../../types/chat'
 import type { ToolCallResponse } from '../../types/tool-call.types'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
@@ -18,15 +18,24 @@ import {
   shouldUseActivityTimeline,
 } from './tool-activity'
 import ToolMessage from './ToolMessage'
+import type {
+  AbortApprovedToolCall,
+  ExecuteApprovedToolCall,
+  ToolCallResponseUpdater,
+} from './ToolMessage'
 
 export default function ToolActivityGroup({
   messages,
   conversationId,
-  onToolMessageUpdate,
+  executeToolCall,
+  abortToolCall,
+  onToolCallResponseUpdate,
 }: {
   messages: readonly ToolActivityMessage[]
   conversationId: string
-  onToolMessageUpdate: (message: ChatToolMessage) => void
+  executeToolCall: ExecuteApprovedToolCall
+  abortToolCall: AbortApprovedToolCall
+  onToolCallResponseUpdate: ToolCallResponseUpdater
 }) {
   const steps = useMemo(() => getToolActivitySteps(messages), [messages])
 
@@ -35,7 +44,9 @@ export default function ToolActivityGroup({
       <ToolActivityMessageList
         messages={messages}
         conversationId={conversationId}
-        onToolMessageUpdate={onToolMessageUpdate}
+        executeToolCall={executeToolCall}
+        abortToolCall={abortToolCall}
+        onToolCallResponseUpdate={onToolCallResponseUpdate}
       />
     )
   }
@@ -46,11 +57,15 @@ export default function ToolActivityGroup({
 function ToolActivityMessageList({
   messages,
   conversationId,
-  onToolMessageUpdate,
+  executeToolCall,
+  abortToolCall,
+  onToolCallResponseUpdate,
 }: {
   messages: readonly ToolActivityMessage[]
   conversationId: string
-  onToolMessageUpdate: (message: ChatToolMessage) => void
+  executeToolCall: ExecuteApprovedToolCall
+  abortToolCall: AbortApprovedToolCall
+  onToolCallResponseUpdate: ToolCallResponseUpdater
 }) {
   return (
     <>
@@ -60,7 +75,9 @@ function ToolActivityMessageList({
             <ToolMessage
               message={message}
               conversationId={conversationId}
-              onMessageUpdate={onToolMessageUpdate}
+              executeToolCall={executeToolCall}
+              abortToolCall={abortToolCall}
+              onToolCallResponseUpdate={onToolCallResponseUpdate}
             />
           </div>
         ) : (

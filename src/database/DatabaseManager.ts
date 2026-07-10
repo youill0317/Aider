@@ -14,6 +14,7 @@ export class DatabaseManager {
   private dbPath: string
   private pgClient: PGlite | null = null
   private db: PgliteDatabase | null = null
+  private saveQueue: Promise<void> = Promise.resolve()
   // WeakMap to prevent circular references
   private static managers = new WeakMap<
     DatabaseManager,
@@ -40,7 +41,6 @@ export class DatabaseManager {
     // WeakMap setup
     const managers = {
       vectorManager: new VectorManager(app, dbManager.db),
-      templateManager: new LegacyTemplateManager(app, dbManager.db),
     }
 
     // save, vacuum callback setup
@@ -51,18 +51,12 @@ export class DatabaseManager {
 
     managers.vectorManager.setSaveCallback(saveCallback)
     managers.vectorManager.setVacuumCallback(vacuumCallback)
-    managers.templateManager.setSaveCallback(saveCallback)
-    managers.templateManager.setVacuumCallback(vacuumCallback)
 
     DatabaseManager.managers.set(dbManager, managers)
 
     console.log('Aider database initialized.', dbManager)
 
     return dbManager
-  }
-
-  getDb() {
-    return this.db
   }
 
   getVectorManager(): VectorManager {
@@ -82,7 +76,8 @@ export class DatabaseManager {
     const managers = DatabaseManager.managers.get(this) ?? {}
     if (!managers.templateManager) {
       if (this.db) {
-        managers.templateManager = new LegacyTemplateManager(this.app, this.db)
+        managers.templateManager = new LegacyTemplateManager(this.db)
+        managers.templateManager.setSaveCallback(() => this.save())
         DatabaseManager.managers.set(this, managers)
       } else {
         throw new Error('Database is not initialized')
@@ -159,7 +154,7 @@ export class DatabaseManager {
         // This error occurs when using an outdated Obsidian installer version
         throw new PGLiteAbortedException()
       }
-      return null
+      throw error
     }
   }
 
@@ -180,18 +175,20 @@ export class DatabaseManager {
   }
 
   async save(): Promise<void> {
-    if (!this.pgClient) {
-      return
-    }
-    try {
-      const blob: Blob = await this.pgClient.dumpDataDir('gzip')
-      await this.app.vault.adapter.writeBinary(
-        this.dbPath,
-        Buffer.from(await blob.arrayBuffer()),
-      )
-    } catch (error) {
-      console.error('Error saving database:', error)
-    }
+    const save = this.saveQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (!this.pgClient) {
+          return
+        }
+        const blob: Blob = await this.pgClient.dumpDataDir('gzip')
+        await this.app.vault.adapter.writeBinary(
+          this.dbPath,
+          Buffer.from(await blob.arrayBuffer()),
+        )
+      })
+    this.saveQueue = save
+    return save
   }
 
   async cleanup() {

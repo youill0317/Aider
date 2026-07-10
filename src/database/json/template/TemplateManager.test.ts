@@ -8,6 +8,7 @@ const mockAdapter = {
   mkdir: jest.fn().mockResolvedValue(undefined),
   read: jest.fn().mockResolvedValue(''),
   write: jest.fn().mockResolvedValue(undefined),
+  rename: jest.fn().mockResolvedValue(undefined),
   remove: jest.fn().mockResolvedValue(undefined),
   list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
 }
@@ -24,7 +25,14 @@ describe('TemplateManager', () => {
   let templateManager: TemplateManager
 
   beforeEach(() => {
+    jest.clearAllMocks()
+    mockAdapter.exists.mockResolvedValue(true)
+    mockAdapter.list.mockResolvedValue({ files: [], folders: [] })
     templateManager = new TemplateManager(mockApp)
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
   })
 
   describe('filename generation and parsing roundtrip', () => {
@@ -83,5 +91,31 @@ describe('TemplateManager', () => {
         expect(metadata.schemaVersion).toBe(template.schemaVersion)
       }
     })
+  })
+
+  it('does not allow runtime input to replace generated fields', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1620000000000)
+    mockAdapter.exists.mockImplementation(async (filePath: string) =>
+      filePath.endsWith('/templates'),
+    )
+    const injectedId = '123e4567-e89b-42d3-a456-426614174000'
+    const injected = {
+      id: injectedId,
+      name: 'Template',
+      content: { nodes: [] },
+      createdAt: 1,
+      updatedAt: 2,
+      schemaVersion: 999,
+    } as Parameters<TemplateManager['createTemplate']>[0]
+
+    const template = await templateManager.createTemplate(injected)
+
+    expect(template.id).not.toBe(injectedId)
+    expect(template.createdAt).toBe(1620000000000)
+    expect(template.updatedAt).toBe(1620000000000)
+    expect(template.schemaVersion).toBe(TEMPLATE_SCHEMA_VERSION)
+    expect(JSON.parse(String(mockAdapter.write.mock.calls[0][1]))).toEqual(
+      template,
+    )
   })
 })

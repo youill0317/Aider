@@ -1,6 +1,6 @@
 import fuzzysort from 'fuzzysort'
 import { App } from 'obsidian'
-import { v4 as uuidv4 } from 'uuid'
+import { v4 as uuidv4, validate as validateUuid } from 'uuid'
 
 import { AbstractJsonRepository } from '../base'
 import { ROOT_DIR, TEMPLATE_DIR } from '../constants'
@@ -33,6 +33,7 @@ export class TemplateManager extends AbstractJsonRepository<
 
     const encodedName = match[1]
     const id = match[2]
+    if (!validateUuid(id)) return null
     const name = decodeURIComponent(encodedName)
 
     return { id, name, schemaVersion: TEMPLATE_SCHEMA_VERSION }
@@ -53,11 +54,13 @@ export class TemplateManager extends AbstractJsonRepository<
       throw new DuplicateTemplateException(template.name)
     }
 
+    const now = Date.now()
     const newTemplate: Template = {
       id: uuidv4(),
-      ...template,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      name: template.name,
+      content: template.content,
+      createdAt: now,
+      updatedAt: now,
       schemaVersion: TEMPLATE_SCHEMA_VERSION,
     }
 

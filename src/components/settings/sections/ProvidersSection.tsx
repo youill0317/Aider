@@ -1,6 +1,5 @@
 import { Settings, Trash2 } from 'lucide-react'
 import { App } from 'obsidian'
-import React from 'react'
 
 import {
   DEFAULT_PROVIDERS,

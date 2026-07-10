@@ -25,7 +25,7 @@ import {
   hasMatchingVoyageContextualIndexProfile,
 } from '../../vector-metadata'
 
-import { VectorRepository } from './VectorRepository'
+import { IndexedVectorFile, VectorRepository } from './VectorRepository'
 
 export class VectorManager {
   private app: App
@@ -50,6 +50,7 @@ export class VectorManager {
           showReportBugButton: true,
         },
       ).open()
+      throw error
     }
   }
 
@@ -61,7 +62,7 @@ export class VectorManager {
 
   constructor(app: App, db: PgliteDatabase) {
     this.app = app
-    this.repository = new VectorRepository(app, db)
+    this.repository = new VectorRepository(db)
   }
 
   setSaveCallback(callback: () => Promise<void>) {
@@ -115,16 +116,20 @@ export class VectorManager {
       })
       await this.repository.clearAllVectors(embeddingModel)
     } else {
-      await this.deleteVectorsForDeletedFiles(embeddingModel)
+      const indexedFiles = await this.repository.getIndexedFiles(embeddingModel)
+      await this.deleteVectorsForDeletedFiles(indexedFiles, embeddingModel)
       filesToIndex = await this.getFilesToIndex({
         embeddingModel: embeddingModel,
         excludePatterns: options.excludePatterns,
         includePatterns: options.includePatterns,
+        indexedFiles,
       })
-      await this.repository.deleteVectorsForMultipleFiles(
-        filesToIndex.map((file) => file.path),
-        embeddingModel,
-      )
+      if (filesToIndex.length > 0) {
+        await this.repository.deleteVectorsForMultipleFiles(
+          filesToIndex.map((file) => file.path),
+          embeddingModel,
+        )
+      }
     }
 
     if (filesToIndex.length === 0) {
@@ -486,17 +491,17 @@ Please report this issue to the developer if it persists.`,
   }
 
   private async deleteVectorsForDeletedFiles(
+    indexedFiles: IndexedVectorFile[],
     embeddingModel: EmbeddingModelClient,
   ) {
-    const indexedFilePaths =
-      await this.repository.getIndexedFilePaths(embeddingModel)
-    for (const filePath of indexedFilePaths) {
-      if (!this.app.vault.getAbstractFileByPath(filePath)) {
-        await this.repository.deleteVectorsForMultipleFiles(
-          [filePath],
-          embeddingModel,
-        )
-      }
+    const deletedFilePaths = [
+      ...new Set(indexedFiles.map(({ path }) => path)),
+    ].filter((filePath) => !this.app.vault.getAbstractFileByPath(filePath))
+    if (deletedFilePaths.length > 0) {
+      await this.repository.deleteVectorsForMultipleFiles(
+        deletedFilePaths,
+        embeddingModel,
+      )
     }
   }
 
@@ -504,11 +509,13 @@ Please report this issue to the developer if it persists.`,
     embeddingModel,
     excludePatterns,
     includePatterns,
+    indexedFiles = [],
     reindexAll,
   }: {
     embeddingModel: EmbeddingModelClient
     excludePatterns: string[]
     includePatterns: string[]
+    indexedFiles?: IndexedVectorFile[]
     reindexAll?: boolean
   }): Promise<TFile[]> {
     let filesToIndex = this.app.vault.getMarkdownFiles()
@@ -527,15 +534,20 @@ Please report this issue to the developer if it persists.`,
       return filesToIndex
     }
 
-    // Check for updated or new files
+    const indexedFileByPath = new Map<string, IndexedVectorFile>()
+    for (const indexedFile of indexedFiles) {
+      if (indexedFile.dimension !== embeddingModel.dimension) continue
+      const current = indexedFileByPath.get(indexedFile.path)
+      if (!current || indexedFile.mtime > current.mtime) {
+        indexedFileByPath.set(indexedFile.path, indexedFile)
+      }
+    }
+
+    // Check for updated or new files without querying once per vault file.
     filesToIndex = await Promise.all(
       filesToIndex.map(async (file) => {
-        // TODO: Query all rows at once and compare them to enhance performance
-        const fileChunks = await this.repository.getVectorsByFilePath(
-          file.path,
-          embeddingModel,
-        )
-        if (fileChunks.length === 0) {
+        const indexedFile = indexedFileByPath.get(file.path)
+        if (!indexedFile) {
           // File is not indexed, so we need to index it
           const fileContent = await this.app.vault.cachedRead(file)
           if (fileContent.length === 0) {
@@ -544,7 +556,7 @@ Please report this issue to the developer if it persists.`,
           }
           return file
         }
-        const outOfDate = file.stat.mtime > fileChunks[0].mtime
+        const outOfDate = file.stat.mtime > indexedFile.mtime
         if (outOfDate) {
           // File has changed, so we need to re-index it
           return file
@@ -553,7 +565,7 @@ Please report this issue to the developer if it persists.`,
           isVoyageContextualAutoChunkModel(embeddingModel) &&
           !hasMatchingVoyageContextualIndexProfile({
             dimension: embeddingModel.dimension,
-            metadata: fileChunks[0].metadata,
+            metadata: indexedFile.metadata,
             modelId: embeddingModel.id,
           })
         ) {

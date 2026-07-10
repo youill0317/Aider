@@ -162,11 +162,19 @@ function createObsidianSecretStore(
     startIndex: number,
     count: number,
   ) => {
-    await Promise.all(
-      Array.from({ length: Math.max(count - startIndex, 0) }, (_, index) =>
-        deleteStoredSecret(createChunkKey(key, startIndex + index)),
-      ),
-    )
+    let firstError: unknown
+    let failed = false
+    for (let index = startIndex; index < count; index += 1) {
+      try {
+        await deleteStoredSecret(createChunkKey(key, index))
+      } catch (error) {
+        if (!failed) firstError = error
+        failed = true
+      }
+    }
+    if (failed) {
+      throw firstError
+    }
   }
 
   const readMetadata = async (
@@ -224,11 +232,9 @@ function createObsidianSecretStore(
 
       const chunks = splitSecretIntoChunks(value)
       try {
-        await Promise.all(
-          chunks.map((chunk, index) =>
-            secretStorage.setSecret(createChunkKey(key, index), chunk),
-          ),
-        )
+        for (const [index, chunk] of chunks.entries()) {
+          await secretStorage.setSecret(createChunkKey(key, index), chunk)
+        }
         await secretStorage.setSecret(
           key,
           serializeChunkedSecretMetadata(chunks.length),

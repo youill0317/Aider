@@ -14,7 +14,6 @@ import {
   sum,
 } from 'drizzle-orm'
 import { PgliteDatabase } from 'drizzle-orm/pglite'
-import { App } from 'obsidian'
 
 import {
   EmbeddingDbStats,
@@ -23,47 +22,33 @@ import {
 import { DatabaseNotInitializedException } from '../../exception'
 import { InsertEmbedding, SelectEmbedding, embeddingTable } from '../../schema'
 
+export type IndexedVectorFile = Pick<
+  SelectEmbedding,
+  'path' | 'mtime' | 'metadata' | 'dimension'
+>
+
 export class VectorRepository {
-  private app: App
   private db: PgliteDatabase | null
 
-  constructor(app: App, db: PgliteDatabase | null) {
-    this.app = app
+  constructor(db: PgliteDatabase | null) {
     this.db = db
   }
 
-  async getIndexedFilePaths(
+  async getIndexedFiles(
     embeddingModel: EmbeddingModelClient,
-  ): Promise<string[]> {
+  ): Promise<IndexedVectorFile[]> {
     if (!this.db) {
       throw new DatabaseNotInitializedException()
     }
-    const indexedFiles = await this.db
+    return this.db
       .select({
         path: embeddingTable.path,
+        mtime: embeddingTable.mtime,
+        metadata: embeddingTable.metadata,
+        dimension: embeddingTable.dimension,
       })
       .from(embeddingTable)
       .where(eq(embeddingTable.model, embeddingModel.id))
-    return indexedFiles.map((row) => row.path)
-  }
-
-  async getVectorsByFilePath(
-    filePath: string,
-    embeddingModel: EmbeddingModelClient,
-  ): Promise<SelectEmbedding[]> {
-    if (!this.db) {
-      throw new DatabaseNotInitializedException()
-    }
-    const fileVectors = await this.db
-      .select()
-      .from(embeddingTable)
-      .where(
-        and(
-          eq(embeddingTable.path, filePath),
-          eq(embeddingTable.model, embeddingModel.id),
-        ),
-      )
-    return fileVectors
   }
 
   async deleteVectorsForSingleFile(

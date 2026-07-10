@@ -107,6 +107,40 @@ describe('SecretStore backend selection', () => {
     await expect(store.getSecret(secretId)).resolves.toBe('short-refresh-token')
   })
 
+  it('attempts every chunk deletion before reporting a failure', async () => {
+    const secretStorageValues = new Map<string, string>()
+    const deletedKeys: string[] = []
+    const secretId = 'aider-provider-openai-plan-refresh-token'
+    const failedChunk = `${secretId}-chunk-0000`
+    const store = createSecretStore({
+      app: {
+        secretStorage: {
+          getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+          setSecret: async (key: string, value: string) => {
+            secretStorageValues.set(key, value)
+          },
+          deleteSecret: async (key: string) => {
+            deletedKeys.push(key)
+            if (key === failedChunk) throw new Error('chunk delete failed')
+            secretStorageValues.delete(key)
+          },
+        },
+      },
+    })
+    await store.setSecret(secretId, 'refresh-token-part.'.repeat(80))
+
+    await expect(store.deleteSecret(secretId)).rejects.toThrow(
+      'chunk delete failed',
+    )
+
+    expect(deletedKeys).toEqual([
+      secretId,
+      failedChunk,
+      `${secretId}-chunk-0001`,
+    ])
+    expect(secretStorageValues.has(`${secretId}-chunk-0001`)).toBe(false)
+  })
+
   it('treats null from Obsidian secretStorage as missing secret', async () => {
     // Given: Obsidian secretStorage reports a missing secret as null.
     const store = createSecretStore({

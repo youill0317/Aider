@@ -23,7 +23,9 @@ describe('ToolActivityGroup', () => {
     const html = renderToStaticMarkup(
       <ToolActivityGroup
         conversationId="conversation-1"
-        onToolMessageUpdate={jest.fn()}
+        executeToolCall={jest.fn()}
+        abortToolCall={jest.fn()}
+        onToolCallResponseUpdate={jest.fn()}
         messages={[
           {
             id: 'message-1',
@@ -66,7 +68,9 @@ describe('ToolActivityGroup', () => {
     const html = renderToStaticMarkup(
       <ToolActivityGroup
         conversationId="conversation-1"
-        onToolMessageUpdate={jest.fn()}
+        executeToolCall={jest.fn()}
+        abortToolCall={jest.fn()}
+        onToolCallResponseUpdate={jest.fn()}
         messages={[
           {
             id: 'message-1',

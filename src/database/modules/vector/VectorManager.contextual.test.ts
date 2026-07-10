@@ -1,6 +1,6 @@
 import { App, TFile } from 'obsidian'
 
-import { InsertEmbedding, SelectEmbedding } from '../../schema'
+import { InsertEmbedding } from '../../schema'
 
 import { VectorManager } from './VectorManager'
 
@@ -92,6 +92,43 @@ describe('VectorManager contextual embedding route', () => {
       endLine: 2,
     })
   })
+
+  it('uses one index snapshot and batches deleted paths', async () => {
+    const repository = createRepository()
+    repository.getIndexedFiles.mockResolvedValue([
+      { path: 'notes/current.md', mtime: 100, metadata: {}, dimension: 1024 },
+      { path: 'notes/current.md', mtime: 100, metadata: {}, dimension: 1024 },
+      { path: 'notes/deleted.md', mtime: 90, metadata: {}, dimension: 768 },
+    ])
+    const manager = createVectorManager(
+      createApp({ 'notes/current.md': 'Unchanged' }),
+      repository,
+    )
+    const getEmbedding = jest.fn()
+
+    await manager.updateVaultIndex(
+      {
+        id: 'voyage/voyage-4',
+        providerType: 'voyage',
+        model: 'voyage-4',
+        dimension: 1024,
+        getEmbedding,
+      },
+      {
+        chunkSize: 1000,
+        excludePatterns: [],
+        includePatterns: [],
+      },
+    )
+
+    expect(repository.getIndexedFiles).toHaveBeenCalledTimes(1)
+    expect(repository.deleteVectorsForMultipleFiles).toHaveBeenCalledTimes(1)
+    expect(repository.deleteVectorsForMultipleFiles).toHaveBeenCalledWith(
+      ['notes/deleted.md'],
+      expect.objectContaining({ id: 'voyage/voyage-4' }),
+    )
+    expect(getEmbedding).not.toHaveBeenCalled()
+  })
 })
 
 function createVectorManager(
@@ -107,8 +144,7 @@ function createVectorManager(
 function createRepository() {
   return {
     insertedVectors: [] as InsertEmbedding[],
-    getIndexedFilePaths: jest.fn().mockResolvedValue([]),
-    getVectorsByFilePath: jest.fn().mockResolvedValue([] as SelectEmbedding[]),
+    getIndexedFiles: jest.fn().mockResolvedValue([]),
     deleteVectorsForMultipleFiles: jest.fn().mockResolvedValue(undefined),
     clearAllVectors: jest.fn().mockResolvedValue(undefined),
     insertVectors: jest.fn(async function (

@@ -4,6 +4,7 @@ import { ChatConversationManager } from '../../utils/chat/chatHistoryManager'
 import { DatabaseManager } from '../DatabaseManager'
 import { DuplicateTemplateException } from '../exception'
 
+import { writeFileAtomically } from './base'
 import { ChatManager } from './chat/ChatManager'
 import { INITIAL_MIGRATION_MARKER, ROOT_DIR } from './constants'
 import { TemplateManager } from './template/TemplateManager'
@@ -14,24 +15,36 @@ async function hasMigrationCompleted(app: App): Promise<boolean> {
 }
 
 async function markMigrationCompleted(app: App): Promise<void> {
+  const rootPath = normalizePath(ROOT_DIR)
+  if (!(await app.vault.adapter.exists(rootPath))) {
+    try {
+      await app.vault.adapter.mkdir(rootPath)
+    } catch (error) {
+      if (!(await app.vault.adapter.exists(rootPath))) {
+        throw error
+      }
+    }
+  }
   const markerPath = normalizePath(`${ROOT_DIR}/${INITIAL_MIGRATION_MARKER}`)
-  await app.vault.adapter.write(
+  await writeFileAtomically(
+    app.vault.adapter,
     markerPath,
     `Migration completed on ${new Date().toISOString()}`,
   )
 }
 
-async function transferChatHistoryFromLegacy(app: App): Promise<void> {
+async function transferChatHistoryFromLegacy(app: App): Promise<number> {
   const oldChatManager = new ChatConversationManager(app)
   const newChatManager = new ChatManager(app)
 
   const chatList = await oldChatManager.getChatList()
+  let failures = 0
 
   for (const chatMeta of chatList) {
     try {
       const oldChat = await oldChatManager.findChatConversation(chatMeta.id)
       if (!oldChat) {
-        continue
+        throw new Error(`Legacy chat ${chatMeta.id} was not found`)
       }
 
       const existingChat = await newChatManager.findById(oldChat.id)
@@ -39,7 +52,7 @@ async function transferChatHistoryFromLegacy(app: App): Promise<void> {
         continue
       }
 
-      await newChatManager.createChat({
+      await newChatManager.importChat({
         id: oldChat.id,
         title: oldChat.title,
         messages: oldChat.messages,
@@ -54,21 +67,24 @@ async function transferChatHistoryFromLegacy(app: App): Promise<void> {
 
       await oldChatManager.deleteChatConversation(oldChat.id)
     } catch (error) {
+      failures += 1
       console.error(`Error migrating chat ${chatMeta.id}:`, error)
     }
   }
 
   console.log('Chat history migration to JSON database completed')
+  return failures
 }
 
 async function transferTemplatesFromDrizzle(
   app: App,
   dbManager: DatabaseManager,
-): Promise<void> {
+): Promise<number> {
   const jsonTemplateManager = new TemplateManager(app)
   const drizzleTemplateManager = dbManager.getTemplateManager()
 
   const templates = await drizzleTemplateManager.findAllTemplates()
+  let failures = 0
 
   for (const template of templates) {
     try {
@@ -93,25 +109,32 @@ async function transferTemplatesFromDrizzle(
       if (error instanceof DuplicateTemplateException) {
         console.log(`Duplicate template found: ${template.name}. Skipping...`)
       } else {
+        failures += 1
         console.error(`Error migrating template ${template.name}:`, error)
       }
     }
   }
 
   console.log('Templates migration to JSON database completed')
+  return failures
 }
 
 export async function migrateToJsonDatabase(
   app: App,
-  dbManager: DatabaseManager,
-  onMigrationComplete?: () => void,
+  getDatabaseManager: () => Promise<DatabaseManager>,
+  onMigrationComplete?: () => void | Promise<void>,
 ): Promise<void> {
   if (await hasMigrationCompleted(app)) {
     return
   }
 
-  await transferChatHistoryFromLegacy(app)
-  await transferTemplatesFromDrizzle(app, dbManager)
+  const chatFailures = await transferChatHistoryFromLegacy(app)
+  const dbManager = await getDatabaseManager()
+  const templateFailures = await transferTemplatesFromDrizzle(app, dbManager)
+  const failures = chatFailures + templateFailures
+  if (failures > 0) {
+    throw new Error(`JSON database migration failed for ${failures} record(s)`)
+  }
   await markMigrationCompleted(app)
-  onMigrationComplete?.()
+  await onMigrationComplete?.()
 }

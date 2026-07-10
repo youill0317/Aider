@@ -77,7 +77,9 @@ describe('public URL fetch boundary', () => {
       expect.objectContaining({ text: 'ok' }),
     )
     expect(
-      mockHttpsRequest.mock.calls.map(([options]) => options.hostname),
+      mockHttpsRequest.mock.calls.map(
+        ([options]) => (options as https.RequestOptions).hostname,
+      ),
     ).toEqual(['2606:4700:4700::1111', '93.184.216.34'])
   })
 

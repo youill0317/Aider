@@ -161,7 +161,7 @@ describe('Aider JSON storage adoption', () => {
       lastError: REDACTED_ADOPTION_ERROR,
     })
     expect(marker.resources.vectorDb?.status).toBe('completed')
-    expect(marker.resources.secrets?.status).toBe('completed')
+    expect(marker.resources.secrets).toBeUndefined()
     expect(
       decodeText(await app.vault.adapter.readBinary('.aider_vector_db.tar.gz')),
     ).toBe('legacy-vector')

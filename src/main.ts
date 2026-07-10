@@ -29,7 +29,7 @@ import {
   SmartComposerSettings,
   smartComposerSettingsSchema,
 } from './settings/schema/setting.types'
-import { parseSmartComposerSettings } from './settings/schema/settings'
+import { parseSmartComposerSettingsResult } from './settings/schema/settings'
 import { SmartComposerSettingTab } from './settings/SettingTab'
 import {
   ToolDispatcher,
@@ -48,11 +48,14 @@ export default class SmartComposerPlugin extends Plugin {
   ragEngine: RAGEngine | null = null
   private dbManagerInitPromise: Promise<DatabaseManager> | null = null
   private ragEngineInitPromise: Promise<RAGEngine> | null = null
+  private mcpManagerInitPromise: Promise<McpManager> | null = null
   private secretStore: SecretStore | null = null
   private settingsSaveQueue: Promise<void> = Promise.resolve()
   private timeoutIds: ReturnType<typeof setTimeout>[] = [] // Use ReturnType instead of number
+  private unloading = false
 
   async onload() {
+    this.unloading = false
     await loadAiderMigrationWiring(
       {
         adoptSmartComposerData: () => this.adoptSmartComposerData(),
@@ -161,21 +164,28 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   onunload() {
+    this.unloading = true
     // clear all timers
     this.timeoutIds.forEach((id) => clearTimeout(id))
     this.timeoutIds = []
 
-    // RagEngine cleanup
-    this.ragEngine?.cleanup()
+    // Finish queued RAG work before closing its database.
+    const ragEngine = this.ragEngine
+    const dbManager = this.dbManager
     this.ragEngine = null
 
     // Promise cleanup
     this.dbManagerInitPromise = null
     this.ragEngineInitPromise = null
+    this.mcpManagerInitPromise = null
 
-    // DatabaseManager cleanup
-    this.dbManager?.cleanup()
     this.dbManager = null
+    void (async () => {
+      await ragEngine?.cleanup()
+      await dbManager?.cleanup()
+    })().catch(() => {
+      console.error('Failed to close the Aider database cleanly')
+    })
 
     // McpManager cleanup
     this.mcpManager?.cleanup()
@@ -187,12 +197,15 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const parsedSettings = parseSmartComposerSettings(await this.loadData())
+    const { settings: parsedSettings, safeToPersist } =
+      parseSmartComposerSettingsResult(await this.loadData())
     const secretStore = this.getSecretStore()
     this.settings = await hydrateSettingsSecrets(parsedSettings, secretStore)
-    await this.saveData(
-      await sanitizeSettingsForPersistence(this.settings, secretStore),
-    ) // Save updated settings
+    if (safeToPersist) {
+      await this.saveData(
+        await sanitizeSettingsForPersistence(this.settings, secretStore),
+      ) // Save updated settings
+    }
   }
 
   async setSettings(newSettings: SmartComposerSettings) {
@@ -300,6 +313,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   async getDbManager(): Promise<DatabaseManager> {
+    this.assertLoaded()
     if (this.dbManager) {
       return this.dbManager
     }
@@ -307,8 +321,13 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     if (!this.dbManagerInitPromise) {
       this.dbManagerInitPromise = (async () => {
         try {
-          this.dbManager = await DatabaseManager.create(this.app)
-          return this.dbManager
+          const manager = await DatabaseManager.create(this.app)
+          if (this.unloading) {
+            await manager.cleanup()
+            throw new Error('Aider unloaded during database initialization')
+          }
+          this.dbManager = manager
+          return manager
         } catch (error) {
           this.dbManagerInitPromise = null
           if (error instanceof PGLiteAbortedException) {
@@ -324,6 +343,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   async getRAGEngine(): Promise<RAGEngine> {
+    this.assertLoaded()
     if (this.ragEngine) {
       return this.ragEngine
     }
@@ -332,12 +352,16 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       this.ragEngineInitPromise = (async () => {
         try {
           const dbManager = await this.getDbManager()
-          this.ragEngine = new RAGEngine(
-            this.app,
+          const ragEngine = new RAGEngine(
             this.settings,
             dbManager.getVectorManager(),
           )
-          return this.ragEngine
+          if (this.unloading) {
+            await ragEngine.cleanup()
+            throw new Error('Aider unloaded during RAG initialization')
+          }
+          this.ragEngine = ragEngine
+          return ragEngine
         } catch (error) {
           this.ragEngineInitPromise = null
           throw error
@@ -349,26 +373,39 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   async getMcpManager(): Promise<McpManager> {
+    this.assertLoaded()
     if (this.mcpManager) {
       return this.mcpManager
     }
 
-    try {
-      this.mcpManager = new McpManager({
-        settings: this.settings,
-        registerSettingsListener: (
-          listener: (settings: SmartComposerSettings) => void,
-        ) => this.addSettingsChangeListener(listener),
-      })
-      await this.mcpManager.initialize()
-      return this.mcpManager
-    } catch (error) {
-      this.mcpManager = null
-      throw error
+    if (!this.mcpManagerInitPromise) {
+      this.mcpManagerInitPromise = (async () => {
+        const manager = new McpManager({
+          settings: this.settings,
+          registerSettingsListener: (
+            listener: (settings: SmartComposerSettings) => void,
+          ) => this.addSettingsChangeListener(listener),
+        })
+        try {
+          await manager.initialize()
+          if (this.unloading) {
+            throw new Error('Aider unloaded during MCP initialization')
+          }
+          this.mcpManager = manager
+          return manager
+        } catch (error) {
+          manager.cleanup()
+          this.mcpManagerInitPromise = null
+          throw error
+        }
+      })()
     }
+
+    return this.mcpManagerInitPromise
   }
 
   getCodexToolRunner(): CodexToolRunner {
+    this.assertLoaded()
     if (this.codexToolRunner) {
       return this.codexToolRunner
     }
@@ -384,6 +421,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   async getToolDispatcher(): Promise<ToolDispatcher> {
+    this.assertLoaded()
     if (this.toolDispatcher) {
       return this.toolDispatcher
     }
@@ -393,6 +431,12 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       codexToolRunner: this.getCodexToolRunner(),
     })
     return this.toolDispatcher
+  }
+
+  private assertLoaded(): void {
+    if (this.unloading) {
+      throw new Error('Aider is unloading')
+    }
   }
 
   private registerTimeout(callback: () => void, timeout: number): void {
@@ -416,12 +460,17 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
 
   private async migrateToJsonStorage() {
     try {
-      const dbManager = await this.getDbManager()
-      await migrateToJsonDatabase(this.app, dbManager, async () => {
-        await this.reloadChatView()
-        console.log('Migration to JSON storage completed successfully')
-      })
+      await migrateToJsonDatabase(
+        this.app,
+        () => this.getDbManager(),
+        async () => {
+          if (this.unloading) return
+          await this.reloadChatView()
+          console.log('Migration to JSON storage completed successfully')
+        },
+      )
     } catch (error) {
+      if (this.unloading) return
       console.error('Failed to migrate to JSON storage:', error)
       new Notice(
         'Failed to migrate to JSON storage. Please check the console for details.',

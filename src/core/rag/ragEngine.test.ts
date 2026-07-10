@@ -1,5 +1,3 @@
-import { App } from 'obsidian'
-
 import { VectorManager } from '../../database/modules/vector/VectorManager'
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import { ChatModel } from '../../types/chat-model.types'
@@ -44,7 +42,6 @@ describe('RAGEngine contextual embedding routing', () => {
     const performSimilaritySearch = jest.fn().mockResolvedValue([])
     const vectorManager = createVectorManager({ performSimilaritySearch })
     const engine = new RAGEngine(
-      {} as App,
       createSettings({
         embeddingModelId: 'voyage/voyage-context-4',
         embeddingModels: [
@@ -91,7 +88,6 @@ describe('RAGEngine contextual embedding routing', () => {
     const performSimilaritySearch = jest.fn().mockResolvedValue([])
     const vectorManager = createVectorManager({ performSimilaritySearch })
     const engine = new RAGEngine(
-      {} as App,
       createSettings({
         embeddingModelId: 'voyage/voyage-4',
         embeddingModels: [
@@ -119,6 +115,115 @@ describe('RAGEngine contextual embedding routing', () => {
         id: 'voyage/voyage-4',
       }),
       expect.any(Object),
+    )
+  })
+
+  it('serializes concurrent index updates', async () => {
+    getProviderClientMock.mockReturnValue(createProviderClient({}))
+    let activeUpdates = 0
+    let maxActiveUpdates = 0
+    const updateVaultIndex = jest.fn(async () => {
+      activeUpdates += 1
+      maxActiveUpdates = Math.max(maxActiveUpdates, activeUpdates)
+      await Promise.resolve()
+      activeUpdates -= 1
+    })
+    const engine = new RAGEngine(
+      createSettings({
+        embeddingModelId: 'voyage/voyage-4',
+        embeddingModels: [
+          {
+            providerType: 'voyage',
+            providerId: 'voyage',
+            id: 'voyage/voyage-4',
+            model: 'voyage-4',
+            dimension: 1024,
+          },
+        ],
+      }),
+      {
+        updateVaultIndex,
+      } as unknown as VectorManager,
+    )
+
+    await Promise.all([
+      engine.updateVaultIndex(),
+      engine.updateVaultIndex(),
+      engine.updateVaultIndex(),
+    ])
+
+    expect(updateVaultIndex).toHaveBeenCalledTimes(3)
+    expect(maxActiveUpdates).toBe(1)
+  })
+
+  it('keeps one model snapshot and drains active queries before cleanup', async () => {
+    const getEmbedding = jest.fn().mockResolvedValue([0.3, 0.4])
+    getProviderClientMock.mockReturnValue(
+      createProviderClient({ getEmbedding }),
+    )
+    let finishIndex: (() => void) | undefined
+    const updateVaultIndex = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishIndex = resolve
+        }),
+    )
+    const performSimilaritySearch = jest.fn().mockResolvedValue([])
+    const vectorManager = {
+      updateVaultIndex,
+      performSimilaritySearch,
+    } as unknown as VectorManager
+    const initialSettings = createSettings({
+      embeddingModelId: 'voyage/voyage-4',
+      embeddingModels: [
+        {
+          providerType: 'voyage',
+          providerId: 'voyage',
+          id: 'voyage/voyage-4',
+          model: 'voyage-4',
+          dimension: 1024,
+        },
+      ],
+    })
+    const engine = new RAGEngine(initialSettings, vectorManager)
+
+    const query = engine.processQuery({ query: 'stable model' })
+    await Promise.resolve()
+    await Promise.resolve()
+    engine.setSettings({
+      ...initialSettings,
+      embeddingModelId: 'voyage/voyage-4-lite',
+      embeddingModels: [
+        {
+          providerType: 'voyage',
+          providerId: 'voyage',
+          id: 'voyage/voyage-4-lite',
+          model: 'voyage-4-lite',
+          dimension: 512,
+        },
+      ],
+    })
+    let cleanupFinished = false
+    const cleanup = engine.cleanup().then(() => {
+      cleanupFinished = true
+    })
+    await Promise.resolve()
+    expect(cleanupFinished).toBe(false)
+
+    finishIndex?.()
+    await query
+    await cleanup
+
+    expect(getEmbedding).toHaveBeenCalledWith('voyage-4', 'stable model', {
+      dimensions: undefined,
+    })
+    expect(performSimilaritySearch).toHaveBeenCalledWith(
+      [0.3, 0.4],
+      expect.objectContaining({ id: 'voyage/voyage-4' }),
+      expect.any(Object),
+    )
+    await expect(engine.updateVaultIndex()).rejects.toThrow(
+      'RAG engine is closed',
     )
   })
 })

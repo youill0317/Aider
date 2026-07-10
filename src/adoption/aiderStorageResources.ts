@@ -57,9 +57,3 @@ export async function adoptVectorDatabase(
   )
   return completed(paths.legacyVectorPath, paths.canonicalVectorPath)
 }
-
-export function adoptSecretNamespace(): Promise<AdoptionOutcome> {
-  return Promise.resolve(
-    completed('smart-composer-provider-*', 'aider-provider-*'),
-  )
-}

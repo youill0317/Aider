@@ -16,7 +16,6 @@ import {
   adoptChatHistories,
   adoptJsonDatabase,
   adoptPluginData,
-  adoptSecretNamespace,
   adoptVectorDatabase,
 } from './aiderStorageResources'
 
@@ -54,14 +53,6 @@ export async function adoptAiderStorage(
     'legacyChatHistories',
     () => adoptChatHistories(app, paths),
   )
-  nextResources = await adoptResource(
-    app,
-    paths,
-    nextResources,
-    'secrets',
-    () => adoptSecretNamespace(),
-  )
-
   return { resources: nextResources }
 }
 
@@ -69,7 +60,7 @@ async function adoptResource(
   app: AiderAdoptionApp,
   paths: AdoptionPaths,
   resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>>,
-  resource: AdoptionResource,
+  resource: Exclude<AdoptionResource, 'secrets'>,
   adopt: () => Promise<AdoptionOutcome>,
 ): Promise<Partial<Record<AdoptionResource, AdoptionResourceStatus>>> {
   if (isTerminalAdoptionStatus(resources[resource]?.status)) {
@@ -116,7 +107,7 @@ async function adoptResource(
 
 function getResourcePaths(
   paths: AdoptionPaths,
-  resource: AdoptionResource,
+  resource: Exclude<AdoptionResource, 'secrets'>,
 ): Pick<AdoptionOutcome, 'sourcePath' | 'targetPath'> {
   switch (resource) {
     case 'pluginData':
@@ -138,11 +129,6 @@ function getResourcePaths(
       return {
         sourcePath: paths.legacyChatHistoryDir,
         targetPath: paths.canonicalChatHistoryDir,
-      }
-    case 'secrets':
-      return {
-        sourcePath: 'smart-composer-provider-*',
-        targetPath: 'aider-provider-*',
       }
   }
 }

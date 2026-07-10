@@ -1,6 +1,5 @@
 import debounce from 'lodash.debounce'
-import isEqual from 'lodash.isequal'
-import { App } from 'obsidian'
+import { App, Notice } from 'obsidian'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { editorStateToPlainText } from '../components/chat-view/chat-input/utils/editor-state-to-plain-text'
@@ -17,13 +16,12 @@ import {
   serializeMentionable,
 } from '../utils/chat/mentionable'
 
+import { ChatSaveQueue } from './chat-save-queue'
 import { useChatManager } from './useJsonManagers'
 
 type UseChatHistory = {
-  createOrUpdateConversation: (
-    id: string,
-    messages: ChatMessage[],
-  ) => Promise<void> | undefined
+  createOrUpdateConversation: (id: string, messages: ChatMessage[]) => void
+  flushPendingSave: () => Promise<void>
   deleteConversation: (id: string) => Promise<void>
   getChatMessagesById: (id: string) => Promise<ChatMessage[] | null>
   updateConversationTitle: (id: string, title: string) => Promise<void>
@@ -45,51 +43,86 @@ export function useChatHistory(): UseChatHistory {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const createOrUpdateConversation = useMemo(
-    () =>
-      debounce(
-        async (id: string, messages: ChatMessage[]): Promise<void> => {
-          const serializedMessages = messages.map(serializeChatMessage)
-          const existingConversation = await chatManager.findById(id)
-
-          if (existingConversation) {
-            if (isEqual(existingConversation.messages, serializedMessages)) {
-              return
-            }
-            await chatManager.updateChat(existingConversation.id, {
-              messages: serializedMessages,
-            })
-          } else {
-            const firstUserMessage = messages.find((v) => v.role === 'user')
-
-            await chatManager.createChat({
-              id,
-              title: firstUserMessage?.content
-                ? editorStateToPlainText(firstUserMessage.content).substring(
-                    0,
-                    50,
-                  )
-                : 'New chat',
-              messages: serializedMessages,
-            })
-          }
-
-          await fetchChatList()
-        },
-        300,
-        {
-          maxWait: 1000,
-        },
-      ),
-    [chatManager, fetchChatList],
+  const cacheConversation = useCallback(
+    ({ id, title, updatedAt, schemaVersion }: ChatConversationMetadata) => {
+      setChatList((current) =>
+        [
+          { id, title, updatedAt, schemaVersion },
+          ...current.filter((conversation) => conversation.id !== id),
+        ].sort((a, b) => b.updatedAt - a.updatedAt),
+      )
+    },
+    [],
   )
+
+  const persistConversation = useCallback(
+    async (id: string, messages: ChatMessage[]) => {
+      const serializedMessages = messages.map(serializeChatMessage)
+      let conversation = await chatManager.updateChat(id, {
+        messages: serializedMessages,
+      })
+
+      if (!conversation) {
+        const firstUserMessage = messages.find(
+          (message) => message.role === 'user',
+        )
+        conversation = await chatManager.createChat({
+          id,
+          title: firstUserMessage?.content
+            ? editorStateToPlainText(firstUserMessage.content).substring(0, 50)
+            : 'New chat',
+          messages: serializedMessages,
+        })
+      }
+
+      cacheConversation(conversation)
+    },
+    [cacheConversation, chatManager],
+  )
+
+  const saveQueue = useMemo(
+    () =>
+      new ChatSaveQueue(persistConversation, (error) => {
+        new Notice('Failed to save chat history')
+        console.error('Failed to save chat history', error)
+      }),
+    [persistConversation],
+  )
+
+  const debouncedSave = useMemo(
+    () => debounce(() => saveQueue.drain(), 300, { maxWait: 1000 }),
+    [saveQueue],
+  )
+
+  const createOrUpdateConversation = useCallback(
+    (id: string, messages: ChatMessage[]) => {
+      saveQueue.schedule(id, messages)
+      debouncedSave()
+    },
+    [debouncedSave, saveQueue],
+  )
+
+  const flushPendingSave = useCallback(async () => {
+    debouncedSave.flush()
+    await saveQueue.flush()
+  }, [debouncedSave, saveQueue])
+
+  useEffect(() => {
+    return () => {
+      debouncedSave.flush()
+    }
+  }, [debouncedSave])
 
   const deleteConversation = useCallback(
     async (id: string): Promise<void> => {
-      await chatManager.deleteChat(id)
-      await fetchChatList()
+      await saveQueue.delete(id, async () => {
+        await chatManager.deleteChat(id)
+        setChatList((current) =>
+          current.filter((conversation) => conversation.id !== id),
+        )
+      })
     },
-    [chatManager, fetchChatList],
+    [chatManager, saveQueue],
   )
 
   const getChatMessagesById = useCallback(
@@ -110,20 +143,20 @@ export function useChatHistory(): UseChatHistory {
       if (title.length === 0) {
         throw new Error('Chat title cannot be empty')
       }
-      const conversation = await chatManager.findById(id)
-      if (!conversation) {
+      const updatedConversation = await saveQueue.mutate(() =>
+        chatManager.updateChat(id, { title }),
+      )
+      if (!updatedConversation) {
         throw new Error('Conversation not found')
       }
-      await chatManager.updateChat(conversation.id, {
-        title,
-      })
-      await fetchChatList()
+      cacheConversation(updatedConversation)
     },
-    [chatManager, fetchChatList],
+    [cacheConversation, chatManager, saveQueue],
   )
 
   return {
     createOrUpdateConversation,
+    flushPendingSave,
     deleteConversation,
     getChatMessagesById,
     updateConversationTitle,

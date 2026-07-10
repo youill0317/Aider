@@ -1,19 +1,49 @@
-import { App, normalizePath } from 'obsidian'
-import path from 'path-browserify'
+import { App, DataAdapter, normalizePath } from 'obsidian'
+import * as path from 'path-browserify'
+
+export async function writeFileAtomically(
+  adapter: DataAdapter,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  const temporaryPath = normalizePath(
+    `${filePath}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+  )
+  try {
+    await adapter.write(temporaryPath, content)
+    await adapter.rename(temporaryPath, filePath)
+  } catch (error) {
+    try {
+      if (await adapter.exists(temporaryPath)) {
+        await adapter.remove(temporaryPath)
+      }
+    } catch {
+      // Keep the original write error; temporary-file cleanup is best effort.
+    }
+    throw error
+  }
+}
 
 export abstract class AbstractJsonRepository<T, M> {
   protected dataDir: string
   protected app: App
+  private directoryReady: Promise<void>
 
   constructor(app: App, dataDir: string) {
     this.app = app
     this.dataDir = normalizePath(dataDir)
-    this.ensureDirectory()
+    this.directoryReady = this.ensureDirectory()
   }
 
   private async ensureDirectory(): Promise<void> {
     if (!(await this.app.vault.adapter.exists(this.dataDir))) {
-      await this.app.vault.adapter.mkdir(this.dataDir)
+      try {
+        await this.app.vault.adapter.mkdir(this.dataDir)
+      } catch (error) {
+        if (!(await this.app.vault.adapter.exists(this.dataDir))) {
+          throw error
+        }
+      }
     }
   }
 
@@ -23,44 +53,65 @@ export abstract class AbstractJsonRepository<T, M> {
   // Each subclass implements how to parse a file name into metadata.
   protected abstract parseFileName(fileName: string): M | null
 
+  private getFilePath(fileName: string): string {
+    if (
+      !fileName ||
+      fileName !== path.basename(fileName) ||
+      fileName.includes('\\')
+    ) {
+      throw new Error(`Invalid database file name: ${fileName}`)
+    }
+    return normalizePath(path.join(this.dataDir, fileName))
+  }
+
   public async create(row: T): Promise<void> {
+    await this.directoryReady
     const fileName = this.generateFileName(row)
-    const filePath = normalizePath(path.join(this.dataDir, fileName))
+    const filePath = this.getFilePath(fileName)
     const content = JSON.stringify(row, null, 2)
 
     if (await this.app.vault.adapter.exists(filePath)) {
       throw new Error(`File already exists: ${filePath}`)
     }
 
-    await this.app.vault.adapter.write(filePath, content)
+    await writeFileAtomically(this.app.vault.adapter, filePath, content)
   }
 
   public async update(oldRow: T, newRow: T): Promise<void> {
+    await this.directoryReady
     const oldFileName = this.generateFileName(oldRow)
     const newFileName = this.generateFileName(newRow)
     const content = JSON.stringify(newRow, null, 2)
 
     if (oldFileName === newFileName) {
       // Simple update - filename hasn't changed
-      const filePath = normalizePath(path.join(this.dataDir, oldFileName))
-      await this.app.vault.adapter.write(filePath, content)
+      const filePath = this.getFilePath(oldFileName)
+      await writeFileAtomically(this.app.vault.adapter, filePath, content)
     } else {
       // Filename has changed - create new file and delete old one
-      const newFilePath = normalizePath(path.join(this.dataDir, newFileName))
-      await this.app.vault.adapter.write(newFilePath, content)
+      const newFilePath = this.getFilePath(newFileName)
+      if (await this.app.vault.adapter.exists(newFilePath)) {
+        throw new Error(`File already exists: ${newFilePath}`)
+      }
+      await writeFileAtomically(this.app.vault.adapter, newFilePath, content)
       await this.delete(oldFileName)
     }
   }
 
   // List metadata for all records by parsing file names.
   public async listMetadata(): Promise<(M & { fileName: string })[]> {
+    await this.directoryReady
     const files = await this.app.vault.adapter.list(this.dataDir)
     return files.files
       .map((filePath) => path.basename(filePath))
       .filter((fileName) => fileName.endsWith('.json'))
       .map((fileName) => {
-        const metadata = this.parseFileName(fileName)
-        return metadata ? { ...metadata, fileName } : null
+        try {
+          const metadata = this.parseFileName(fileName)
+          return metadata ? { ...metadata, fileName } : null
+        } catch {
+          return null
+        }
       })
       .filter(
         (metadata): metadata is M & { fileName: string } => metadata !== null,
@@ -68,7 +119,8 @@ export abstract class AbstractJsonRepository<T, M> {
   }
 
   public async read(fileName: string): Promise<T | null> {
-    const filePath = normalizePath(path.join(this.dataDir, fileName))
+    await this.directoryReady
+    const filePath = this.getFilePath(fileName)
     if (!(await this.app.vault.adapter.exists(filePath))) return null
 
     const content = await this.app.vault.adapter.read(filePath)
@@ -76,7 +128,8 @@ export abstract class AbstractJsonRepository<T, M> {
   }
 
   public async delete(fileName: string): Promise<void> {
-    const filePath = normalizePath(path.join(this.dataDir, fileName))
+    await this.directoryReady
+    const filePath = this.getFilePath(fileName)
     if (await this.app.vault.adapter.exists(filePath)) {
       await this.app.vault.adapter.remove(filePath)
     }

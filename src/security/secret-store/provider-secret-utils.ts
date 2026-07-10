@@ -163,9 +163,7 @@ export async function readProviderSecret(
     ) {
       try {
         await writeSecret(secretStore, keys.current, secret)
-        await Promise.all(
-          keys.legacy.map((legacyKey) => secretStore.deleteSecret(legacyKey)),
-        )
+        await deleteSecrets(secretStore, keys.legacy)
       } catch (error) {
         void error
       }
@@ -181,10 +179,28 @@ export async function deleteProviderSecrets(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
 ): Promise<void> {
-  const allKeys = new Set([keys.current, ...keys.legacy])
-  await Promise.all(
-    Array.from(allKeys, (secretKey) => secretStore.deleteSecret(secretKey)),
-  )
+  await deleteSecrets(secretStore, [keys.current, ...keys.legacy])
+}
+
+async function deleteSecrets(
+  secretStore: SecretStore,
+  keys: readonly string[],
+): Promise<void> {
+  let firstError: unknown
+  let failed = false
+
+  for (const secretKey of new Set(keys)) {
+    try {
+      await secretStore.deleteSecret(secretKey)
+    } catch (error) {
+      if (!failed) firstError = error
+      failed = true
+    }
+  }
+
+  if (failed) {
+    throw firstError
+  }
 }
 
 async function readSecret(

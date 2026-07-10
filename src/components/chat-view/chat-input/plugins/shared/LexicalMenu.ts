@@ -47,9 +47,6 @@ export type MenuResolution = {
   getRect: () => DOMRect
 }
 
-export const PUNCTUATION =
-  '\\.,\\+\\*\\?\\$\\@\\|#{}\\(\\)\\^\\-\\[\\]\\\\/!%\'"~=<>_:;'
-
 export class MenuOption {
   key: string
   ref?: MutableRefObject<HTMLElement | null>

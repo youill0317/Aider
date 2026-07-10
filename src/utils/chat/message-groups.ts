@@ -31,3 +31,18 @@ export function groupAssistantAndToolMessages(
     [],
   )
 }
+
+export type ChatMessageRow = {
+  messageOrGroup: ChatUserMessage | AssistantToolMessageGroup
+  endIndex: number
+}
+
+export function buildChatMessageRows(
+  messages: ChatMessage[],
+): ChatMessageRow[] {
+  let endIndex = 0
+  return groupAssistantAndToolMessages(messages).map((messageOrGroup) => {
+    endIndex += Array.isArray(messageOrGroup) ? messageOrGroup.length : 1
+    return { messageOrGroup, endIndex }
+  })
+}

@@ -11,6 +11,8 @@ import {
   ChatConversationMetadata,
 } from './types'
 
+const SAFE_CHAT_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
 export class ChatManager extends AbstractJsonRepository<
   ChatConversation,
   ChatConversationMetadata
@@ -28,7 +30,7 @@ export class ChatManager extends AbstractJsonRepository<
   protected parseFileName(fileName: string): ChatConversationMetadata | null {
     // Parse: v{schemaVersion}_{title}_{updatedAt}_{id}.json
     const regex = new RegExp(
-      `^v${CHAT_SCHEMA_VERSION}_(.+)_(\\d+)_([0-9a-f-]+)\\.json$`,
+      `^v${CHAT_SCHEMA_VERSION}_(.+)_(\\d+)_([A-Za-z0-9_-]+)\\.json$`,
     )
     const match = fileName.match(regex)
     if (!match) return null
@@ -36,6 +38,7 @@ export class ChatManager extends AbstractJsonRepository<
     const title = decodeURIComponent(match[1])
     const updatedAt = parseInt(match[2], 10)
     const id = match[3]
+    if (!SAFE_CHAT_ID_PATTERN.test(id)) return null
 
     return {
       id,
@@ -46,25 +49,41 @@ export class ChatManager extends AbstractJsonRepository<
   }
 
   public async createChat(
-    initialData: Partial<ChatConversation>,
+    initialData: Partial<
+      Pick<ChatConversation, 'id' | 'title' | 'messages'>
+    > = {},
   ): Promise<ChatConversation> {
-    if (initialData.title && initialData.title.length === 0) {
+    if (initialData.title !== undefined && initialData.title.length === 0) {
       throw new EmptyChatTitleException()
     }
 
     const now = Date.now()
     const newChat: ChatConversation = {
-      id: uuidv4(),
-      title: 'New chat',
-      messages: [],
+      id: initialData.id ?? uuidv4(),
+      title: initialData.title ?? 'New chat',
+      messages: initialData.messages ?? [],
       createdAt: now,
       updatedAt: now,
       schemaVersion: CHAT_SCHEMA_VERSION,
-      ...initialData,
     }
+    this.validateId(newChat.id)
 
     await this.create(newChat)
     return newChat
+  }
+
+  public async importChat(
+    chat: Omit<ChatConversation, 'schemaVersion'>,
+  ): Promise<void> {
+    this.validateId(chat.id)
+    await this.create({
+      id: chat.id,
+      title: chat.title,
+      messages: chat.messages,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    })
   }
 
   public async findById(id: string): Promise<ChatConversation | null> {
@@ -111,5 +130,11 @@ export class ChatManager extends AbstractJsonRepository<
   public async listChats(): Promise<ChatConversationMetadata[]> {
     const metadata = await this.listMetadata()
     return metadata.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  private validateId(id: string): void {
+    if (!SAFE_CHAT_ID_PATTERN.test(id)) {
+      throw new Error(`Invalid chat ID: ${id}`)
+    }
   }
 }

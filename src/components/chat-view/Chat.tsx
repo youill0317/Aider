@@ -26,18 +26,17 @@ import {
 } from '../../core/llm/exception'
 import { getChatModelClient } from '../../core/llm/manager'
 import { useChatHistory } from '../../hooks/useChatHistory'
-import {
-  AssistantToolMessageGroup,
-  ChatMessage,
-  ChatToolMessage,
-  ChatUserMessage,
-} from '../../types/chat'
+import { ChatMessage, ChatToolMessage, ChatUserMessage } from '../../types/chat'
 import {
   MentionableBlock,
   MentionableBlockData,
   MentionableCurrentFile,
 } from '../../types/mentionable'
-import { ToolCallResponseStatus } from '../../types/tool-call.types'
+import {
+  ToolCallRequest,
+  ToolCallResponse,
+  ToolCallResponseStatus,
+} from '../../types/tool-call.types'
 import {
   buildAgentAssistantMessage,
   buildAgentChatRequestArgs,
@@ -53,7 +52,7 @@ import {
   getMentionableKey,
   serializeMentionable,
 } from '../../utils/chat/mentionable'
-import { groupAssistantAndToolMessages } from '../../utils/chat/message-groups'
+import { buildChatMessageRows } from '../../utils/chat/message-groups'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { readTFileContent } from '../../utils/obsidian'
 import { redactSecrets } from '../../utils/security/redact-secrets'
@@ -88,10 +87,31 @@ const getNewInputMessage = (app: App): ChatUserMessage => {
   }
 }
 
+const markRunningToolCallsAborted = (
+  messages: readonly ChatMessage[],
+): ChatMessage[] =>
+  messages.map((message) =>
+    message.role === 'tool'
+      ? {
+          ...message,
+          toolCalls: message.toolCalls.map((toolCall) =>
+            toolCall.response.status === ToolCallResponseStatus.Running
+              ? {
+                  ...toolCall,
+                  response: { status: ToolCallResponseStatus.Aborted as const },
+                }
+              : toolCall,
+          ),
+        }
+      : message,
+  )
+
 export type ChatRef = {
   openNewChat: (selectedBlock?: MentionableBlockData) => void
   addSelectionToChat: (selectedBlock: MentionableBlockData) => void
   focusMessage: () => void
+  abortActiveWork: () => Promise<void>
+  flushPendingSave: () => Promise<void>
 }
 
 export type ChatProps = {
@@ -99,6 +119,11 @@ export type ChatProps = {
 }
 
 type ActiveAgentToolCall = {
+  readonly abortController: AbortController
+  readonly toolCallId: string
+}
+
+type ActiveApprovedToolCall = {
   readonly abortController: AbortController
   readonly toolCallId: string
 }
@@ -112,6 +137,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
 
   const {
     createOrUpdateConversation,
+    flushPendingSave: flushPendingChatSave,
     deleteConversation,
     getChatMessagesById,
     updateConversationTitle,
@@ -153,14 +179,23 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   })
   const [activeAgentToolCallCount, setActiveAgentToolCallCount] = useState(0)
 
-  const groupedChatMessages: (ChatUserMessage | AssistantToolMessageGroup)[] =
-    useMemo(() => {
-      return groupAssistantAndToolMessages(chatMessages)
-    }, [chatMessages])
+  const chatMessageRows = useMemo(
+    () => buildChatMessageRows(chatMessages),
+    [chatMessages],
+  )
 
   const chatUserInputRefs = useRef<Map<string, ChatUserInputRef>>(new Map())
   const chatMessagesRef = useRef<HTMLDivElement>(null)
   const activeAgentToolCallsRef = useRef<ActiveAgentToolCall[]>([])
+  const activeAgentTasksRef = useRef(new Set<Promise<void>>())
+  const activeApprovedToolCallsRef = useRef<ActiveApprovedToolCall[]>([])
+  const activeApprovedToolTasksRef = useRef(new Set<Promise<void>>())
+  const latestChatMessagesRef = useRef(chatMessages)
+  const currentConversationIdRef = useRef(currentConversationId)
+  const workGenerationRef = useRef(0)
+  const readyWorkGenerationRef = useRef(0)
+  latestChatMessagesRef.current = chatMessages
+  currentConversationIdRef.current = currentConversationId
 
   const { autoScrollToBottom, forceScrollToBottom } = useAutoScroll({
     scrollContainerRef: chatMessagesRef,
@@ -194,8 +229,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }, [])
 
   const abortActiveAgentToolCalls = useCallback(
-    (messages: readonly ChatMessage[]) => {
+    async (messages: readonly ChatMessage[]) => {
       const activeToolCalls = activeAgentToolCallsRef.current
+      const activeTasks = [...activeAgentTasksRef.current]
       const toolCallIds = new Set([
         ...activeToolCalls.map((toolCall) => toolCall.toolCallId),
         ...getRunningAgentChatToolCallIds(messages),
@@ -206,29 +242,195 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       activeToolCalls.forEach(({ abortController }) => {
         abortController.abort()
       })
-      if (toolCallIds.size === 0) {
-        return
+      if (activeToolCalls.length > 0) {
+        const updatedMessages = [
+          ...latestChatMessagesRef.current,
+          buildAgentAssistantMessage('Agent Chat was stopped.'),
+        ]
+        latestChatMessagesRef.current = updatedMessages
+        setChatMessages(updatedMessages)
       }
-
-      void (async () => {
-        const toolDispatcher = await getToolDispatcher()
-        toolCallIds.forEach((toolCallId) => {
-          toolDispatcher.abortToolCall(toolCallId)
-        })
-      })().catch((error) => {
-        console.error(
-          'Failed to abort Agent Chat tool calls',
-          redactSecrets(error),
-        )
-      })
+      if (toolCallIds.size > 0) {
+        try {
+          const toolDispatcher = await getToolDispatcher()
+          toolCallIds.forEach((toolCallId) => {
+            toolDispatcher.abortToolCall(toolCallId)
+          })
+        } catch (error) {
+          console.error(
+            'Failed to abort Agent Chat tool calls',
+            redactSecrets(error),
+          )
+        }
+      }
+      await Promise.all(activeTasks.map((task) => task.catch(() => undefined)))
     },
     [getToolDispatcher],
   )
 
-  const abortActiveWork = useCallback(() => {
-    abortActiveStreams()
-    abortActiveAgentToolCalls(chatMessages)
-  }, [abortActiveStreams, abortActiveAgentToolCalls, chatMessages])
+  const abortActiveApprovedToolCalls = useCallback(async () => {
+    const activeToolCalls = activeApprovedToolCallsRef.current
+    const activeTasks = [...activeApprovedToolTasksRef.current]
+    const activeToolCallIds = new Set(
+      activeToolCalls.map(({ toolCallId }) => toolCallId),
+    )
+    if (activeToolCallIds.size > 0) {
+      const updatedMessages = latestChatMessagesRef.current.map((message) =>
+        message.role === 'tool'
+          ? {
+              ...message,
+              toolCalls: message.toolCalls.map((toolCall) =>
+                activeToolCallIds.has(toolCall.request.id)
+                  ? {
+                      ...toolCall,
+                      response: {
+                        status: ToolCallResponseStatus.Aborted as const,
+                      },
+                    }
+                  : toolCall,
+              ),
+            }
+          : message,
+      )
+      latestChatMessagesRef.current = updatedMessages
+      setChatMessages(updatedMessages)
+    }
+    activeApprovedToolCallsRef.current = []
+    activeToolCalls.forEach(({ abortController }) => abortController.abort())
+
+    const abortThroughDispatcher = (async () => {
+      if (activeToolCalls.length === 0) return
+      try {
+        const toolDispatcher = await getToolDispatcher()
+        activeToolCalls.forEach(({ toolCallId }) => {
+          toolDispatcher.abortToolCall(toolCallId)
+        })
+      } catch (error) {
+        console.error('Failed to abort tool calls', redactSecrets(error))
+      }
+    })()
+
+    await Promise.all([
+      abortThroughDispatcher,
+      ...activeTasks.map((task) => task.catch(() => undefined)),
+    ])
+  }, [getToolDispatcher])
+
+  const invalidateActiveWork = useCallback(() => {
+    const generation = ++workGenerationRef.current
+    readyWorkGenerationRef.current = -1
+    const settled = Promise.all([
+      abortActiveStreams(),
+      abortActiveAgentToolCalls(latestChatMessagesRef.current),
+      abortActiveApprovedToolCalls(),
+    ]).then(
+      () => undefined,
+      (error) => {
+        console.error('Failed to settle active chat work', redactSecrets(error))
+      },
+    )
+    readyWorkGenerationRef.current = generation
+    return { generation, settled }
+  }, [
+    abortActiveStreams,
+    abortActiveAgentToolCalls,
+    abortActiveApprovedToolCalls,
+  ])
+
+  const abortActiveWork = useCallback(async () => {
+    const { settled } = invalidateActiveWork()
+    await settled
+  }, [invalidateActiveWork])
+
+  const isCurrentWork = useCallback(
+    (generation: number, conversationId: string) =>
+      generation === workGenerationRef.current &&
+      generation === readyWorkGenerationRef.current &&
+      conversationId === currentConversationIdRef.current,
+    [],
+  )
+
+  const executeApprovedToolCall = useCallback(
+    async (
+      request: ToolCallRequest,
+      conversationId: string,
+      generation: number,
+      onResponseUpdate: (response: ToolCallResponse) => void,
+    ) => {
+      if (
+        !isCurrentWork(generation, conversationId) ||
+        activeApprovedToolCallsRef.current.some(
+          ({ toolCallId }) => toolCallId === request.id,
+        )
+      ) {
+        return
+      }
+
+      const abortController = new AbortController()
+      activeApprovedToolCallsRef.current.push({
+        abortController,
+        toolCallId: request.id,
+      })
+      onResponseUpdate({ status: ToolCallResponseStatus.Running })
+
+      const toolTask = (async () => {
+        try {
+          const toolDispatcher = await getToolDispatcher()
+          if (
+            abortController.signal.aborted ||
+            !isCurrentWork(generation, conversationId)
+          ) {
+            return
+          }
+          const response = await toolDispatcher.callTool({
+            name: request.name,
+            args: request.arguments,
+            id: request.id,
+            signal: abortController.signal,
+          })
+          if (
+            abortController.signal.aborted ||
+            !isCurrentWork(generation, conversationId)
+          ) {
+            return
+          }
+          onResponseUpdate(response)
+        } catch (error) {
+          if (isCurrentWork(generation, conversationId)) {
+            onResponseUpdate({
+              status: ToolCallResponseStatus.Error,
+              error: redactSecrets(
+                error instanceof Error ? error.message : String(error),
+              ),
+            })
+          }
+        } finally {
+          activeApprovedToolCallsRef.current =
+            activeApprovedToolCallsRef.current.filter(
+              (activeToolCall) =>
+                activeToolCall.abortController !== abortController,
+            )
+        }
+      })()
+
+      activeApprovedToolTasksRef.current.add(toolTask)
+      try {
+        await toolTask
+      } finally {
+        activeApprovedToolTasksRef.current.delete(toolTask)
+      }
+    },
+    [getToolDispatcher, isCurrentWork],
+  )
+
+  const flushPendingSave = useCallback(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const messages = latestChatMessagesRef.current
+    if (messages.length > 0) {
+      createOrUpdateConversation(currentConversationIdRef.current, messages)
+    }
+    await flushPendingChatSave()
+  }, [createOrUpdateConversation, flushPendingChatSave])
 
   const registerChatUserInputRef = (
     id: string,
@@ -243,8 +445,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
 
   const handleLoadConversation = async (conversationId: string) => {
     try {
-      abortActiveWork()
+      const { generation } = invalidateActiveWork()
+      if (generation !== workGenerationRef.current) return
       const conversation = await getChatMessagesById(conversationId)
+      if (generation !== workGenerationRef.current) return
       if (!conversation) {
         throw new Error('Conversation not found')
       }
@@ -264,6 +468,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
 
   const handleNewChat = useCallback(
     (selectedBlock?: MentionableBlockData) => {
+      const { generation } = invalidateActiveWork()
+      if (generation !== workGenerationRef.current) return
       setCurrentConversationId(uuidv4())
       setChatMessages([])
       const newInputMessage = getNewInputMessage(app)
@@ -285,9 +491,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       setQueryProgress({
         type: 'idle',
       })
-      abortActiveWork()
     },
-    [abortActiveWork, app],
+    [invalidateActiveWork, app],
   )
 
   const handleUserMessageSubmit = useCallback(
@@ -298,30 +503,33 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       inputChatMessages: ChatMessage[]
       mode?: ChatSubmitMode
     }) => {
-      abortActiveWork()
+      const { generation } = invalidateActiveWork()
+      if (generation !== workGenerationRef.current) return
+      const conversationId = currentConversationIdRef.current
+      const submittedMessages = markRunningToolCallsAborted(inputChatMessages)
       setQueryProgress({
         type: 'idle',
       })
 
       // Update the chat history to show the new user message
-      setChatMessages(inputChatMessages)
+      setChatMessages(submittedMessages)
       requestAnimationFrame(() => {
         forceScrollToBottom()
       })
 
-      const lastMessage = inputChatMessages.at(-1)
+      const lastMessage = submittedMessages.at(-1)
       if (lastMessage?.role !== 'user') {
         throw new Error('Last message is not a user message')
       }
       const activeFile = app.workspace.getActiveFile()
       const messagesWithCurrentFile =
         mode === 'agent'
-          ? inputChatMessages.map((message) =>
+          ? submittedMessages.map((message) =>
               message.id === lastMessage.id && message.role === 'user'
                 ? withCurrentFileMentionable(message, activeFile)
                 : message,
             )
-          : inputChatMessages
+          : submittedMessages
 
       const compiledMessages = await Promise.all(
         messagesWithCurrentFile.map(async (message) => {
@@ -330,7 +538,11 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
               await promptGenerator.compileUserMessagePrompt({
                 message,
                 useVaultSearch: mode === 'vault',
-                onQueryProgressChange: setQueryProgress,
+                onQueryProgressChange: (progress) => {
+                  if (isCurrentWork(generation, conversationId)) {
+                    setQueryProgress(progress)
+                  }
+                },
               })
             return {
               ...message,
@@ -354,9 +566,11 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         }),
       )
 
+      if (!isCurrentWork(generation, conversationId)) return
       setChatMessages(compiledMessages)
       if (mode === 'agent') {
         const toolDispatcher = await getToolDispatcher()
+        if (!isCurrentWork(generation, conversationId)) return
         const compiledLastMessage = compiledMessages.at(-1)
         if (compiledLastMessage?.role !== 'user') {
           throw new Error('Last compiled message is not a user message')
@@ -370,65 +584,77 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         const toolCallId = uuidv4()
         const abortController = new AbortController()
         registerActiveAgentToolCall(toolCallId, abortController)
-        try {
-          const response = await toolDispatcher.callTool({
-            name: CODEX_TOOL_NAME,
-            args: buildAgentChatRequestArgs(
-              buildAgentPrompt({
-                messages: compiledMessages,
-                prompt: agentPrompt,
-                userMessage: compiledLastMessage,
-              }),
-            ),
-            id: toolCallId,
-            onEvent: (event) => {
-              const commandMessage = buildAgentCommandMessageFromEvent(event)
-              if (!commandMessage) {
-                return
-              }
-              setChatMessages((prevMessages) =>
-                upsertAgentCommandMessage(prevMessages, commandMessage),
-              )
-            },
-            signal: abortController.signal,
-          })
-          const content =
-            response.status === ToolCallResponseStatus.Success
-              ? response.data.text
-              : response.status === ToolCallResponseStatus.Aborted
-                ? 'Agent Chat was stopped.'
-                : response.status === ToolCallResponseStatus.Error
-                  ? response.error
-                  : `Agent Chat ended with status: ${response.status}`
-          setChatMessages((prevMessages) => [
-            ...prevMessages,
-            buildAgentAssistantMessage(content),
-          ])
-        } catch (error) {
-          setChatMessages((prevMessages) => [
-            ...prevMessages,
-            buildAgentAssistantMessage(
-              redactSecrets(
-                error instanceof Error ? error.message : String(error),
+        const agentTask = (async () => {
+          try {
+            const response = await toolDispatcher.callTool({
+              name: CODEX_TOOL_NAME,
+              args: buildAgentChatRequestArgs(
+                buildAgentPrompt({
+                  messages: compiledMessages,
+                  prompt: agentPrompt,
+                  userMessage: compiledLastMessage,
+                }),
               ),
-            ),
-          ])
+              id: toolCallId,
+              onEvent: (event) => {
+                if (!isCurrentWork(generation, conversationId)) return
+                const commandMessage = buildAgentCommandMessageFromEvent(event)
+                if (!commandMessage) {
+                  return
+                }
+                setChatMessages((prevMessages) =>
+                  upsertAgentCommandMessage(prevMessages, commandMessage),
+                )
+              },
+              signal: abortController.signal,
+            })
+            if (!isCurrentWork(generation, conversationId)) return
+            const content =
+              response.status === ToolCallResponseStatus.Success
+                ? response.data.text
+                : response.status === ToolCallResponseStatus.Aborted
+                  ? 'Agent Chat was stopped.'
+                  : response.status === ToolCallResponseStatus.Error
+                    ? response.error
+                    : `Agent Chat ended with status: ${response.status}`
+            setChatMessages((prevMessages) => [
+              ...prevMessages,
+              buildAgentAssistantMessage(content),
+            ])
+          } catch (error) {
+            if (!isCurrentWork(generation, conversationId)) return
+            setChatMessages((prevMessages) => [
+              ...prevMessages,
+              buildAgentAssistantMessage(
+                redactSecrets(
+                  error instanceof Error ? error.message : String(error),
+                ),
+              ),
+            ])
+          } finally {
+            unregisterActiveAgentToolCall(toolCallId)
+          }
+        })()
+        activeAgentTasksRef.current.add(agentTask)
+        try {
+          await agentTask
         } finally {
-          unregisterActiveAgentToolCall(toolCallId)
+          activeAgentTasksRef.current.delete(agentTask)
         }
         return
       }
+      if (!isCurrentWork(generation, conversationId)) return
       submitChatMutation.mutate({
         chatMessages: compiledMessages,
-        conversationId: currentConversationId,
+        conversationId,
       })
     },
     [
       submitChatMutation,
-      currentConversationId,
       promptGenerator,
       getToolDispatcher,
-      abortActiveWork,
+      invalidateActiveWork,
+      isCurrentWork,
       app.workspace,
       forceScrollToBottom,
       registerActiveAgentToolCall,
@@ -504,63 +730,80 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     [applyMutation],
   )
 
-  const handleToolMessageUpdate = useCallback(
-    async (toolMessage: ChatToolMessage) => {
-      const toolMessageIndex = chatMessages.findIndex(
-        (message) => message.id === toolMessage.id,
+  const abortToolCall = useCallback(
+    (toolCallId: string, onlyIfActive = false) => {
+      const activeToolCalls = activeApprovedToolCallsRef.current.filter(
+        (toolCall) => toolCall.toolCallId === toolCallId,
       )
-      if (toolMessageIndex === -1) {
-        // The tool message no longer exists in the chat history.
-        // This likely means a new message was submitted while this stream was running.
-        // Abort the tool calls and keep the current chat history.
-        void (async () => {
-          const toolDispatcher = await getToolDispatcher()
-          toolMessage.toolCalls.forEach((toolCall) => {
-            toolDispatcher.abortToolCall(toolCall.request.id)
-          })
-        })()
+      if (onlyIfActive && activeToolCalls.length === 0) return
+      activeToolCalls.forEach(({ abortController }) => abortController.abort())
+      void getToolDispatcher()
+        .then((toolDispatcher) => toolDispatcher.abortToolCall(toolCallId))
+        .catch((error) => {
+          console.error('Failed to abort tool call', redactSecrets(error))
+        })
+    },
+    [getToolDispatcher],
+  )
+
+  const handleToolCallResponseUpdate = useCallback(
+    (
+      conversationId: string,
+      generation: number,
+      messageId: string,
+      toolCallId: string,
+      response: ToolCallResponse,
+    ) => {
+      if (!isCurrentWork(generation, conversationId)) {
+        abortToolCall(toolCallId)
         return
       }
 
-      const updatedMessages = chatMessages.map((message) =>
-        message.id === toolMessage.id ? toolMessage : message,
+      const messages = latestChatMessagesRef.current
+      const toolMessageIndex = messages.findIndex(
+        (message) => message.id === messageId,
       )
+      const currentToolMessage = messages[toolMessageIndex]
+      if (!currentToolMessage || currentToolMessage.role !== 'tool') {
+        abortToolCall(toolCallId)
+        return
+      }
+
+      const updatedToolMessage: ChatToolMessage = {
+        ...currentToolMessage,
+        toolCalls: currentToolMessage.toolCalls.map((toolCall) =>
+          toolCall.request.id === toolCallId
+            ? { ...toolCall, response }
+            : toolCall,
+        ),
+      }
+      const updatedMessages = messages.map((message) =>
+        message.id === messageId ? updatedToolMessage : message,
+      )
+      latestChatMessagesRef.current = updatedMessages
       setChatMessages(updatedMessages)
 
-      if (isAgentChatTerminalMessage(toolMessage)) {
-        return
-      }
+      if (isAgentChatTerminalMessage(updatedToolMessage)) return
 
-      // Resume the chat automatically if this tool message is the last message
-      // and all tool calls have completed.
       if (
-        toolMessageIndex === chatMessages.length - 1 &&
-        toolMessage.toolCalls.every((toolCall) =>
+        toolMessageIndex === messages.length - 1 &&
+        updatedToolMessage.toolCalls.every((toolCall) =>
           [
             ToolCallResponseStatus.Success,
             ToolCallResponseStatus.Error,
           ].includes(toolCall.response.status),
         )
       ) {
-        // Using updated toolMessage directly because chatMessages state
-        // still contains the old values
         submitChatMutation.mutate({
           chatMessages: updatedMessages,
-          conversationId: currentConversationId,
+          conversationId,
         })
         requestAnimationFrame(() => {
           forceScrollToBottom()
         })
       }
     },
-    [
-      chatMessages,
-      currentConversationId,
-      submitChatMutation,
-      setChatMessages,
-      getToolDispatcher,
-      forceScrollToBottom,
-    ],
+    [abortToolCall, forceScrollToBottom, isCurrentWork, submitChatMutation],
   )
 
   const showContinueResponseButton = useMemo(() => {
@@ -602,17 +845,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }, [])
 
   useEffect(() => {
-    const updateConversationAsync = async () => {
-      try {
-        if (chatMessages.length > 0) {
-          createOrUpdateConversation(currentConversationId, chatMessages)
-        }
-      } catch (error) {
-        new Notice('Failed to save chat history')
-        console.error('Failed to save chat history', error)
-      }
+    if (chatMessages.length > 0) {
+      createOrUpdateConversation(currentConversationId, chatMessages)
     }
-    updateConversationAsync()
   }, [currentConversationId, chatMessages, createOrUpdateConversation])
 
   // Updates the currentFile of the focused message (input or chat history)
@@ -664,6 +899,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }, [app.workspace, handleActiveLeafChange])
 
   useImperativeHandle(ref, () => ({
+    abortActiveWork,
+    flushPendingSave,
     openNewChat: (selectedBlock?: MentionableBlockData) => {
       handleNewChat(selectedBlock)
     },
@@ -727,6 +964,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     },
   }))
 
+  const renderedWorkGeneration = workGenerationRef.current
+
   return (
     <div className="smtcmp-chat-container">
       <div className="smtcmp-chat-header">
@@ -778,7 +1017,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       </div>
       <>
         <div className="smtcmp-chat-messages" ref={chatMessagesRef}>
-          {groupedChatMessages.map((messageOrGroup, index) =>
+          {chatMessageRows.map(({ messageOrGroup, endIndex }) =>
             !Array.isArray(messageOrGroup) ? (
               <UserMessageItem
                 key={messageOrGroup.id}
@@ -802,13 +1041,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                   if (editorStateToPlainText(content).trim() === '') return
                   handleUserMessageSubmit({
                     inputChatMessages: [
-                      ...groupedChatMessages
-                        .slice(0, index)
-                        .flatMap((messageOrGroup): ChatMessage[] =>
-                          !Array.isArray(messageOrGroup)
-                            ? [messageOrGroup]
-                            : messageOrGroup,
-                        ),
+                      ...chatMessages.slice(0, endIndex - 1),
                       {
                         role: 'user',
                         content: content,
@@ -838,17 +1071,28 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
               <AssistantToolMessageGroupItem
                 key={messageOrGroup.at(0)?.id}
                 messages={messageOrGroup}
-                contextMessages={groupedChatMessages
-                  .slice(0, index + 1)
-                  .flatMap((messageOrGroup): ChatMessage[] =>
-                    !Array.isArray(messageOrGroup)
-                      ? [messageOrGroup]
-                      : messageOrGroup,
-                  )}
+                getContextMessages={() => chatMessages.slice(0, endIndex)}
                 conversationId={currentConversationId}
                 isApplying={applyMutation.isPending}
                 onApply={handleApply}
-                onToolMessageUpdate={handleToolMessageUpdate}
+                executeToolCall={(request, onResponseUpdate) =>
+                  executeApprovedToolCall(
+                    request,
+                    currentConversationId,
+                    renderedWorkGeneration,
+                    onResponseUpdate,
+                  )
+                }
+                abortToolCall={abortToolCall}
+                onToolCallResponseUpdate={(messageId, toolCallId, response) =>
+                  handleToolCallResponseUpdate(
+                    currentConversationId,
+                    renderedWorkGeneration,
+                    messageId,
+                    toolCallId,
+                    response,
+                  )
+                }
               />
             ),
           )}

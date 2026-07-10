@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { PgliteDatabase } from 'drizzle-orm/pglite'
-import { App } from 'obsidian'
 
 import { DatabaseNotInitializedException } from '../../exception'
 import {
@@ -10,11 +9,9 @@ import {
 } from '../../schema'
 
 export class TemplateRepository {
-  private app: App
   private db: PgliteDatabase | null
 
-  constructor(app: App, db: PgliteDatabase | null) {
-    this.app = app
+  constructor(db: PgliteDatabase | null) {
     this.db = db
   }
 

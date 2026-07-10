@@ -1,5 +1,4 @@
 import { App } from 'obsidian'
-import React from 'react'
 
 import SmartComposerPlugin from '../../../main'
 

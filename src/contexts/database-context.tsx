@@ -7,13 +7,10 @@ import {
 } from 'react'
 
 import { DatabaseManager } from '../database/DatabaseManager'
-import { LegacyTemplateManager } from '../database/modules/template/TemplateManager'
 import { VectorManager } from '../database/modules/vector/VectorManager'
 
 type DatabaseContextType = {
-  getDatabaseManager: () => Promise<DatabaseManager>
   getVectorManager: () => Promise<VectorManager>
-  getTemplateManager: () => Promise<LegacyTemplateManager>
 }
 
 const DatabaseContext = createContext<DatabaseContextType | null>(null)
@@ -29,18 +26,14 @@ export function DatabaseProvider({
     return (await getDatabaseManager()).getVectorManager()
   }, [getDatabaseManager])
 
-  const getTemplateManager = useCallback(async () => {
-    return (await getDatabaseManager()).getTemplateManager()
-  }, [getDatabaseManager])
-
   useEffect(() => {
     // start initialization of dbManager in the background
     void getDatabaseManager()
   }, [getDatabaseManager])
 
   const value = useMemo(() => {
-    return { getDatabaseManager, getVectorManager, getTemplateManager }
-  }, [getDatabaseManager, getVectorManager, getTemplateManager])
+    return { getVectorManager }
+  }, [getVectorManager])
 
   return (
     <DatabaseContext.Provider value={value}>

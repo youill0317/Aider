@@ -12,6 +12,62 @@ import {
 } from './provider-secret-utils'
 import type { SecretStore } from './secret-store'
 
+type ProviderSecretKeys = ReturnType<typeof providerSecretKeys>
+type SecretSnapshot = {
+  values: readonly { key: string; value: string | null }[]
+}
+
+function allSecretKeys(keys: ProviderSecretKeys): string[] {
+  return Array.from(new Set([keys.current, ...keys.legacy]))
+}
+
+async function captureSecretSnapshot(
+  secretStore: SecretStore,
+  keys: ProviderSecretKeys,
+): Promise<SecretSnapshot> {
+  return {
+    values: await Promise.all(
+      allSecretKeys(keys).map(async (key) => ({
+        key,
+        value: await secretStore.getSecret(key),
+      })),
+    ),
+  }
+}
+
+async function restoreSecretSnapshots(
+  secretStore: SecretStore,
+  snapshots: readonly SecretSnapshot[],
+): Promise<boolean> {
+  let restored = true
+
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    for (const { key, value } of snapshots[index].values) {
+      try {
+        if (value === null) {
+          await secretStore.deleteSecret(key)
+        } else {
+          await secretStore.setSecret(key, value)
+        }
+      } catch {
+        restored = false
+      }
+    }
+  }
+
+  return restored
+}
+
+async function writeProviderSecret(
+  secretStore: SecretStore,
+  keys: ProviderSecretKeys,
+  value: string,
+  snapshots: SecretSnapshot[],
+): Promise<void> {
+  snapshots.push(await captureSecretSnapshot(secretStore, keys))
+  await writeSecret(secretStore, keys, value)
+}
+
 async function hydrateProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
@@ -51,6 +107,7 @@ async function hydrateProvider(
 async function sanitizeProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
   previousProvider?: LLMProvider,
 ): Promise<LLMProvider> {
   if (secretStore.getBackendStatus() === 'insecure-settings-fallback') {
@@ -61,10 +118,11 @@ async function sanitizeProvider(
 
   if (isNonEmptySecret(provider.apiKey)) {
     if (provider.apiKey !== previousProvider?.apiKey) {
-      await writeSecret(
+      await writeProviderSecret(
         secretStore,
         providerSecretKeys(provider, 'apiKey'),
         provider.apiKey,
+        snapshots,
       )
     }
     delete sanitizedProvider.apiKey
@@ -86,10 +144,11 @@ async function sanitizeProvider(
     }
 
     if (provider.oauth[field] !== previousOauth?.[field]) {
-      await writeSecret(
+      await writeProviderSecret(
         secretStore,
         providerSecretKeys(provider, field),
         provider.oauth[field],
+        snapshots,
       )
     }
     sanitizedOauth[field] = ''
@@ -105,6 +164,7 @@ async function deleteRemovedProviderSecrets(
   previousSettings: SmartComposerSettings | undefined,
   nextRuntimeSettings: SmartComposerSettings,
   secretStore: SecretStore,
+  snapshots?: SecretSnapshot[],
 ): Promise<void> {
   if (
     !previousSettings ||
@@ -118,26 +178,38 @@ async function deleteRemovedProviderSecrets(
       (provider) => provider.id === previousProvider.id,
     )
 
-    if (!nextProvider) {
-      await deleteAllProviderSecrets(previousProvider, secretStore)
+    if (!nextProvider || nextProvider.type !== previousProvider.type) {
+      await deleteAllProviderSecrets(previousProvider, secretStore, snapshots)
       continue
     }
 
-    if (
-      hasOAuth(previousProvider) &&
-      previousProvider.oauth &&
-      (!hasOAuth(nextProvider) || !nextProvider.oauth)
-    ) {
-      await deleteOAuthSecrets(previousProvider, secretStore)
+    if (hasOAuth(previousProvider) && previousProvider.oauth) {
+      if (!hasOAuth(nextProvider) || !nextProvider.oauth) {
+        await deleteOAuthSecrets(previousProvider, secretStore, snapshots)
+      } else {
+        for (const field of OAUTH_SECRET_FIELDS) {
+          if (
+            isNonEmptySecret(previousProvider.oauth[field]) &&
+            !isNonEmptySecret(nextProvider.oauth[field])
+          ) {
+            await deleteSecretKeys(
+              providerSecretKeys(previousProvider, field),
+              secretStore,
+              snapshots,
+            )
+          }
+        }
+      }
     }
 
     if (
       isNonEmptySecret(previousProvider.apiKey) &&
       !isNonEmptySecret(nextProvider.apiKey)
     ) {
-      await deleteProviderSecrets(
-        secretStore,
+      await deleteSecretKeys(
         providerSecretKeys(previousProvider, 'apiKey'),
+        secretStore,
+        snapshots,
       )
     }
   }
@@ -146,27 +218,42 @@ async function deleteRemovedProviderSecrets(
 async function deleteAllProviderSecrets(
   provider: LLMProvider,
   secretStore: SecretStore,
+  snapshots?: SecretSnapshot[],
 ): Promise<void> {
-  await deleteProviderSecrets(
-    secretStore,
+  await deleteSecretKeys(
     providerSecretKeys(provider, 'apiKey'),
+    secretStore,
+    snapshots,
   )
 
   if (hasOAuth(provider)) {
-    await deleteOAuthSecrets(provider, secretStore)
+    await deleteOAuthSecrets(provider, secretStore, snapshots)
   }
 }
 
 async function deleteOAuthSecrets(
   provider: LLMProvider,
   secretStore: SecretStore,
+  snapshots?: SecretSnapshot[],
 ): Promise<void> {
   for (const field of OAUTH_SECRET_FIELDS) {
-    await deleteProviderSecrets(
-      secretStore,
+    await deleteSecretKeys(
       providerSecretKeys(provider, field),
+      secretStore,
+      snapshots,
     )
   }
+}
+
+async function deleteSecretKeys(
+  keys: ProviderSecretKeys,
+  secretStore: SecretStore,
+  snapshots?: SecretSnapshot[],
+): Promise<void> {
+  if (snapshots) {
+    snapshots.push(await captureSecretSnapshot(secretStore, keys))
+  }
+  await deleteProviderSecrets(secretStore, keys)
 }
 
 export async function hydrateSettingsSecrets(
@@ -190,23 +277,59 @@ export async function sanitizeSettingsForPersistence(
   secretStore: SecretStore,
   previousSettings?: SmartComposerSettings,
 ): Promise<SmartComposerSettings> {
-  const providers = await Promise.all(
-    settings.providers.map((provider) => {
-      const previousProvider = previousSettings?.providers.find(
-        (candidate) =>
-          candidate.id === provider.id && candidate.type === provider.type,
+  const snapshots: SecretSnapshot[] = []
+
+  try {
+    const sanitizedSettings = await sanitizeSettingsProviders(
+      settings,
+      secretStore,
+      snapshots,
+      previousSettings,
+    )
+    await deleteRemovedProviderSecrets(
+      previousSettings,
+      settings,
+      secretStore,
+      snapshots,
+    )
+    return sanitizedSettings
+  } catch (error) {
+    if (!(await restoreSecretSnapshots(secretStore, snapshots))) {
+      throw new Error(
+        'Settings update failed and previous secrets could not be restored',
       )
-      return sanitizeProvider(provider, secretStore, previousProvider)
-    }),
-  )
-  const sanitizedSettings = {
+    }
+    throw error
+  }
+}
+
+async function sanitizeSettingsProviders(
+  settings: SmartComposerSettings,
+  secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
+  previousSettings?: SmartComposerSettings,
+): Promise<SmartComposerSettings> {
+  const providers: LLMProvider[] = []
+
+  for (const provider of settings.providers) {
+    const previousProvider = previousSettings?.providers.find(
+      (candidate) =>
+        candidate.id === provider.id && candidate.type === provider.type,
+    )
+    providers.push(
+      await sanitizeProvider(
+        provider,
+        secretStore,
+        snapshots,
+        previousProvider,
+      ),
+    )
+  }
+
+  return {
     ...settings,
     providers,
   }
-
-  await deleteRemovedProviderSecrets(previousSettings, settings, secretStore)
-
-  return sanitizedSettings
 }
 
 export async function persistSettingsUpdate({
@@ -223,15 +346,30 @@ export async function persistSettingsUpdate({
   saveData: (settings: SmartComposerSettings) => Promise<void>
 }): Promise<void> {
   publishRuntimeSettings(nextSettings)
+  const snapshots: SecretSnapshot[] = []
+
   try {
-    const persistedSettings = await sanitizeSettingsForPersistence(
+    const persistedSettings = await sanitizeSettingsProviders(
       nextSettings,
       secretStore,
+      snapshots,
       previousSettings,
+    )
+    await deleteRemovedProviderSecrets(
+      previousSettings,
+      nextSettings,
+      secretStore,
+      snapshots,
     )
     await saveData(persistedSettings)
   } catch (error) {
+    const restored = await restoreSecretSnapshots(secretStore, snapshots)
     publishRuntimeSettings(previousSettings)
+    if (!restored) {
+      throw new Error(
+        'Settings update failed and previous secrets could not be restored',
+      )
+    }
     throw error
   }
 }

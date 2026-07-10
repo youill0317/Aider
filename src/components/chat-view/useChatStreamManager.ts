@@ -1,6 +1,6 @@
 import { UseMutationResult, useMutation } from '@tanstack/react-query'
 import { Notice } from 'obsidian'
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import { useApp } from '../../contexts/app-context'
 import { useSettings } from '../../contexts/settings-context'
@@ -25,7 +25,7 @@ type UseChatStreamManagerParams = {
 }
 
 export type UseChatStreamManager = {
-  abortActiveStreams: () => void
+  abortActiveStreams: () => Promise<void>
   submitChatMutation: UseMutationResult<
     void,
     Error,
@@ -43,13 +43,31 @@ export function useChatStreamManager({
   const { getToolDispatcher } = useToolDispatcher()
 
   const activeStreamAbortControllersRef = useRef<AbortController[]>([])
+  const activeStreamTasksRef = useRef(new Set<Promise<void>>())
+  const streamGenerationRef = useRef(0)
 
-  const abortActiveStreams = useCallback(() => {
+  const invalidateActiveStreams = useCallback(() => {
+    const generation = ++streamGenerationRef.current
     for (const abortController of activeStreamAbortControllersRef.current) {
       abortController.abort()
     }
     activeStreamAbortControllersRef.current = []
+    return {
+      generation,
+      tasks: [...activeStreamTasksRef.current],
+    }
   }, [])
+
+  const abortActiveStreams = useCallback(async () => {
+    const { tasks } = invalidateActiveStreams()
+    await Promise.all(tasks.map((task) => task.catch(() => undefined)))
+  }, [invalidateActiveStreams])
+
+  useEffect(() => {
+    return () => {
+      void abortActiveStreams()
+    }
+  }, [abortActiveStreams])
 
   const { providerClient, model } = useMemo(() => {
     try {
@@ -103,7 +121,9 @@ export function useChatStreamManager({
         return
       }
 
-      abortActiveStreams()
+      const { generation } = invalidateActiveStreams()
+      if (generation !== streamGenerationRef.current) return
+
       const abortController = new AbortController()
       activeStreamAbortControllersRef.current.push(abortController)
 
@@ -111,6 +131,12 @@ export function useChatStreamManager({
 
       try {
         const toolDispatcher = await getToolDispatcher()
+        if (
+          abortController.signal.aborted ||
+          generation !== streamGenerationRef.current
+        ) {
+          return
+        }
         const responseGenerator = new ResponseGenerator({
           providerClient,
           model,
@@ -125,6 +151,7 @@ export function useChatStreamManager({
 
         unsubscribeResponseGenerator = responseGenerator.subscribe(
           (responseMessages) => {
+            if (generation !== streamGenerationRef.current) return
             setChatMessages((prevChatMessages) => {
               const lastMessageIndex = prevChatMessages.findIndex(
                 (message) => message.id === lastMessage.id,
@@ -145,8 +172,15 @@ export function useChatStreamManager({
           },
         )
 
-        await responseGenerator.run()
+        const streamTask = responseGenerator.run()
+        activeStreamTasksRef.current.add(streamTask)
+        try {
+          await streamTask
+        } finally {
+          activeStreamTasksRef.current.delete(streamTask)
+        }
       } catch (error) {
+        if (generation !== streamGenerationRef.current) return
         // Ignore AbortError
         if (error instanceof Error && error.name === 'AbortError') {
           return

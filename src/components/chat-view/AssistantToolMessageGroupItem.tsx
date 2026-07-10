@@ -4,7 +4,6 @@ import type {
   AssistantToolMessageGroup,
   ChatAssistantMessage,
   ChatMessage,
-  ChatToolMessage,
 } from '../../types/chat'
 
 import AssistantMessageAnnotations from './AssistantMessageAnnotations'
@@ -13,23 +12,32 @@ import AssistantMessageReasoning from './AssistantMessageReasoning'
 import AssistantToolMessageGroupActions from './AssistantToolMessageGroupActions'
 import type { ToolActivityMessage } from './tool-activity'
 import ToolActivityGroup from './ToolActivityGroup'
+import type {
+  AbortApprovedToolCall,
+  ExecuteApprovedToolCall,
+  ToolCallResponseUpdater,
+} from './ToolMessage'
 
 export type AssistantToolMessageGroupItemProps = {
   messages: AssistantToolMessageGroup
-  contextMessages: ChatMessage[]
+  getContextMessages: () => ChatMessage[]
   conversationId: string
   isApplying: boolean // TODO: isApplying should be a boolean for each assistant message
   onApply: (blockToApply: string, chatMessages: ChatMessage[]) => void
-  onToolMessageUpdate: (message: ChatToolMessage) => void
+  executeToolCall: ExecuteApprovedToolCall
+  abortToolCall: AbortApprovedToolCall
+  onToolCallResponseUpdate: ToolCallResponseUpdater
 }
 
 export default function AssistantToolMessageGroupItem({
   messages,
-  contextMessages,
+  getContextMessages,
   conversationId,
   isApplying,
   onApply,
-  onToolMessageUpdate,
+  executeToolCall,
+  abortToolCall,
+  onToolCallResponseUpdate,
 }: AssistantToolMessageGroupItemProps) {
   const messageBlocks = useMemo(() => getMessageBlocks(messages), [messages])
 
@@ -40,7 +48,7 @@ export default function AssistantToolMessageGroupItem({
           <AssistantMessageBlock
             key={block.message.id}
             message={block.message}
-            contextMessages={contextMessages}
+            getContextMessages={getContextMessages}
             isApplying={isApplying}
             onApply={onApply}
           />
@@ -49,7 +57,9 @@ export default function AssistantToolMessageGroupItem({
             key={getActivityBlockKey(block.messages)}
             messages={block.messages}
             conversationId={conversationId}
-            onToolMessageUpdate={onToolMessageUpdate}
+            executeToolCall={executeToolCall}
+            abortToolCall={abortToolCall}
+            onToolCallResponseUpdate={onToolCallResponseUpdate}
           />
         ),
       )}
@@ -105,12 +115,12 @@ function getActivityBlockKey(messages: readonly ToolActivityMessage[]): string {
 
 function AssistantMessageBlock({
   message,
-  contextMessages,
+  getContextMessages,
   isApplying,
   onApply,
 }: {
   message: ChatAssistantMessage
-  contextMessages: ChatMessage[]
+  getContextMessages: () => ChatMessage[]
   isApplying: boolean
   onApply: (blockToApply: string, chatMessages: ChatMessage[]) => void
 }) {
@@ -128,7 +138,7 @@ function AssistantMessageBlock({
       )}
       <AssistantMessageContent
         content={message.content}
-        contextMessages={contextMessages}
+        getContextMessages={getContextMessages}
         handleApply={onApply}
         isApplying={isApplying}
       />

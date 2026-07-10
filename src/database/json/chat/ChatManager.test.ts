@@ -8,6 +8,7 @@ const mockAdapter = {
   mkdir: jest.fn().mockResolvedValue(undefined),
   read: jest.fn().mockResolvedValue(''),
   write: jest.fn().mockResolvedValue(undefined),
+  rename: jest.fn().mockResolvedValue(undefined),
   remove: jest.fn().mockResolvedValue(undefined),
   list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
 }
@@ -24,7 +25,14 @@ describe('ChatManager', () => {
   let chatManager: ChatManager
 
   beforeEach(() => {
+    jest.clearAllMocks()
+    mockAdapter.exists.mockResolvedValue(true)
+    mockAdapter.list.mockResolvedValue({ files: [], folders: [] })
     chatManager = new ChatManager(mockApp)
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
   })
 
   describe('filename generation and parsing roundtrip', () => {
@@ -76,5 +84,74 @@ describe('ChatManager', () => {
         expect(metadata.schemaVersion).toBe(chat.schemaVersion)
       }
     })
+  })
+
+  it('skips malformed percent-encoded filenames', async () => {
+    mockAdapter.list.mockResolvedValue({
+      files: [
+        '.aider_json_db/chats/v1_%E0%A4%A_1620000000000_123e4567-e89b-12d3-a456-426614174000.json',
+      ],
+      folders: [],
+    })
+
+    await expect(chatManager.listChats()).resolves.toEqual([])
+  })
+
+  it('preserves a valid caller ID but not generated timestamps or schema', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1620000000000)
+    mockAdapter.exists.mockImplementation(async (filePath: string) =>
+      filePath.endsWith('/chats'),
+    )
+    const id = '123e4567-e89b-42d3-a456-426614174000'
+
+    const chat = await chatManager.createChat({
+      id,
+      title: 'Title',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 2,
+      schemaVersion: 999,
+    } as Parameters<ChatManager['createChat']>[0])
+
+    expect(chat).toEqual({
+      id,
+      title: 'Title',
+      messages: [],
+      createdAt: 1620000000000,
+      updatedAt: 1620000000000,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    })
+    expect(JSON.parse(String(mockAdapter.write.mock.calls[0][1]))).toEqual(chat)
+  })
+
+  it('rejects non-UUID caller IDs before writing', async () => {
+    mockAdapter.exists.mockImplementation(async (filePath: string) =>
+      filePath.endsWith('/chats'),
+    )
+
+    await expect(
+      chatManager.createChat({ id: '../../outside', messages: [] }),
+    ).rejects.toThrow('Invalid chat ID')
+    expect(mockAdapter.write).not.toHaveBeenCalled()
+  })
+
+  it('parses path-safe legacy non-UUID chat ids', () => {
+    const chat: ChatConversation = {
+      id: 'legacy_chat-123',
+      title: 'Legacy chat',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    }
+    const fileMethods = chatManager as unknown as {
+      parseFileName: (fileName: string) => { id: string } | null
+      generateFileName: (value: ChatConversation) => string
+    }
+    const metadata = fileMethods.parseFileName(
+      fileMethods.generateFileName(chat),
+    )
+
+    expect(metadata?.id).toBe('legacy_chat-123')
   })
 })

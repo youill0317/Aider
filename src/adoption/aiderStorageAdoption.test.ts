@@ -59,16 +59,25 @@ describe('Aider storage adoption', () => {
     )
   })
 
-  it('records lazy secret namespace adoption in the marker', async () => {
+  it('does not create fake secret adoption and preserves historic markers', async () => {
     const app = createTestApp()
 
-    const marker = await adoptAiderStorage(app)
+    expect((await adoptAiderStorage(app)).resources.secrets).toBeUndefined()
 
-    expect(marker.resources.secrets).toMatchObject({
+    const historicSecretStatus = {
       status: 'completed',
       sourcePath: 'smart-composer-provider-*',
       targetPath: 'aider-provider-*',
-    })
+      completedAt: '2025-01-01T00:00:00.000Z',
+    }
+    await app.vault.adapter.write(
+      '.obsidian/plugins/aider/.aider_adoption.json',
+      jsonFile({ resources: { secrets: historicSecretStatus } }),
+    )
+
+    expect((await adoptAiderStorage(app)).resources.secrets).toEqual(
+      historicSecretStatus,
+    )
   })
 
   it('uses canonical Aider storage constants when legacy Smart Composer constants still exist', () => {

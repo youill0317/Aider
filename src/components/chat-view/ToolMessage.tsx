@@ -55,14 +55,34 @@ export const getToolMessageContent = (message: ChatToolMessage): string => {
     .join('\n')
 }
 
+export type ExecuteApprovedToolCall = (
+  request: ToolCallRequest,
+  onResponseUpdate: (response: ToolCallResponse) => void,
+) => Promise<void>
+
+export type AbortApprovedToolCall = (
+  toolCallId: string,
+  onlyIfActive?: boolean,
+) => void
+
+export type ToolCallResponseUpdater = (
+  messageId: string,
+  toolCallId: string,
+  response: ToolCallResponse,
+) => void
+
 const ToolMessage = memo(function ToolMessage({
   message,
   conversationId,
-  onMessageUpdate,
+  executeToolCall,
+  abortToolCall,
+  onToolCallResponseUpdate,
 }: {
   message: ChatToolMessage
   conversationId: string
-  onMessageUpdate: (message: ChatToolMessage) => void
+  executeToolCall: ExecuteApprovedToolCall
+  abortToolCall: AbortApprovedToolCall
+  onToolCallResponseUpdate: ToolCallResponseUpdater
 }) {
   return (
     <div className="smtcmp-toolcall-container">
@@ -75,13 +95,14 @@ const ToolMessage = memo(function ToolMessage({
             request={toolCall.request}
             response={toolCall.response}
             conversationId={conversationId}
+            executeToolCall={executeToolCall}
+            abortToolCall={abortToolCall}
             onResponseUpdate={(response) =>
-              onMessageUpdate({
-                ...message,
-                toolCalls: message.toolCalls.map((t) =>
-                  t.request.id === toolCall.request.id ? { ...t, response } : t,
-                ),
-              })
+              onToolCallResponseUpdate(
+                message.id,
+                toolCall.request.id,
+                response,
+              )
             }
           />
         </div>
@@ -94,11 +115,15 @@ function ToolCallItem({
   request,
   response,
   conversationId,
+  executeToolCall,
+  abortToolCall,
   onResponseUpdate,
 }: {
   request: ToolCallRequest
   response: ToolCallResponse
   conversationId: string
+  executeToolCall: ExecuteApprovedToolCall
+  abortToolCall: AbortApprovedToolCall
   onResponseUpdate: (response: ToolCallResponse) => void
 }) {
   const {
@@ -107,7 +132,13 @@ function ToolCallItem({
     handleAllowAutoExecution,
     handleReject,
     handleAbort,
-  } = useToolCall(request, conversationId, onResponseUpdate)
+  } = useToolCall(
+    request,
+    conversationId,
+    executeToolCall,
+    abortToolCall,
+    onResponseUpdate,
+  )
   const isCodexTool = request.name === CODEX_TOOL_NAME
 
   const [isOpen, setIsOpen] = useState(
@@ -250,23 +281,16 @@ function ToolCallItem({
 function useToolCall(
   request: ToolCallRequest,
   conversationId: string,
+  executeToolCall: ExecuteApprovedToolCall,
+  abortToolCall: AbortApprovedToolCall,
   onResponseUpdate: (response: ToolCallResponse) => void,
 ) {
   const { settings, setSettings } = useSettings()
   const { getToolDispatcher } = useToolDispatcher()
 
   const handleToolCall = useCallback(async () => {
-    const toolDispatcher = await getToolDispatcher()
-    onResponseUpdate({
-      status: ToolCallResponseStatus.Running,
-    })
-    const toolCallResponse: ToolCallResponse = await toolDispatcher.callTool({
-      name: request.name,
-      args: request.arguments,
-      id: request.id,
-    })
-    onResponseUpdate(toolCallResponse)
-  }, [request, onResponseUpdate, getToolDispatcher])
+    await executeToolCall(request, onResponseUpdate)
+  }, [executeToolCall, request, onResponseUpdate])
 
   const handleAllowForConversation = useCallback(async () => {
     const toolDispatcher = await getToolDispatcher()
@@ -312,19 +336,19 @@ function useToolCall(
     })
   }, [request, settings, setSettings])
 
-  const handleReject = useCallback(async () => {
+  const handleReject = useCallback(() => {
+    abortToolCall(request.id, true)
     onResponseUpdate({
       status: ToolCallResponseStatus.Rejected,
     })
-  }, [onResponseUpdate])
+  }, [abortToolCall, onResponseUpdate, request.id])
 
-  const handleAbort = useCallback(async () => {
-    const toolDispatcher = await getToolDispatcher()
-    toolDispatcher.abortToolCall(request.id)
+  const handleAbort = useCallback(() => {
+    abortToolCall(request.id)
     onResponseUpdate({
       status: ToolCallResponseStatus.Aborted,
     })
-  }, [request, onResponseUpdate, getToolDispatcher])
+  }, [abortToolCall, onResponseUpdate, request.id])
 
   return {
     handleToolCall,

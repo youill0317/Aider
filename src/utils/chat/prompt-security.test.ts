@@ -406,6 +406,11 @@ function createApp(contents: Record<string, string>): App {
 function createFile(path: string): TFile {
   return {
     path,
+    stat: {
+      ctime: 0,
+      mtime: 0,
+      size: 0,
+    },
   } as TFile
 }
 

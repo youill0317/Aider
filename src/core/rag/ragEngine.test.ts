@@ -407,7 +407,7 @@ function createSettings(
 ): SmartComposerSettings {
   return {
     version: 20,
-    providers: [],
+    providers: [{ type: 'voyage', id: 'voyage' }],
     chatModels: [],
     embeddingModels: [],
     chatModelId: 'chat-model',

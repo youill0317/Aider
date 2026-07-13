@@ -165,8 +165,9 @@ describe('Aider plugin migration wiring', () => {
         },
       },
     }
+    const defaultSettings = smartComposerSettingsSchema.parse({})
     const rawSettings = {
-      ...smartComposerSettingsSchema.parse({}),
+      ...defaultSettings,
       futureTopLevel: { keep: true },
       providers: [
         {
@@ -185,6 +186,7 @@ describe('Aider plugin migration wiring', () => {
             futureOauthOption: 'keep-oauth',
           },
         },
+        ...defaultSettings.providers.filter(({ id }) => id !== 'openai-plan'),
       ],
       mcp: {
         futureMcpOption: 'keep-mcp',
@@ -220,20 +222,6 @@ describe('Aider plugin migration wiring', () => {
     const persistedSettings = firstSave.mock.calls[0][0]
     expect(persistedSettings).toMatchObject({
       futureTopLevel: { keep: true },
-      providers: [
-        {
-          id: 'custom-openai',
-          futureProviderOption: 'keep-provider',
-        },
-        {
-          id: 'openai-plan',
-          oauth: {
-            accessToken: '',
-            refreshToken: '',
-            futureOauthOption: 'keep-oauth',
-          },
-        },
-      ],
       mcp: {
         futureMcpOption: 'keep-mcp',
         servers: [
@@ -244,6 +232,20 @@ describe('Aider plugin migration wiring', () => {
         ],
       },
     })
+    expect(persistedSettings.providers.slice(0, 2)).toMatchObject([
+      {
+        id: 'custom-openai',
+        futureProviderOption: 'keep-provider',
+      },
+      {
+        id: 'openai-plan',
+        oauth: {
+          accessToken: '',
+          refreshToken: '',
+          futureOauthOption: 'keep-oauth',
+        },
+      },
+    ])
     expect(JSON.stringify(persistedSettings)).not.toContain('plaintext-')
 
     const reloadSave = jest.fn().mockResolvedValue(undefined)

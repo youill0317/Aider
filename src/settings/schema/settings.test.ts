@@ -7,6 +7,7 @@ import {
 } from '../../constants'
 
 import { SETTINGS_SCHEMA_VERSION } from './migrations'
+import { MAX_MCP_SERVERS } from './setting.types'
 import {
   parseSmartComposerSettings,
   parseSmartComposerSettingsResult,
@@ -73,7 +74,6 @@ describe('parseSmartComposerSettings', () => {
     const result = parseSmartComposerSettingsResult({
       ...parseSmartComposerSettings({}),
       version: SETTINGS_SCHEMA_VERSION - 1,
-      embeddingModels: [],
     })
 
     expect(result.safeToPersist).toBe(true)
@@ -116,6 +116,33 @@ describe('parseSmartComposerSettings', () => {
     expect(result.settings.providers).toEqual(DEFAULT_PROVIDERS)
   })
 
+  it('bounds settings that control indexing and automatic tool loops', () => {
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      ragOptions: {
+        ...defaults.ragOptions,
+        chunkSize: 201,
+        thresholdTokens: -1,
+        minSimilarity: 2,
+        limit: 0,
+      },
+      chatOptions: {
+        ...defaults.chatOptions,
+        maxAutoIterations: 1_000,
+      },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.ragOptions).toMatchObject({
+      chunkSize: 1000,
+      thresholdTokens: 8192,
+      minSimilarity: 0,
+      limit: 10,
+    })
+    expect(result.settings.chatOptions.maxAutoIterations).toBe(1)
+  })
+
   it('does not approve stripped unknown fields for overwrite', () => {
     const defaults = parseSmartComposerSettings({})
     const topLevel = parseSmartComposerSettingsResult({
@@ -132,5 +159,154 @@ describe('parseSmartComposerSettings', () => {
 
     expect(topLevel.safeToPersist).toBe(false)
     expect(nested.safeToPersist).toBe(false)
+  })
+
+  it('rejects duplicate provider IDs without approving an overwrite', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      providers: [
+        { id: 'duplicate', type: 'openai', apiKey: 'first' },
+        { id: 'duplicate', type: 'anthropic', apiKey: 'second' },
+      ],
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.providers).toEqual(DEFAULT_PROVIDERS)
+  })
+
+  it('rejects duplicate chat model IDs without approving an overwrite', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const defaults = parseSmartComposerSettings({})
+    const model = defaults.chatModels[0]
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      chatModels: [model, { ...model }],
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.chatModels).toEqual(DEFAULT_CHAT_MODELS)
+  })
+
+  it('rejects duplicate embedding model IDs without approving an overwrite', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const defaults = parseSmartComposerSettings({})
+    const model = defaults.embeddingModels[0]
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      embeddingModels: [model, { ...model }],
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.embeddingModels).toEqual(DEFAULT_EMBEDDING_MODELS)
+  })
+
+  it('rejects duplicate MCP server IDs without approving an overwrite', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const defaults = parseSmartComposerSettings({})
+    const server = {
+      id: 'duplicate',
+      enabled: true,
+      parameters: { command: 'node' },
+      toolOptions: {},
+    }
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      mcp: {
+        servers: [server, { ...server, parameters: { command: 'deno' } }],
+      },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.mcp.servers).toEqual([])
+  })
+
+  it.each(['chatModelId', 'applyModelId', 'embeddingModelId'] as const)(
+    'rejects a dangling %s',
+    (field) => {
+      const defaults = parseSmartComposerSettings({})
+
+      expect(
+        parseSmartComposerSettingsResult({
+          ...defaults,
+          [field]: 'missing-model',
+        }).safeToPersist,
+      ).toBe(false)
+    },
+  )
+
+  it.each(['chatModelId', 'applyModelId'] as const)(
+    'rejects a disabled selected %s',
+    (field) => {
+      const defaults = parseSmartComposerSettings({})
+      const selectedId = defaults[field]
+
+      expect(
+        parseSmartComposerSettingsResult({
+          ...defaults,
+          chatModels: defaults.chatModels.map((model) =>
+            model.id === selectedId ? { ...model, enable: false } : model,
+          ),
+        }).safeToPersist,
+      ).toBe(false)
+    },
+  )
+
+  it.each(['chatModels', 'embeddingModels'] as const)(
+    'rejects a missing provider referenced by %s',
+    (field) => {
+      const defaults = parseSmartComposerSettings({})
+
+      expect(
+        parseSmartComposerSettingsResult({
+          ...defaults,
+          [field]: defaults[field].map((model, index) =>
+            index === 0 ? { ...model, providerId: 'missing-provider' } : model,
+          ),
+        }).safeToPersist,
+      ).toBe(false)
+    },
+  )
+
+  it.each(['chatModels', 'embeddingModels'] as const)(
+    'rejects a provider type mismatch in %s',
+    (field) => {
+      const defaults = parseSmartComposerSettings({})
+      const model = defaults[field][0]
+      const mismatchedProvider = defaults.providers.find(
+        (provider) => provider.type !== model.providerType,
+      )
+      expect(mismatchedProvider).toBeDefined()
+
+      expect(
+        parseSmartComposerSettingsResult({
+          ...defaults,
+          [field]: defaults[field].map((current, index) =>
+            index === 0
+              ? { ...current, providerId: mismatchedProvider?.id }
+              : current,
+          ),
+        }).safeToPersist,
+      ).toBe(false)
+    },
+  )
+
+  it('does not allow settings to spawn an unbounded number of MCP servers', () => {
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      mcp: {
+        servers: Array.from({ length: MAX_MCP_SERVERS + 1 }, (_, index) => ({
+          id: `server-${index}`,
+          enabled: true,
+          parameters: { command: 'node' },
+          toolOptions: {},
+        })),
+      },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.mcp.servers).toEqual([])
   })
 })

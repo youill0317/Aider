@@ -64,6 +64,7 @@ function ConnectGeminiPlanModalComponent({
   const [state, setState] = useState('')
   const [isWaitingForCallback, setIsWaitingForCallback] = useState(false)
   const [isManualConnecting, setIsManualConnecting] = useState(false)
+  const [isManualOpen, setIsManualOpen] = useState(false)
   const [autoError, setAutoError] = useState('')
   const [manualError, setManualError] = useState('')
 
@@ -150,6 +151,7 @@ function ConnectGeminiPlanModalComponent({
       setAutoError(
         'Automatic connect failed. Paste the full redirect URL below and click "Connect with URL".',
       )
+      setIsManualOpen(true)
     } finally {
       setIsWaitingForCallback(false)
     }
@@ -227,10 +229,6 @@ function ConnectGeminiPlanModalComponent({
         <ol>
           <li>Login to Google in your browser</li>
           <li>Aider connects automatically when you return</li>
-          <li>
-            If automatic connect fails, paste the full redirect URL below and
-            click &quot;Connect with URL&quot;
-          </li>
         </ol>
       </div>
 
@@ -259,33 +257,40 @@ function ConnectGeminiPlanModalComponent({
         )}
       </ObsidianSetting>
 
-      <ObsidianSetting
-        name="Redirect URL (fallback)"
-        desc="Use this only if automatic connect fails. Paste the full redirect URL from your browser address bar."
-        className="smtcmp-plan-connect-fallback"
+      <details
+        className="smtcmp-plan-connect-manual"
+        open={isManualOpen}
+        onToggle={(event) => setIsManualOpen(event.currentTarget.open)}
       >
-        <div className="smtcmp-plan-connect-fallback-controls">
-          {autoError && (
-            <div className="smtcmp-plan-connect-error">{autoError}</div>
-          )}
-          <ObsidianTextInput
-            value={redirectUrl}
-            placeholder="http://localhost:8085/oauth2callback?code=..."
-            onChange={(value) => {
-              setRedirectUrl(value)
-              if (manualError) setManualError('')
-            }}
-          />
-          <ObsidianButton
-            text="Connect with URL"
-            disabled={!redirectCode || isBusy}
-            onClick={() => void connectWithRedirectUrl()}
-          />
-          {manualError && (
-            <div className="smtcmp-plan-connect-error">{manualError}</div>
-          )}
-        </div>
-      </ObsidianSetting>
+        <summary>Connect manually</summary>
+        <ObsidianSetting
+          name="Redirect URL (fallback)"
+          desc="Use this only if automatic connect fails. Paste the full redirect URL from your browser address bar."
+          className="smtcmp-plan-connect-fallback"
+        >
+          <div className="smtcmp-plan-connect-fallback-controls">
+            {autoError && (
+              <div className="smtcmp-plan-connect-error">{autoError}</div>
+            )}
+            <ObsidianTextInput
+              value={redirectUrl}
+              placeholder="http://localhost:8085/oauth2callback?code=..."
+              onChange={(value) => {
+                setRedirectUrl(value)
+                if (manualError) setManualError('')
+              }}
+            />
+            <ObsidianButton
+              text="Connect with URL"
+              disabled={!redirectCode || isBusy}
+              onClick={() => void connectWithRedirectUrl()}
+            />
+            {manualError && (
+              <div className="smtcmp-plan-connect-error">{manualError}</div>
+            )}
+          </div>
+        </ObsidianSetting>
+      </details>
 
       <ObsidianSetting>
         <ObsidianButton text="Cancel" onClick={onClose} />

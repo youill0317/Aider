@@ -5,22 +5,25 @@ const baseEmbeddingModelSchema = z.object({
     .string({
       required_error: 'provider ID is required',
     })
-    .min(1, 'provider ID is required'),
+    .min(1, 'provider ID is required')
+    .max(128),
   id: z
     .string({
       required_error: 'id is required',
     })
-    .min(1, 'id is required'),
+    .min(1, 'id is required')
+    .max(128),
   model: z
     .string({
       required_error: 'model is required',
     })
-    .min(1, 'model is required'),
-  dimension: z.number(),
+    .min(1, 'model is required')
+    .max(512),
+  dimension: z.number().int().min(1).max(32_767),
   // Optional: Request specific output dimensions from the API.
   // Only works with models that support Matryoshka Representation Learning (MRL),
   // such as OpenAI's text-embedding-3-* and Google's gemini-embedding-001.
-  outputDimension: z.number().optional(),
+  outputDimension: z.number().int().min(1).max(32_767).optional(),
 })
 
 // TODO: Ensure the embedding model schema only includes providers that genuinely support embeddings.

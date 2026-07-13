@@ -39,6 +39,7 @@ export type LexicalContentEditableProps = {
   onCreateImageMentionables?: (mentionables: MentionableImage[]) => void
   initialEditorState?: InitialEditorStateType
   autoFocus?: boolean
+  placeholder?: string
   plugins?: {
     image?: boolean
     mention?: boolean
@@ -63,6 +64,7 @@ export default function LexicalContentEditable({
   onCreateImageMentionables,
   initialEditorState,
   autoFocus = false,
+  placeholder,
   plugins,
 }: LexicalContentEditableProps) {
   const app = useApp()
@@ -111,19 +113,27 @@ export default function LexicalContentEditable({
               - PlainTextPlugin only pastes text, so we need to implement custom paste handler.
               - https://github.com/facebook/lexical/discussions/5112
            */}
-      <RichTextPlugin
-        contentEditable={
-          <ContentEditable
-            className="obsidian-default-textarea"
-            style={{
-              background: 'transparent',
-            }}
-            onFocus={onFocus}
-            ref={contentEditableRef}
-          />
-        }
-        ErrorBoundary={LexicalErrorBoundary}
-      />
+      <div className="smtcmp-lexical-input-shell">
+        <RichTextPlugin
+          contentEditable={
+            <ContentEditable
+              className="obsidian-default-textarea"
+              aria-label="Message input"
+              style={{
+                background: 'transparent',
+              }}
+              onFocus={onFocus}
+              ref={contentEditableRef}
+            />
+          }
+          placeholder={
+            placeholder ? (
+              <div className="smtcmp-chat-input-placeholder">{placeholder}</div>
+            ) : null
+          }
+          ErrorBoundary={LexicalErrorBoundary}
+        />
+      </div>
       <HistoryPlugin />
       {mentionPluginsEnabled && (
         <MentionPlugin searchResultByQuery={searchResultByQuery} />

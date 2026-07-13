@@ -26,11 +26,7 @@ import { PromptLevel } from '../../types/prompt-level.types'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 import { fetchPublicUrl, isPublicHttpUrl } from '../fetch-utils'
 import { tokenCount } from '../llm/token'
-import {
-  getNestedFiles,
-  readMultipleTFiles,
-  readTFileContent,
-} from '../obsidian'
+import { getNestedFiles, readTFileContent } from '../obsidian'
 import { redactSecrets } from '../security/redact-secrets'
 
 import {
@@ -41,6 +37,10 @@ import { YoutubeTranscript, isYoutubeUrl } from './youtube-transcript'
 
 const MAX_URL_MENTIONS = 5
 const MAX_WEBSITE_CONTENT_CHARS = 200_000
+const MAX_DIRECT_PROMPT_FILE_BYTES = 512 * 1024
+const MAX_BLOCK_CONTEXT_CHARS = 512 * 1024
+const MAX_PROMPT_TEXT_CHARS = 2 * 1024 * 1024
+const MAX_PROMPT_IMAGE_CHARS = 32 * 1024 * 1024
 
 export class PromptGenerator {
   private getRagEngine: () => Promise<RAGEngine>
@@ -67,35 +67,30 @@ export class PromptGenerator {
       throw new Error('No messages provided')
     }
 
-    // Ensure all user messages have prompt content
-    // This is a fallback for cases where compilation was missed earlier in the process
-    const compiledMessages = await Promise.all(
-      messages.map(async (message) => {
-        if (message.role === 'user' && !message.promptContent) {
-          const { promptContent, similaritySearchResults } =
-            await this.compileUserMessagePrompt({
-              message,
-            })
-          return {
-            ...message,
-            promptContent,
-            similaritySearchResults,
-          }
-        }
-        return message
-      }),
-    )
-
-    // find last user message
-    let lastUserMessage: ChatUserMessage | undefined = undefined
+    const compiledMessages = [...messages]
+    let lastUserMessageIndex = -1
     for (let i = compiledMessages.length - 1; i >= 0; --i) {
       if (compiledMessages[i].role === 'user') {
-        lastUserMessage = compiledMessages[i] as ChatUserMessage
+        lastUserMessageIndex = i
         break
       }
     }
-    if (!lastUserMessage) {
+    if (lastUserMessageIndex === -1) {
       throw new Error('No user messages found')
+    }
+
+    let lastUserMessage = compiledMessages[
+      lastUserMessageIndex
+    ] as ChatUserMessage
+    if (!lastUserMessage.promptContent) {
+      const { promptContent, similaritySearchResults } =
+        await this.compileUserMessagePrompt({ message: lastUserMessage })
+      lastUserMessage = {
+        ...lastUserMessage,
+        promptContent,
+        similaritySearchResults,
+      }
+      compiledMessages[lastUserMessageIndex] = lastUserMessage
     }
     const shouldUseRAG = lastUserMessage.similaritySearchResults !== undefined
     const hasFileOnlyRag =
@@ -125,6 +120,7 @@ export class PromptGenerator {
         : []),
     ]
 
+    assertPromptBudget(requestMessages)
     return requestMessages
   }
 
@@ -137,11 +133,14 @@ export class PromptGenerator {
     const requestMessages: RequestMessage[] = contextMessages.flatMap(
       (message): RequestMessage[] => {
         if (message.role === 'user') {
-          // We assume that all user messages have been compiled
           return [
             {
               role: 'user',
-              content: message.promptContent ?? '',
+              content:
+                message.promptContent ??
+                (message.content
+                  ? editorStateToPlainText(message.content).trim()
+                  : ''),
             },
           ]
         } else if (message.role === 'assistant') {
@@ -287,10 +286,12 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
     message,
     useVaultSearch,
     onQueryProgressChange,
+    signal,
   }: {
     message: ChatUserMessage
     useVaultSearch?: boolean
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void
+    signal?: AbortSignal
   }): Promise<{
     promptContent: ChatUserMessage['promptContent']
     shouldUseRAG: boolean
@@ -299,6 +300,7 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
     })[]
   }> {
     try {
+      signal?.throwIfAborted()
       if (!message.content) {
         return {
           promptContent: '',
@@ -308,12 +310,13 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
       const query = editorStateToPlainText(message.content)
       let similaritySearchResults = undefined
 
-      useVaultSearch =
+      const searchEntireVault = Boolean(
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         useVaultSearch ||
-        message.mentionables.some(
-          (m): m is MentionableVault => m.type === 'vault',
-        )
+          message.mentionables.some(
+            (m): m is MentionableVault => m.type === 'vault',
+          ),
+      )
 
       onQueryProgressChange?.({
         type: 'reading-mentionables',
@@ -324,34 +327,54 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
       const folders = message.mentionables
         .filter((m): m is MentionableFolder => m.type === 'folder')
         .map((m) => m.folder)
-      const nestedFiles = folders.flatMap((folder) =>
-        getNestedFiles(folder, this.app.vault),
-      )
-      const allFiles = [...files, ...nestedFiles]
-      const fileContents = await readMultipleTFiles(allFiles, this.app.vault)
-
-      // Count tokens incrementally to avoid long processing times on large content sets
-      const exceedsTokenThreshold = async () => {
-        let accTokenCount = 0
-        for (const content of fileContents) {
-          const count = await tokenCount(content)
-          accTokenCount += count
-          if (accTokenCount > this.settings.ragOptions.thresholdTokens) {
-            return true
-          }
+      const allFiles = searchEntireVault
+        ? []
+        : [
+            ...new Map(
+              [
+                ...files,
+                ...folders.flatMap((folder) =>
+                  getNestedFiles(folder, this.app.vault),
+                ),
+              ].map((file) => [file.path, file]),
+            ).values(),
+          ]
+      const fileContents: string[] = []
+      let shouldUseRAG = searchEntireVault
+      let mentionedFileTokens = 0
+      for (const file of allFiles) {
+        signal?.throwIfAborted()
+        if (file.stat.size > MAX_DIRECT_PROMPT_FILE_BYTES) {
+          shouldUseRAG = true
+          break
         }
-        return false
+        const estimatedFileTokens = Math.ceil(file.stat.size / 2)
+        if (
+          mentionedFileTokens + estimatedFileTokens >
+          this.settings.ragOptions.thresholdTokens
+        ) {
+          shouldUseRAG = true
+          break
+        }
+        const content = await readTFileContent(file, this.app.vault)
+        signal?.throwIfAborted()
+        fileContents.push(content)
+        mentionedFileTokens += await tokenCount(content)
+        if (mentionedFileTokens > this.settings.ragOptions.thresholdTokens) {
+          shouldUseRAG = true
+          break
+        }
       }
-      const shouldUseRAG = useVaultSearch || (await exceedsTokenThreshold())
 
       let filePrompt: string
       if (shouldUseRAG) {
-        similaritySearchResults = useVaultSearch
+        similaritySearchResults = searchEntireVault
           ? await (
               await this.getRagEngine()
             ).processQuery({
               query,
               onQueryProgressChange: onQueryProgressChange,
+              signal,
             }) // TODO: Add similarity boosting for mentioned files or folders
           : await (
               await this.getRagEngine()
@@ -362,6 +385,7 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
                 folders: folders.map((f) => f.path),
               },
               onQueryProgressChange: onQueryProgressChange,
+              signal,
             })
         const modelPromptLevel = this.getModelPromptLevel()
         filePrompt = `## Potentially Relevant Snippets from the current vault
@@ -393,6 +417,12 @@ ${wrapUntrustedContext(
       const blocks = message.mentionables.filter(
         (m): m is MentionableBlock => m.type === 'block',
       )
+      if (
+        blocks.reduce((length, block) => length + block.content.length, 0) >
+        MAX_BLOCK_CONTEXT_CHARS
+      ) {
+        throw new Error('Referenced block content is too large')
+      }
       const blockPrompt = wrapUntrustedContext(
         blocks
           .map(({ file, content }) => {
@@ -420,7 +450,7 @@ ${wrapUntrustedContext(
         async ({ url }) => `\`\`\`
 Website URL: ${url}
 Website Content:
-${await this.getWebsiteContent(url)}
+${await this.getWebsiteContent(url, signal)}
 \`\`\``,
       ),
     )
@@ -457,7 +487,9 @@ ${await this.getWebsiteContent(url)}
         similaritySearchResults: similaritySearchResults,
       }
     } catch (error) {
-      console.error('Failed to compile user message', redactSecrets(error))
+      if (!signal?.aborted) {
+        console.error('Failed to compile user message', redactSecrets(error))
+      }
       onQueryProgressChange?.({
         type: 'idle',
       })
@@ -564,6 +596,12 @@ ${customInstruction}
   private async getCurrentFileMessage(
     currentFile: TFile,
   ): Promise<RequestMessage> {
+    if (currentFile.stat.size > MAX_DIRECT_PROMPT_FILE_BYTES) {
+      return {
+        role: 'user',
+        content: `The current file (${currentFile.path}) is too large to include directly. Use vault search to retrieve only relevant snippets.`,
+      }
+    }
     const fileContent = await readTFileContent(currentFile, this.app.vault)
     return {
       role: 'user',
@@ -613,12 +651,15 @@ When writing out new markdown blocks, remember not to include "line_number|" at 
    * - filter visually hidden elements
    * ...
    */
-  private async getWebsiteContent(url: string): Promise<string> {
+  private async getWebsiteContent(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     try {
       if (isYoutubeUrl(url)) {
         // TODO: pass language based on user preferences
         const { title, transcript } =
-          await YoutubeTranscript.fetchTranscriptAndMetadata(url)
+          await YoutubeTranscript.fetchTranscriptAndMetadata(url, { signal })
 
         return `Title: ${title}
 Video Transcript:
@@ -628,9 +669,10 @@ ${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`.slice(
         )
       }
 
-      const response = await fetchPublicUrl(url)
+      const response = await fetchPublicUrl(url, { signal })
       return htmlToMarkdown(response.text).slice(0, MAX_WEBSITE_CONTENT_CHARS)
     } catch (error) {
+      if (signal?.aborted) throw error
       console.warn(
         'Website content could not be fetched safely:',
         redactSecrets(error),
@@ -644,6 +686,41 @@ ${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`.slice(
       (model) => model.id === this.settings.chatModelId,
     )
     return chatModel?.promptLevel ?? PromptLevel.Default
+  }
+}
+
+function assertPromptBudget(messages: RequestMessage[]): void {
+  let textChars = 0
+  let imageChars = 0
+
+  for (const message of messages) {
+    if (typeof message.content === 'string') {
+      textChars += message.content.length
+    } else {
+      for (const part of message.content) {
+        if (part.type === 'text') textChars += part.text.length
+        else imageChars += part.image_url.url.length
+      }
+    }
+    if (message.role === 'assistant') {
+      textChars +=
+        message.tool_calls?.reduce(
+          (length, toolCall) =>
+            length + toolCall.name.length + (toolCall.arguments?.length ?? 0),
+          0,
+        ) ?? 0
+    } else if (message.role === 'tool') {
+      textChars +=
+        message.tool_call.name.length +
+        (message.tool_call.arguments?.length ?? 0)
+    }
+
+    if (
+      textChars > MAX_PROMPT_TEXT_CHARS ||
+      imageChars > MAX_PROMPT_IMAGE_CHARS
+    ) {
+      throw new Error('Compiled prompt is too large')
+    }
   }
 }
 

@@ -1,12 +1,35 @@
-import { CornerDownLeftIcon } from 'lucide-react'
+import { ArrowUp, CircleStop } from 'lucide-react'
 
-export function SubmitButton({ onClick }: { onClick: () => void }) {
+export function SubmitButton({
+  onClick,
+  isWorking = false,
+  onStop,
+}: {
+  onClick: () => void
+  isWorking?: boolean
+  onStop?: () => void
+}) {
+  if (isWorking) {
+    return (
+      <button
+        type="button"
+        className="smtcmp-chat-stop-button"
+        onClick={onStop}
+      >
+        <CircleStop size={14} />
+        Stop
+      </button>
+    )
+  }
+
   return (
-    <div className="smtcmp-chat-user-input-submit-button" onClick={onClick}>
-      <div className="smtcmp-chat-user-input-submit-button-icons">
-        <CornerDownLeftIcon size={12} />
-      </div>
-      <div>Chat</div>
-    </div>
+    <button
+      type="button"
+      className="smtcmp-chat-primary-button"
+      onClick={onClick}
+    >
+      <ArrowUp size={14} />
+      Chat
+    </button>
   )
 }

@@ -69,11 +69,72 @@ describe('SecretStore backend selection', () => {
 
     // Then: the base entry contains only chunk metadata and the full value roundtrips.
     expect(secretStorageValues.get(secretId)).not.toBe(longSecret)
-    expect(secretStorageValues.get(`${secretId}-chunk-0000`)).toBe(
-      longSecret.slice(0, 1000),
-    )
+    const chunkValues = [...secretStorageValues.entries()]
+      .filter(([key]) => key.startsWith(`${secretId}-chunk-`))
+      .map(([, value]) => value)
+    expect(chunkValues).toContain(longSecret.slice(0, 1000))
     await expect(store.getSecret(secretId)).resolves.toBe(longSecret)
   })
+
+  it('rejects secrets that exceed the readable chunk limit before writing', async () => {
+    const getSecret = jest.fn().mockResolvedValue('')
+    const setSecret = jest.fn().mockResolvedValue(undefined)
+    const store = createSecretStore({
+      app: { secretStorage: { getSecret, setSecret } },
+    })
+
+    await expect(
+      store.setSecret('too-large', 'x'.repeat(10_000_001)),
+    ).rejects.toThrow('Secret is too large')
+    expect(getSecret).not.toHaveBeenCalled()
+    expect(setSecret).not.toHaveBeenCalled()
+  })
+
+  it('roundtrips a literal legacy metadata-shaped secret', async () => {
+    const secretStorageValues = new Map<string, string>()
+    const store = createSecretStore({
+      app: {
+        secretStorage: {
+          getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+          setSecret: async (key: string, value: string) => {
+            secretStorageValues.set(key, value)
+          },
+        },
+      },
+    })
+    const value = '__aider_secret_chunked_v1__:1'
+
+    await store.setSecret('literal-prefix', value)
+
+    await expect(store.getSecret('literal-prefix')).resolves.toBe(value)
+  })
+
+  it.each(['set', 'delete'] as const)(
+    'does not %s a secret when its previous metadata cannot be read',
+    async (operation) => {
+      const setSecret = jest.fn().mockResolvedValue(undefined)
+      const deleteSecret = jest.fn().mockResolvedValue(undefined)
+      const store = createSecretStore({
+        app: {
+          secretStorage: {
+            getSecret: async () => {
+              throw new Error('temporary read failure')
+            },
+            setSecret,
+            deleteSecret,
+          },
+        },
+      })
+
+      const action =
+        operation === 'set'
+          ? store.setSecret('unreadable', 'replacement')
+          : store.deleteSecret('unreadable')
+      await expect(action).rejects.toThrow('temporary read failure')
+      expect(setSecret).not.toHaveBeenCalled()
+      expect(deleteSecret).not.toHaveBeenCalled()
+    },
+  )
 
   it('deletes chunks when a chunked Obsidian secret is replaced by a short value', async () => {
     // Given: a long secret was stored as multiple SecretStorage entries.
@@ -94,16 +155,16 @@ describe('SecretStore backend selection', () => {
     const secretId = 'aider-provider-openai-plan-refresh-token'
     const store = createSecretStore({ app })
     await store.setSecret(secretId, 'refresh-token-part.'.repeat(80))
+    const chunkKeys = [...secretStorageValues.keys()].filter((key) =>
+      key.startsWith(`${secretId}-chunk-`),
+    )
 
     // When: the same secret id is updated to a short value.
     await store.setSecret(secretId, 'short-refresh-token')
 
     // Then: stale chunk entries are removed and the new value roundtrips.
-    expect(deletedKeys).toEqual([
-      `${secretId}-chunk-0000`,
-      `${secretId}-chunk-0001`,
-    ])
-    expect(secretStorageValues.has(`${secretId}-chunk-0000`)).toBe(false)
+    expect(deletedKeys).toEqual(chunkKeys)
+    expect(chunkKeys.every((key) => !secretStorageValues.has(key))).toBe(true)
     await expect(store.getSecret(secretId)).resolves.toBe('short-refresh-token')
   })
 
@@ -111,7 +172,7 @@ describe('SecretStore backend selection', () => {
     const secretStorageValues = new Map<string, string>()
     const deletedKeys: string[] = []
     const secretId = 'aider-provider-openai-plan-refresh-token'
-    const failedChunk = `${secretId}-chunk-0000`
+    let failedChunk = ''
     const store = createSecretStore({
       app: {
         secretStorage: {
@@ -128,17 +189,90 @@ describe('SecretStore backend selection', () => {
       },
     })
     await store.setSecret(secretId, 'refresh-token-part.'.repeat(80))
+    const chunkKeys = [...secretStorageValues.keys()].filter((key) =>
+      key.startsWith(`${secretId}-chunk-`),
+    )
+    failedChunk = chunkKeys[0]
 
     await expect(store.deleteSecret(secretId)).rejects.toThrow(
       'chunk delete failed',
     )
 
-    expect(deletedKeys).toEqual([
-      secretId,
-      failedChunk,
-      `${secretId}-chunk-0001`,
+    expect(deletedKeys).toEqual([secretId, ...chunkKeys])
+    expect(secretStorageValues.has(chunkKeys[1])).toBe(false)
+  })
+
+  it('keeps the previous chunk generation readable when rotation fails', async () => {
+    const secretStorageValues = new Map<string, string>()
+    let failSecondNewChunk = false
+    let newChunkWrites = 0
+    const app = {
+      secretStorage: {
+        getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+        setSecret: async (key: string, value: string) => {
+          if (failSecondNewChunk && key.includes('-chunk-')) {
+            newChunkWrites += 1
+            if (newChunkWrites === 2) throw new Error('chunk write failed')
+          }
+          secretStorageValues.set(key, value)
+        },
+        deleteSecret: async (key: string) => {
+          secretStorageValues.delete(key)
+        },
+      },
+    }
+    const secretId = 'aider-provider-openai-plan-refresh-token'
+    const originalSecret = 'original-token-part.'.repeat(120)
+    const store = createSecretStore({ app })
+    await store.setSecret(secretId, originalSecret)
+    const originalMetadata = secretStorageValues.get(secretId)
+    const originalChunkKeys = [...secretStorageValues.keys()].filter((key) =>
+      key.startsWith(`${secretId}-chunk-`),
+    )
+
+    failSecondNewChunk = true
+    await expect(
+      store.setSecret(secretId, 'replacement-token-part.'.repeat(120)),
+    ).rejects.toThrow('chunk write failed')
+
+    expect(secretStorageValues.get(secretId)).toBe(originalMetadata)
+    expect(originalChunkKeys.every((key) => secretStorageValues.has(key))).toBe(
+      true,
+    )
+    await expect(store.getSecret(secretId)).resolves.toBe(originalSecret)
+  })
+
+  it('reads and cleans up legacy chunk metadata', async () => {
+    const secretId = 'aider-provider-openai-plan-refresh-token'
+    const firstChunk = 'a'.repeat(1000)
+    const secondChunk = 'legacy-tail'
+    const secretStorageValues = new Map<string, string>([
+      [secretId, '__aider_secret_chunked_v1__:2'],
+      [`${secretId}-chunk-0000`, firstChunk],
+      [`${secretId}-chunk-0001`, secondChunk],
     ])
+    const store = createSecretStore({
+      app: {
+        secretStorage: {
+          getSecret: async (key: string) => secretStorageValues.get(key) ?? '',
+          setSecret: async (key: string, value: string) => {
+            secretStorageValues.set(key, value)
+          },
+          deleteSecret: async (key: string) => {
+            secretStorageValues.delete(key)
+          },
+        },
+      },
+    })
+
+    await expect(store.getSecret(secretId)).resolves.toBe(
+      firstChunk + secondChunk,
+    )
+    await store.setSecret(secretId, 'short-token')
+
+    expect(secretStorageValues.has(`${secretId}-chunk-0000`)).toBe(false)
     expect(secretStorageValues.has(`${secretId}-chunk-0001`)).toBe(false)
+    await expect(store.getSecret(secretId)).resolves.toBe('short-token')
   })
 
   it('treats null from Obsidian secretStorage as missing secret', async () => {

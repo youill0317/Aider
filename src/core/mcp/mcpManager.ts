@@ -13,6 +13,7 @@ import {
   ToolCallResponse,
   ToolCallResponseStatus,
 } from '../../types/tool-call.types'
+import { chunkArray } from '../../utils/common/chunk-array'
 
 import { InvalidToolNameException, McpNotAvailableException } from './exception'
 import {
@@ -32,6 +33,10 @@ function errorMessage(error: unknown): string {
 }
 
 const MAX_MCP_TOOL_OUTPUT_CHARS = 24_000
+const MAX_MCP_RAW_TOOL_OUTPUT_CHARS = 256_000
+const MAX_MCP_TOOL_ARGUMENT_CHARS = 1024 * 1024
+const MCP_CONNECTION_CONCURRENCY = 4
+const MAX_CONVERSATION_TOOL_ALLOWLISTS = 1_000
 
 export class McpManager {
   static readonly TOOL_NAME_DELIMITER = DEFAULT_TOOL_NAME_DELIMITER // Delimiter for tool name construction (serverName__toolName)
@@ -39,11 +44,17 @@ export class McpManager {
   public readonly disabled = !Platform.isDesktop // MCP should be disabled on mobile since it doesn't support node.js
 
   private settings: SmartComposerSettings
+  private readonly isServerTrusted: (
+    config: McpServerConfig,
+  ) => Promise<boolean>
   private unsubscribeFromSettings: () => void
   private defaultEnv: Record<string, string> = {}
+  private defaultEnvPromise: Promise<void> | null = null
   private settingsRevision = 0
+  private disposed = false
 
   private servers: McpServerState[] = [] // IMPORTANT: Always use this.updateServers() to update this array
+  private pendingClients = new Set<McpClient>()
   private activeToolCalls: Map<string, AbortController> = new Map()
   private allowedToolsByConversation: Map<string, Set<string>> = new Map()
   private subscribers = new Set<(servers: McpServerState[]) => void>()
@@ -53,57 +64,66 @@ export class McpManager {
   constructor({
     settings,
     registerSettingsListener,
+    isServerTrusted,
   }: {
     settings: SmartComposerSettings
     registerSettingsListener: (
       listener: (settings: SmartComposerSettings) => void,
     ) => () => void
+    isServerTrusted: (config: McpServerConfig) => Promise<boolean>
   }) {
     this.settings = settings
+    this.isServerTrusted = isServerTrusted
     this.unsubscribeFromSettings = registerSettingsListener((newSettings) => {
-      this.handleSettingsUpdate(newSettings)
+      void this.handleSettingsUpdate(newSettings).catch(() => {
+        console.error('Failed to update MCP server settings')
+      })
     })
   }
 
   public async initialize() {
-    if (this.disabled) {
+    if (this.disabled || this.disposed) {
       return
     }
 
     const revision = this.settingsRevision
 
-    // Get default environment variables
-    const { shellEnvSync } = await import('shell-env')
-    this.defaultEnv = shellEnvSync()
-
     // Create MCP servers
-    const servers = await Promise.all(
-      this.settings.mcp.servers.map((serverConfig) =>
-        this.connectServer(serverConfig),
-      ),
+    const servers = await this.connectServers(
+      this.settings.mcp.servers,
+      revision,
     )
-    if (revision !== this.settingsRevision) {
+    if (!this.isConnectionCurrent(revision)) {
       await this.closeConnectedServers(servers)
       return
     }
+    this.releaseConnectedClients(servers)
     this.updateServers(servers)
   }
 
   public cleanup() {
+    this.disposed = true
     this.settingsRevision += 1
-    void this.closeClients(
-      this.servers
+    for (const controller of this.activeToolCalls.values()) {
+      controller.abort()
+    }
+    const clients = new Set([
+      ...this.pendingClients,
+      ...this.servers
         .filter((s) => s.status === McpServerStatus.Connected)
         .map((s) => s.client),
-    )
+    ])
+    void this.closeClients([...clients])
 
     if (this.unsubscribeFromSettings) {
       this.unsubscribeFromSettings()
     }
 
     this.servers = []
+    this.availableToolsCache = null
     this.subscribers.clear()
     this.activeToolCalls.clear()
+    this.allowedToolsByConversation.clear()
   }
 
   public getServers() {
@@ -118,6 +138,9 @@ export class McpManager {
   public async handleSettingsUpdate(settings: SmartComposerSettings) {
     const revision = ++this.settingsRevision
     this.settings = settings
+    await this.closeClients([...this.pendingClients])
+    if (this.disabled || !this.isConnectionCurrent(revision)) return
+
     const updatedServers = settings.mcp.servers.map(
       (serverConfig: McpServerConfig): McpServerState => {
         const existingServer = this.servers.find(
@@ -129,7 +152,10 @@ export class McpManager {
             existingServer.config.parameters,
             serverConfig.parameters,
           ) &&
-          existingServer.config.enabled === serverConfig.enabled
+          existingServer.config.enabled === serverConfig.enabled &&
+          (existingServer.status === McpServerStatus.Connected ||
+            (existingServer.status === McpServerStatus.Disconnected &&
+              !serverConfig.enabled))
         ) {
           // Server is already up to date
           return {
@@ -147,22 +173,46 @@ export class McpManager {
 
     this.updateServers(updatedServers)
 
-    await Promise.all(
-      updatedServers
-        .filter((s) => s.status === McpServerStatus.Connecting)
-        .map(async (s) => {
-          const server = await this.connectServer(s.config)
-          if (revision !== this.settingsRevision) {
+    const connectingServers = updatedServers.filter(
+      (server) => server.status === McpServerStatus.Connecting,
+    )
+    if (connectingServers.length === 0) return
+
+    for (const batch of chunkArray(
+      connectingServers,
+      MCP_CONNECTION_CONCURRENCY,
+    )) {
+      await Promise.all(
+        batch.map(async (s) => {
+          const server = await this.connectServer(s.config, revision)
+          if (!this.isConnectionCurrent(revision)) {
             await this.closeConnectedServers([server])
             return
           }
+          this.releaseConnectedClients([server])
           this.updateServers((prevServers) =>
             prevServers.map((prevServer) =>
               prevServer.name === server.name ? server : prevServer,
             ),
           )
         }),
-    )
+      )
+    }
+  }
+
+  private async connectServers(
+    configs: McpServerConfig[],
+    revision: number,
+  ): Promise<McpServerState[]> {
+    const servers: McpServerState[] = []
+    for (const batch of chunkArray(configs, MCP_CONNECTION_CONCURRENCY)) {
+      servers.push(
+        ...(await Promise.all(
+          batch.map((config) => this.connectServer(config, revision)),
+        )),
+      )
+    }
+    return servers
   }
 
   private async closeConnectedServers(servers: McpServerState[]) {
@@ -174,11 +224,52 @@ export class McpManager {
   }
 
   private async closeClients(clients: McpClient[]) {
-    await Promise.allSettled(clients.map(async (client) => client.close()))
+    const uniqueClients = [...new Set(clients)]
+    uniqueClients.forEach((client) => this.pendingClients.delete(client))
+    await Promise.allSettled(uniqueClients.map((client) => client.close()))
+  }
+
+  private releaseConnectedClients(servers: McpServerState[]) {
+    for (const server of servers) {
+      if (server.status === McpServerStatus.Connected) {
+        this.pendingClients.delete(server.client)
+      }
+    }
+  }
+
+  private isConnectionCurrent(revision: number): boolean {
+    return !this.disposed && revision === this.settingsRevision
+  }
+
+  private ensureDefaultEnvironment(): Promise<void> {
+    if (!this.defaultEnvPromise) {
+      this.defaultEnvPromise = Promise.all([
+        import('shell-env'),
+        import('@modelcontextprotocol/sdk/client/stdio.js'),
+      ])
+        .then(async ([{ shellEnv }, { getDefaultEnvironment }]) => {
+          const loginShellPath = (await shellEnv()).PATH
+          this.defaultEnv = {
+            ...getDefaultEnvironment(),
+            ...(loginShellPath ? { PATH: loginShellPath } : {}),
+          }
+        })
+        .catch((error: unknown) => {
+          this.defaultEnvPromise = null
+          throw error
+        })
+    }
+    return this.defaultEnvPromise
   }
 
   private notifySubscribers() {
-    for (const cb of this.subscribers) cb(this.servers)
+    for (const callback of this.subscribers) {
+      try {
+        callback(this.servers)
+      } catch {
+        console.error('MCP server subscriber failed')
+      }
+    }
   }
 
   private updateServers(
@@ -217,6 +308,7 @@ export class McpManager {
 
   private async connectServer(
     serverConfig: McpServerConfig,
+    revision = this.settingsRevision,
   ): Promise<McpServerState> {
     if (this.disabled) {
       throw new McpNotAvailableException()
@@ -224,7 +316,7 @@ export class McpManager {
 
     const { id: name, parameters: serverParams, enabled } = serverConfig
 
-    if (!enabled) {
+    if (!enabled || !this.isConnectionCurrent(revision)) {
       return {
         name,
         config: serverConfig,
@@ -243,16 +335,64 @@ export class McpManager {
       }
     }
 
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-    const { StdioClientTransport } = await import(
-      '@modelcontextprotocol/sdk/client/stdio.js'
-    )
+    let trusted = false
+    try {
+      trusted = await this.isServerTrusted(serverConfig)
+    } catch {
+      trusted = false
+    }
+    if (!this.isConnectionCurrent(revision)) {
+      return {
+        name,
+        config: serverConfig,
+        status: McpServerStatus.Disconnected,
+      }
+    }
+    if (!trusted) {
+      return {
+        name,
+        config: serverConfig,
+        status: McpServerStatus.ApprovalRequired,
+      }
+    }
+
+    let Client: typeof import('@modelcontextprotocol/sdk/client/index.js').Client
+    let StdioClientTransport: typeof import('@modelcontextprotocol/sdk/client/stdio.js').StdioClientTransport
+    try {
+      await this.ensureDefaultEnvironment()
+      ;[{ Client }, { StdioClientTransport }] = await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/client/stdio.js'),
+      ])
+    } catch (error) {
+      return {
+        name,
+        config: serverConfig,
+        status: McpServerStatus.Error,
+        error: new Error(
+          redactMcpError(
+            `Failed to initialize MCP server ${name}: ${errorMessage(error)}`,
+            serverConfig,
+            this.defaultEnv,
+          ),
+        ),
+      }
+    }
+    if (!this.isConnectionCurrent(revision)) {
+      return {
+        name,
+        config: serverConfig,
+        status: McpServerStatus.Disconnected,
+      }
+    }
     const client = new Client({ name, version: '1.0.0' })
+    this.pendingClients.add(client)
 
     try {
       await client.connect(
         new StdioClientTransport({
           ...serverParams,
+          stderr: 'ignore',
           env: {
             ...this.defaultEnv,
             ...(serverParams.env ?? {}),
@@ -275,8 +415,25 @@ export class McpManager {
       }
     }
 
+    if (!this.isConnectionCurrent(revision)) {
+      await this.closeClients([client])
+      return {
+        name,
+        config: serverConfig,
+        status: McpServerStatus.Disconnected,
+      }
+    }
+
     try {
       const toolList = await client.listTools()
+      if (!this.isConnectionCurrent(revision)) {
+        await this.closeClients([client])
+        return {
+          name,
+          config: serverConfig,
+          status: McpServerStatus.Disconnected,
+        }
+      }
       return {
         name,
         config: serverConfig,
@@ -302,7 +459,11 @@ export class McpManager {
   }
 
   public async listAvailableTools(): Promise<McpTool[]> {
-    if (this.disabled || !this.settings.chatOptions.enableTools) {
+    if (
+      this.disabled ||
+      this.disposed ||
+      !this.settings.chatOptions.enableTools
+    ) {
       return []
     }
 
@@ -311,33 +472,17 @@ export class McpManager {
     }
 
     const revision = this.settingsRevision
-    const availableTools = (
-      await Promise.all(
-        this.servers.map(async (server): Promise<McpTool[]> => {
-          if (server.status !== McpServerStatus.Connected) {
-            return []
-          }
-          try {
-            const toolList = await server.client.listTools()
-            return toolList.tools
-              .filter((tool) => !server.config.toolOptions[tool.name]?.disabled)
-              .map((tool) => ({
-                ...tool,
-                name: getToolName(server.name, tool.name),
-              }))
-          } catch (error) {
-            console.error(
-              redactMcpError(
-                `Failed to list tools for MCP server ${server.name}: ${errorMessage(error)}`,
-                server.config,
-                this.defaultEnv,
-              ),
-            )
-            return []
-          }
-        }),
-      )
-    ).flat()
+    const availableTools = this.servers.flatMap((server): McpTool[] => {
+      if (server.status !== McpServerStatus.Connected) {
+        return []
+      }
+      return server.tools
+        .filter((tool) => !server.config.toolOptions[tool.name]?.disabled)
+        .map((tool) => ({
+          ...tool,
+          name: getToolName(server.name, tool.name),
+        }))
+    })
 
     if (
       revision !== this.settingsRevision ||
@@ -357,8 +502,31 @@ export class McpManager {
     if (this.disabled || !this.settings.chatOptions.enableTools) {
       return
     }
+    try {
+      const { serverName, toolName } = parseToolName(requestToolName)
+      const server = this.servers.find(({ name }) => name === serverName)
+      if (
+        !server ||
+        server.status !== McpServerStatus.Connected ||
+        server.config.toolOptions[toolName]?.disabled ||
+        !hasAdvertisedTool(server, toolName)
+      ) {
+        return
+      }
+    } catch (error) {
+      if (error instanceof InvalidToolNameException) return
+      throw error
+    }
     let allowedTools = this.allowedToolsByConversation.get(conversationId)
     if (!allowedTools) {
+      if (
+        this.allowedToolsByConversation.size >= MAX_CONVERSATION_TOOL_ALLOWLISTS
+      ) {
+        const oldestConversation = this.allowedToolsByConversation.keys().next()
+        if (!oldestConversation.done) {
+          this.allowedToolsByConversation.delete(oldestConversation.value)
+        }
+      }
       allowedTools = new Set<string>()
       this.allowedToolsByConversation.set(conversationId, allowedTools)
     }
@@ -441,8 +609,11 @@ export class McpManager {
       this.activeToolCalls.set(id, toolAbortController)
     }
     const compositeSignal = toolAbortController.signal
-    if (signal) {
-      signal.addEventListener('abort', () => toolAbortController.abort())
+    const abortFromCaller = () => toolAbortController.abort()
+    if (signal?.aborted) {
+      abortFromCaller()
+    } else {
+      signal?.addEventListener('abort', abortFromCaller, { once: true })
     }
 
     try {
@@ -467,6 +638,12 @@ export class McpManager {
       }
       const { client } = server
 
+      if (
+        typeof args === 'string' &&
+        args.length > MAX_MCP_TOOL_ARGUMENT_CHARS
+      ) {
+        throw new Error('MCP tool arguments are too large')
+      }
       const parsedArgs: Record<string, unknown> | undefined =
         typeof args === 'string' ? (args === '' ? {} : JSON.parse(args)) : args
 
@@ -484,32 +661,33 @@ export class McpManager {
       if (result.content.length === 0) {
         throw new Error('Tool call returned no content')
       }
-      if (result.content[0].type !== 'text') {
+      const unsupportedContent = result.content.find(
+        (content) => content.type !== 'text',
+      )
+      if (unsupportedContent) {
         throw new Error(
-          `Tool result with content type ${result.content[0].type} is not currently supported.`,
+          `Tool result with content type ${unsupportedContent.type} is not currently supported.`,
         )
       }
+      const text = this.collectToolOutput(result.content)
       if (result.isError) {
         return {
           status: ToolCallResponseStatus.Error,
-          error: this.boundAndRedactToolOutput(
-            result.content[0].text,
-            serverConfigForRedaction,
-          ),
+          error: this.boundAndRedactToolOutput(text, serverConfigForRedaction),
         }
       }
       return {
         status: ToolCallResponseStatus.Success,
         data: {
           type: 'text',
-          text: this.boundAndRedactToolOutput(
-            result.content[0].text,
-            serverConfigForRedaction,
-          ),
+          text: this.boundAndRedactToolOutput(text, serverConfigForRedaction),
         },
       }
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (
+        compositeSignal.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         return {
           status: ToolCallResponseStatus.Aborted,
         }
@@ -524,7 +702,11 @@ export class McpManager {
         ),
       }
     } finally {
-      if (id !== undefined) {
+      signal?.removeEventListener('abort', abortFromCaller)
+      if (
+        id !== undefined &&
+        this.activeToolCalls.get(id) === toolAbortController
+      ) {
         this.activeToolCalls.delete(id)
       }
     }
@@ -538,6 +720,23 @@ export class McpManager {
       0,
       MAX_MCP_TOOL_OUTPUT_CHARS,
     )
+  }
+
+  private collectToolOutput(content: McpToolCallResult['content']): string {
+    const output: string[] = []
+    let outputLength = 0
+    for (const item of content) {
+      if (item.type !== 'text' || typeof item.text !== 'string') {
+        throw new Error('Unsupported MCP tool result content')
+      }
+      const separator = outputLength > 0 ? '\n' : ''
+      const remaining = MAX_MCP_RAW_TOOL_OUTPUT_CHARS - outputLength
+      if (remaining <= 0) break
+      const part = `${separator}${item.text}`.slice(0, remaining)
+      output.push(part)
+      outputLength += part.length
+    }
+    return output.join('')
   }
 
   public abortToolCall(id: string): boolean {

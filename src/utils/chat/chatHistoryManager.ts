@@ -8,6 +8,11 @@
 
 import { App, normalizePath } from 'obsidian'
 
+import {
+  MAX_ADOPTION_JSON_FILES,
+  createAdoptionReadBudget,
+  readBoundedTextFile,
+} from '../../adoption/aiderAdoptionUtils'
 import { ChatConversation, ChatConversationMeta } from '../../types/chat'
 
 const CURRENT_SCHEMA_VERSION = 3
@@ -19,6 +24,7 @@ const SAFE_CHAT_CONVERSATION_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export class ChatConversationManager {
   private app: App
+  private readonly readBudget = createAdoptionReadBudget()
 
   constructor(app: App) {
     this.app = app
@@ -38,20 +44,47 @@ export class ChatConversationManager {
   }
 
   async deleteChatConversation(id: string): Promise<void> {
-    const filePath = this.getChatConversationPath(id)
-    await this.app.vault.adapter.remove(filePath)
-    const chatList = await this.getChatList()
-    const updatedChatList = chatList.filter((chat) => chat.id !== id)
-    await this.app.vault.adapter.write(
-      this.getChatListPath(),
-      JSON.stringify(updatedChatList),
+    const failures = await this.deleteChatConversations([id])
+    if (failures.length > 0) {
+      throw new Error(`Failed to delete chat conversation ${id}`)
+    }
+  }
+
+  async deleteChatConversations(ids: string[]): Promise<string[]> {
+    const uniqueIds = [...new Set(ids)]
+    const paths = uniqueIds.map(
+      (id) => [id, this.getChatConversationPath(id)] as const,
     )
+    const deletedIds = new Set<string>()
+    const failedIds: string[] = []
+
+    for (const [id, path] of paths) {
+      try {
+        await this.app.vault.adapter.remove(path)
+        deletedIds.add(id)
+      } catch {
+        failedIds.push(id)
+      }
+    }
+
+    if (deletedIds.size > 0) {
+      const chatList = await this.getChatList()
+      await this.app.vault.adapter.write(
+        this.getChatListPath(),
+        JSON.stringify(chatList.filter((chat) => !deletedIds.has(chat.id))),
+      )
+    }
+    return failedIds
   }
 
   async findChatConversation(id: string): Promise<ChatConversation | null> {
     const filePath = this.getChatConversationPath(id)
     if (await this.app.vault.adapter.exists(filePath)) {
-      const content = await this.app.vault.adapter.read(filePath)
+      const content = await readBoundedTextFile(
+        this.app.vault.adapter,
+        filePath,
+        this.readBudget,
+      )
       const chatConversation: unknown = JSON.parse(content)
       return this.isChatConversation(chatConversation, id)
         ? chatConversation
@@ -75,17 +108,21 @@ export class ChatConversationManager {
   async getChatList(): Promise<ChatConversationMeta[]> {
     const chatListPath = this.getChatListPath()
     if (await this.app.vault.adapter.exists(chatListPath)) {
-      const content = await this.app.vault.adapter.read(chatListPath)
+      const content = await readBoundedTextFile(
+        this.app.vault.adapter,
+        chatListPath,
+        this.readBudget,
+      )
       const chatList: unknown = JSON.parse(content)
       if (!Array.isArray(chatList)) {
         return []
       }
+      if (chatList.length > MAX_ADOPTION_JSON_FILES) {
+        throw new Error('Legacy chat list exceeds the entry limit')
+      }
       const chatItems: unknown[] = chatList
-      return chatItems.filter(
-        // TODO: should migrate from 2 to 3
-        (chat): chat is ChatConversationMeta =>
-          this.isChatConversationMeta(chat) &&
-          chat.schemaVersion >= SUPPORTED_SCHEMA_VERSION,
+      return chatItems.filter((chat): chat is ChatConversationMeta =>
+        this.isChatConversationMeta(chat),
       )
     }
     return []
@@ -146,6 +183,9 @@ export class ChatConversationManager {
       isRecord(value) &&
       this.isSafeChatConversationId(value.id) &&
       typeof value.schemaVersion === 'number' &&
+      Number.isSafeInteger(value.schemaVersion) &&
+      value.schemaVersion >= SUPPORTED_SCHEMA_VERSION &&
+      value.schemaVersion <= CURRENT_SCHEMA_VERSION &&
       typeof value.title === 'string' &&
       typeof value.createdAt === 'number' &&
       typeof value.updatedAt === 'number'

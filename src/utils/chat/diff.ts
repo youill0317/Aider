@@ -24,17 +24,27 @@ export function createDiffBlocks(
   const advOptions: ILinesDiffComputerOptions = {
     ignoreTrimWhitespace: false,
     computeMoves: true,
-    maxComputationTimeMs: 0,
+    maxComputationTimeMs: 2_000,
   }
   const advDiffComputer = new AdvancedLinesDiffComputer()
 
   const currentLines = currentMarkdown.split('\n')
   const incomingLines = incomingMarkdown.split('\n')
-  const advLineChanges = advDiffComputer.computeDiff(
+  const diffResult = advDiffComputer.computeDiff(
     currentLines,
     incomingLines,
     advOptions,
-  ).changes
+  )
+  if (diffResult.hitTimeout) {
+    return [
+      {
+        type: 'modified',
+        originalValue: currentMarkdown || undefined,
+        modifiedValue: incomingMarkdown || undefined,
+      },
+    ]
+  }
+  const advLineChanges = diffResult.changes
 
   let lastOriginalEndLineNumberExclusive = 1 // 1-indexed
   advLineChanges.forEach((change: LineRangeMapping) => {

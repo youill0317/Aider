@@ -60,7 +60,7 @@ export class XaiProvider extends BaseLLMProvider<
   async getEmbedding(
     _model: string,
     _text: string,
-    _options?: { dimensions?: number },
+    _options?: { dimensions?: number; signal?: AbortSignal },
   ): Promise<number[]> {
     throw new Error(
       `Provider ${String(this.provider.id)} does not support embeddings. Please use a different provider.`,

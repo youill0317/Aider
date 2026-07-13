@@ -147,6 +147,7 @@ export class CodexMessageAdapter {
       { id?: string; name?: string }
     >()
     const toolCallHasDelta = new Set<number>()
+    const reasoningSummaryHasDelta = new Set<string>()
 
     const getChunkId = (itemId?: string) =>
       responseId.length > 0 ? responseId : (itemId ?? 'codex-response')
@@ -237,6 +238,7 @@ export class CodexMessageAdapter {
       }
 
       if (chunk.type === 'response.reasoning_summary_text.delta') {
+        reasoningSummaryHasDelta.add(`${chunk.item_id}:${chunk.summary_index}`)
         yield {
           id: getChunkId(chunk.item_id),
           created,
@@ -256,6 +258,13 @@ export class CodexMessageAdapter {
       }
 
       if (chunk.type === 'response.reasoning_summary_text.done') {
+        if (
+          reasoningSummaryHasDelta.has(
+            `${chunk.item_id}:${chunk.summary_index}`,
+          )
+        ) {
+          continue
+        }
         yield {
           id: getChunkId(chunk.item_id),
           created,

@@ -1,4 +1,8 @@
 import { MAX_PGLITE_DATABASE_BYTES } from '../constants'
+import {
+  writeBinaryFileAtomically,
+  writeFileAtomically,
+} from '../utils/atomic-file'
 
 import { completed, existing, failed, missing } from './aiderAdoptionOutcomes'
 import type {
@@ -7,9 +11,11 @@ import type {
   AiderAdoptionApp,
 } from './aiderAdoptionTypes'
 import {
+  createAdoptionReadBudget,
   ensureFolderTree,
   parentPath,
-  parseJsonValue,
+  parseJsonObject,
+  readBoundedTextFile,
 } from './aiderAdoptionUtils'
 
 export { adoptChatHistories } from './aiderChatHistoryAdoption'
@@ -20,15 +26,27 @@ export async function adoptPluginData(
   paths: AdoptionPaths,
 ): Promise<AdoptionOutcome> {
   const adapter = app.vault.adapter
+  const readBudget = createAdoptionReadBudget()
   if (await adapter.exists(paths.canonicalPluginDataPath)) {
-    return existing(paths.legacyPluginDataPath, paths.canonicalPluginDataPath)
+    const canonicalContent = await readBoundedTextFile(
+      adapter,
+      paths.canonicalPluginDataPath,
+      readBudget,
+    )
+    if (parseJsonObject(canonicalContent) !== null) {
+      return existing(paths.legacyPluginDataPath, paths.canonicalPluginDataPath)
+    }
   }
   if (!(await adapter.exists(paths.legacyPluginDataPath))) {
     return missing(paths.legacyPluginDataPath, paths.canonicalPluginDataPath)
   }
 
-  const content = await adapter.read(paths.legacyPluginDataPath)
-  if (parseJsonValue(content) === null) {
+  const content = await readBoundedTextFile(
+    adapter,
+    paths.legacyPluginDataPath,
+    readBudget,
+  )
+  if (parseJsonObject(content) === null) {
     return failed(
       paths.legacyPluginDataPath,
       paths.canonicalPluginDataPath,
@@ -37,7 +55,7 @@ export async function adoptPluginData(
   }
 
   await ensureFolderTree(adapter, parentPath(paths.canonicalPluginDataPath))
-  await adapter.write(paths.canonicalPluginDataPath, content)
+  await writeFileAtomically(adapter, paths.canonicalPluginDataPath, content)
   return completed(paths.legacyPluginDataPath, paths.canonicalPluginDataPath)
 }
 
@@ -65,9 +83,19 @@ export async function adoptVectorDatabase(
     )
   }
 
-  await adapter.writeBinary(
+  const legacyDatabase = await adapter.readBinary(paths.legacyVectorPath)
+  if (legacyDatabase.byteLength > MAX_PGLITE_DATABASE_BYTES) {
+    return failed(
+      paths.legacyVectorPath,
+      paths.canonicalVectorPath,
+      'Legacy vector database archive is too large',
+    )
+  }
+
+  await writeBinaryFileAtomically(
+    adapter,
     paths.canonicalVectorPath,
-    await adapter.readBinary(paths.legacyVectorPath),
+    legacyDatabase,
   )
   return completed(paths.legacyVectorPath, paths.canonicalVectorPath)
 }

@@ -313,6 +313,28 @@ describe('McpManager permission boundaries', () => {
     ).toBe(false)
   })
 
+  it('bounds conversation-scoped tool permissions', () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    const requestToolName = getToolName('github', 'search')
+
+    for (let index = 0; index <= 1_000; index += 1) {
+      manager.allowToolForConversation(requestToolName, `conversation-${index}`)
+    }
+
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-0',
+      }),
+    ).toBe(false)
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-1000',
+      }),
+    ).toBe(true)
+  })
+
   it('enabled tool with per-chat allow is scoped to conversation', () => {
     // Given: an enabled tool is allowed for one conversation.
     const manager = createManager({
@@ -376,24 +398,14 @@ describe('McpManager permission boundaries', () => {
     await expect(manager.listAvailableTools()).resolves.toEqual([])
   })
 
-  it('does not return a stale tool list when settings change mid-list', async () => {
-    let resolveListTools: ((value: { tools: McpTool[] }) => void) | undefined
+  it('reuses tools discovered while connecting instead of relisting', async () => {
     const client = createClient()
-    client.listTools = jest.fn(
-      () =>
-        new Promise<{ tools: McpTool[] }>((resolve) => {
-          resolveListTools = resolve
-        }),
-    )
+    const listTools = jest.fn()
+    client.listTools = listTools
     const manager = createManager({ toolOptions: { search: {} }, client })
 
-    const listing = manager.listAvailableTools()
-    const disabledSettings = createSettings({ search: { disabled: true } })
-    disabledSettings.chatOptions.enableTools = false
-    await manager.handleSettingsUpdate(disabledSettings)
-    resolveListTools?.({ tools: [createTool('search')] })
-
-    await expect(listing).resolves.toEqual([])
+    await expect(manager.listAvailableTools()).resolves.toHaveLength(1)
+    expect(listTools).not.toHaveBeenCalled()
   })
 
   it('does not let a stale connection overwrite newer settings', async () => {
@@ -423,9 +435,11 @@ describe('McpManager permission boundaries', () => {
     const staleUpdate = manager.handleSettingsUpdate(
       createSettings({ search: {} }, { command: 'stale' }),
     )
+    await waitFor(() => resolvers.has('stale'))
     const latestUpdate = manager.handleSettingsUpdate(
       createSettings({ search: {} }, { command: 'latest' }),
     )
+    await waitFor(() => resolvers.has('latest'))
     resolvers.get('latest')?.()
     await latestUpdate
     resolvers.get('stale')?.()
@@ -454,6 +468,15 @@ describe('McpManager permission boundaries', () => {
         requestToolName: getToolName('github', 'search'),
       }),
     ).toBe(false)
+  })
+
+  it('exposes no cached tools after cleanup', async () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    await expect(manager.listAvailableTools()).resolves.toHaveLength(1)
+
+    manager.cleanup()
+
+    await expect(manager.listAvailableTools()).resolves.toEqual([])
   })
 
   it('MCP env secret is redacted from connection error', () => {
@@ -640,6 +663,90 @@ describe('McpManager permission boundaries', () => {
     }
   })
 
+  it('rejects oversized serialized tool arguments before calling a server', async () => {
+    const client = createClient()
+    const callTool = jest.spyOn(client, 'callTool')
+    const manager = createManager({
+      toolOptions: { search: {} },
+      client,
+    })
+
+    const response = await manager.callTool({
+      name: getToolName('github', 'search'),
+      args: 'x'.repeat(1024 * 1024 + 1),
+    })
+
+    expect(response.status).toBe(ToolCallResponseStatus.Error)
+    expect(callTool).not.toHaveBeenCalled()
+  })
+
+  it('preserves every text block returned by a tool', async () => {
+    const response = await createManager({
+      toolOptions: { search: {} },
+      callToolResult: {
+        isError: false,
+        content: [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ],
+      },
+    }).callTool({ name: getToolName('github', 'search'), args: '{}' })
+
+    expect(response.status).toBe(ToolCallResponseStatus.Success)
+    if (response.status === ToolCallResponseStatus.Success) {
+      expect(response.data.text).toBe('first\nsecond')
+    }
+  })
+
+  it('does not let an older duplicate call clear the newer call state', async () => {
+    const client = {
+      close: jest.fn(),
+      listTools: async () => ({ tools: [createTool('search')] }),
+      callTool: jest.fn(
+        (
+          _request: unknown,
+          _schema: unknown,
+          options: { signal: AbortSignal },
+        ) =>
+          new Promise((_resolve, reject) => {
+            const rejectAsAborted = () =>
+              reject(new DOMException('aborted', 'AbortError'))
+            if (options.signal.aborted) {
+              rejectAsAborted()
+            } else {
+              options.signal.addEventListener('abort', rejectAsAborted, {
+                once: true,
+              })
+            }
+          }),
+      ),
+    } as unknown as McpClient
+    const manager = createManager({
+      toolOptions: { search: {} },
+      client,
+    })
+
+    const first = manager.callTool({
+      name: getToolName('github', 'search'),
+      args: '{}',
+      id: 'same-id',
+    })
+    await Promise.resolve()
+    const second = manager.callTool({
+      name: getToolName('github', 'search'),
+      args: '{}',
+      id: 'same-id',
+    })
+
+    await expect(first).resolves.toEqual({
+      status: ToolCallResponseStatus.Aborted,
+    })
+    expect(manager.abortToolCall('same-id')).toBe(true)
+    await expect(second).resolves.toEqual({
+      status: ToolCallResponseStatus.Aborted,
+    })
+  })
+
   it('password-style MCP env secret is redacted from tool errors', async () => {
     // Given: a tool error includes a password-style inherited env secret.
     const manager = createManager({
@@ -750,6 +857,7 @@ function createManager(params: {
   const manager = new McpManager({
     settings: createSettings(params.toolOptions, params.parameters),
     registerSettingsListener: () => () => undefined,
+    isServerTrusted: async () => true,
   })
   const mutableManager = manager as unknown as {
     servers: ReturnType<typeof createConnectedServer>[]
@@ -911,4 +1019,12 @@ function createTool(name: string): McpTool {
       properties: {},
     },
   }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (predicate()) return
+    await Promise.resolve()
+  }
+  throw new Error('Condition was not reached')
 }

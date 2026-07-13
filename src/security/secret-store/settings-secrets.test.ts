@@ -8,10 +8,12 @@ import {
   createMcpEnvSecretStoreKey,
   createSecretStore,
   createSecretStoreKey,
+  createUnversionedLegacyAiderSecretStoreKey,
 } from './secret-store'
 import type { SecretStore } from './secret-store'
 import {
   hydrateSettingsSecrets,
+  persistRecognizedRawSettingsSecrets,
   persistSettingsUpdate,
   sanitizeSettingsForPersistence,
 } from './settings-secrets'
@@ -90,6 +92,170 @@ describe('settings secret persistence', () => {
     await expect(
       secretStore.getSecret(createMcpEnvSecretStoreKey(server.id)),
     ).resolves.toContain('mcp-secret-token')
+  })
+
+  it('does not copy an ambiguous unversioned provider secret', async () => {
+    const providers = [
+      { id: 'foo-bar', type: 'openai' as const },
+      { id: 'foo_bar', type: 'openai' as const },
+    ]
+    const legacyKey = createUnversionedLegacyAiderSecretStoreKey({
+      providerId: providers[0].id,
+      providerType: providers[0].type,
+      field: 'apiKey',
+    })
+    const values = new Map([[legacyKey, 'shared-legacy-secret']])
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: async (key) => values.get(key) ?? null,
+      setSecret: async (key, value) => {
+        values.set(key, value)
+      },
+      deleteSecret: async (key) => {
+        values.delete(key)
+      },
+    }
+
+    const hydrated = await hydrateSettingsSecrets(
+      createSettings(providers),
+      secretStore,
+    )
+
+    expect(hydrated.providers.every((provider) => !provider.apiKey)).toBe(true)
+    expect(values.get(legacyKey)).toBe('shared-legacy-secret')
+    for (const provider of providers) {
+      expect(values.has(providerSecretKeys(provider, 'apiKey').current)).toBe(
+        false,
+      )
+    }
+  })
+
+  it('rolls back raw secret migration when preserving settings fails', async () => {
+    const provider = {
+      id: 'custom-openai',
+      type: 'openai',
+      apiKey: 'sk-new-plaintext-key',
+    } as const
+    const secretKey = providerSecretKeys(provider, 'apiKey').current
+    const values = new Map([[secretKey, 'sk-previous-key']])
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: async (key) => values.get(key) ?? null,
+      setSecret: async (key, value) => {
+        values.set(key, value)
+      },
+      deleteSecret: async (key) => {
+        values.delete(key)
+      },
+    }
+    const rawData = {
+      ...createSettings([provider]),
+      futureTopLevel: 'keep-me',
+    }
+
+    await expect(
+      persistRecognizedRawSettingsSecrets({
+        rawData,
+        secretStore,
+        saveData: async () => {
+          throw new Error('save failed')
+        },
+      }),
+    ).rejects.toThrow('save failed')
+
+    expect(values.get(secretKey)).toBe('sk-previous-key')
+    expect(rawData.providers[0].apiKey).toBe('sk-new-plaintext-key')
+    expect(rawData.futureTopLevel).toBe('keep-me')
+  })
+
+  it('does not migrate secret-shaped fields from unrecognized raw entries', async () => {
+    const setSecret = jest.fn().mockResolvedValue(undefined)
+    const saveData = jest.fn().mockResolvedValue(undefined)
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: async () => null,
+      setSecret,
+      deleteSecret: async () => undefined,
+    }
+
+    await persistRecognizedRawSettingsSecrets({
+      rawData: {
+        providers: [
+          {
+            id: 'future-provider',
+            type: 'future-provider',
+            apiKey: 'leave-this-unknown-value',
+          },
+        ],
+        mcp: {
+          servers: [
+            {
+              id: 'future-server',
+              enabled: true,
+              parameters: {
+                command: 42,
+                env: { TOKEN: 'leave-this-unknown-value' },
+              },
+              toolOptions: {},
+            },
+          ],
+        },
+      },
+      secretStore,
+      saveData,
+    })
+
+    expect(setSecret).not.toHaveBeenCalled()
+    expect(saveData).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['unavailable', new Error('read failed')],
+    ['malformed', '{'],
+  ])('ignores an %s MCP environment secret', async (_case, failure) => {
+    const server = {
+      id: 'github',
+      enabled: true,
+      parameters: { command: 'node' },
+      toolOptions: {},
+    }
+    const warning = jest.spyOn(console, 'warn').mockImplementation()
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: async () => {
+        if (failure instanceof Error) throw failure
+        return failure
+      },
+      setSecret: async () => undefined,
+      deleteSecret: async () => undefined,
+    }
+
+    await expect(
+      hydrateSettingsSecrets(createSettings([], [server]), secretStore),
+    ).resolves.toEqual(createSettings([], [server]))
+    expect(warning).toHaveBeenCalledTimes(1)
+    warning.mockRestore()
+  })
+
+  it('ignores an MCP environment secret that exceeds server limits', async () => {
+    const server = {
+      id: 'github',
+      enabled: true,
+      parameters: { command: 'node' },
+      toolOptions: {},
+    }
+    const secretStore = createSecretStore({ app: {} })
+    await secretStore.setSecret(
+      createMcpEnvSecretStoreKey(server.id),
+      JSON.stringify({ TOKEN: 'x'.repeat(16_385) }),
+    )
+    const warning = jest.spyOn(console, 'warn').mockImplementation()
+
+    await expect(
+      hydrateSettingsSecrets(createSettings([], [server]), secretStore),
+    ).resolves.toEqual(createSettings([], [server]))
+    expect(warning).toHaveBeenCalledTimes(1)
+    warning.mockRestore()
   })
 
   it('does not save blank tokens when secret persistence fails', async () => {
@@ -405,6 +571,56 @@ describe('settings secret persistence', () => {
     expect(runtimeSettings).toBe(previousSettings)
   })
 
+  it('does not hide a failed current-key replacement in a legacy key', async () => {
+    const provider = {
+      id: 'custom-openai',
+      type: 'openai',
+      apiKey: 'sk-new-secret',
+    } as const
+    const keys = providerSecretKeys(provider, 'apiKey')
+    const values = new Map([[keys.current, 'sk-old-secret']])
+    const setSecret = jest.fn(async (key: string, value: string) => {
+      if (key === keys.current && value === provider.apiKey) {
+        throw new Error('current write failed')
+      }
+      values.set(key, value)
+    })
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: async (key) => values.get(key) ?? null,
+      setSecret,
+      deleteSecret: async (key) => {
+        values.delete(key)
+      },
+    }
+    const previousSettings = createSettings([
+      { ...provider, apiKey: 'sk-old-secret' },
+    ])
+    const nextSettings = createSettings([provider])
+    let runtimeSettings: SmartComposerSettings | undefined
+    const saveData = jest.fn()
+
+    await expect(
+      persistSettingsUpdate({
+        previousSettings,
+        nextSettings,
+        secretStore,
+        publishRuntimeSettings: (settings) => {
+          runtimeSettings = settings
+        },
+        saveData,
+      }),
+    ).rejects.toThrow('current write failed')
+
+    expect(runtimeSettings).toBe(previousSettings)
+    expect(saveData).not.toHaveBeenCalled()
+    expect(values.get(keys.current)).toBe('sk-old-secret')
+    expect(keys.legacy.some((key) => values.has(key))).toBe(false)
+    for (const legacyKey of keys.legacy) {
+      expect(setSecret).not.toHaveBeenCalledWith(legacyKey, provider.apiKey)
+    }
+  })
+
   it('removes a newly written secret when data save fails', async () => {
     const secretKey = createSecretStoreKey({
       providerId: 'custom-openai',
@@ -604,5 +820,65 @@ describe('settings secret persistence', () => {
     )
 
     expect(attemptedKeys).toEqual(expectedKeys)
+  })
+
+  it('rejects duplicate provider IDs before touching secret storage', async () => {
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: jest.fn().mockResolvedValue(null),
+      setSecret: jest.fn().mockResolvedValue(undefined),
+      deleteSecret: jest.fn().mockResolvedValue(undefined),
+    }
+    const settings = createSettings([
+      { id: 'duplicate', type: 'openai', apiKey: 'first' },
+      { id: 'duplicate', type: 'anthropic', apiKey: 'second' },
+    ])
+
+    await expect(
+      sanitizeSettingsForPersistence(settings, secretStore),
+    ).rejects.toThrow('Provider IDs must be unique')
+    expect(secretStore.getSecret).not.toHaveBeenCalled()
+    expect(secretStore.setSecret).not.toHaveBeenCalled()
+    expect(secretStore.deleteSecret).not.toHaveBeenCalled()
+  })
+
+  it('rejects duplicate MCP server IDs before publishing or persisting', async () => {
+    const secretStore: SecretStore = {
+      getBackendStatus: () => 'obsidian-secret-storage',
+      getSecret: jest.fn().mockResolvedValue(null),
+      setSecret: jest.fn().mockResolvedValue(undefined),
+      deleteSecret: jest.fn().mockResolvedValue(undefined),
+    }
+    const server = {
+      id: 'duplicate',
+      enabled: true,
+      parameters: { command: 'node', env: { TOKEN: 'first' } },
+      toolOptions: {},
+    }
+    const publishRuntimeSettings = jest.fn()
+    const saveData = jest.fn()
+
+    await expect(
+      persistSettingsUpdate({
+        previousSettings: createSettings([]),
+        nextSettings: createSettings(
+          [],
+          [
+            server,
+            {
+              ...server,
+              parameters: { command: 'node', env: { TOKEN: 'second' } },
+            },
+          ],
+        ),
+        secretStore,
+        publishRuntimeSettings,
+        saveData,
+      }),
+    ).rejects.toThrow('MCP server IDs must be unique')
+    expect(publishRuntimeSettings).not.toHaveBeenCalled()
+    expect(saveData).not.toHaveBeenCalled()
+    expect(secretStore.getSecret).not.toHaveBeenCalled()
+    expect(secretStore.setSecret).not.toHaveBeenCalled()
   })
 })

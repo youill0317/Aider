@@ -59,9 +59,7 @@ describe('AbstractJsonRepository', () => {
 
     finishMkdir?.()
     await creating
-    expect(adapter.write.mock.calls[0]?.[0]).toMatch(
-      /^data\/row\.json\..+\.tmp$/,
-    )
+    expect(adapter.write.mock.calls[0]?.[0]).toMatch(/^data\/\.aider-.+\.tmp$/)
     expect(adapter.rename).toHaveBeenCalledWith(
       adapter.write.mock.calls[0]?.[0],
       'data/row.json',
@@ -79,6 +77,20 @@ describe('AbstractJsonRepository', () => {
     await expect(
       repository.create({ fileName: '../outside.json', value: 'no' }),
     ).rejects.toThrow('Invalid database file name')
+    expect(adapter.write).not.toHaveBeenCalled()
+  })
+
+  it('validates records again at the persistence boundary', async () => {
+    const adapter = createAdapter()
+    adapter.exists.mockResolvedValue(true)
+    const repository = new TestRepository(
+      { vault: { adapter } } as unknown as App,
+      'data',
+    )
+
+    await expect(
+      repository.create({ fileName: 'row.json' } as Row),
+    ).rejects.toThrow('Invalid JSON database record')
     expect(adapter.write).not.toHaveBeenCalled()
   })
 

@@ -32,6 +32,7 @@ type PublicUrlResponse = {
 type PublicUrlOptions = {
   headers?: Record<string, string>
   maxBytes?: number
+  signal?: AbortSignal
 }
 
 export function isPublicHttpUrl(value: string): boolean {
@@ -58,7 +59,13 @@ export async function fetchPublicUrl(
   )
 
   for (let redirects = 0; ; redirects += 1) {
-    const response = await requestPublicUrl(url, options.headers, maxBytes)
+    throwIfAborted(options.signal)
+    const response = await requestPublicUrl(
+      url,
+      options.headers,
+      maxBytes,
+      options.signal,
+    )
     const location = response.headers.location
     if (![301, 302, 303, 307, 308].includes(response.status) || !location) {
       if (response.status < 200 || response.status >= 300) {
@@ -126,6 +133,7 @@ async function requestPublicUrl(
   url: URL,
   suppliedHeaders: Record<string, string> | undefined,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<PublicUrlResponse> {
   // Pin the validated DNS answer to the socket. Obsidian requestUrl does not
   // expose redirect targets or the connected address, so it cannot prevent
@@ -137,7 +145,11 @@ async function requestPublicUrl(
   const hostname = normalizeHostname(url.hostname)
   const addresses = isIpAddress(hostname)
     ? [{ address: hostname, family: hostname.includes(':') ? 6 : 4 }]
-    : await dns.promises.lookup(hostname, { all: true, verbatim: true })
+    : await abortable(
+        dns.promises.lookup(hostname, { all: true, verbatim: true }),
+        signal,
+      )
+  throwIfAborted(signal)
 
   if (
     addresses.length === 0 ||
@@ -153,16 +165,27 @@ async function requestPublicUrl(
     let activeRequest: import('http').ClientRequest | undefined
     let addressIndex = 0
     const deadline: { timer?: ReturnType<typeof setTimeout> } = {}
-    const clearDeadline = () => {
+    const cleanup = () => {
       if (deadline.timer !== undefined) clearTimeout(deadline.timer)
+      signal?.removeEventListener('abort', abort)
     }
     const fail = (error: Error) => {
       if (!settled) {
         settled = true
-        clearDeadline()
+        cleanup()
         reject(error)
       }
     }
+    const abort = () => {
+      const error = createAbortError()
+      activeRequest?.destroy(error)
+      fail(error)
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     const startRequest = () => {
       const destination = addresses[addressIndex++]
       let responseStarted = false
@@ -190,7 +213,7 @@ async function requestPublicUrl(
 
         if ([301, 302, 303, 307, 308].includes(status) && headers.location) {
           settled = true
-          clearDeadline()
+          cleanup()
           response.destroy()
           resolve({ status, headers, text: '' })
           return
@@ -226,7 +249,7 @@ async function requestPublicUrl(
         response.on('end', () => {
           if (!settled) {
             settled = true
-            clearDeadline()
+            cleanup()
             resolve({ status, headers, text: Buffer.concat(chunks).toString() })
           }
         })
@@ -254,6 +277,36 @@ async function requestPublicUrl(
       activeRequest?.destroy()
     }, REQUEST_TIMEOUT_MS)
     startRequest()
+  })
+}
+
+function createAbortError(): DOMException {
+  return new DOMException('Operation aborted', 'AbortError')
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createAbortError()
+}
+
+async function abortable<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return operation
+  throwIfAborted(signal)
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(createAbortError())
+    signal.addEventListener('abort', abort, { once: true })
+    operation.then(
+      (value) => {
+        signal.removeEventListener('abort', abort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      },
+    )
   })
 }
 

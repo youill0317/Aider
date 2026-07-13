@@ -21,14 +21,20 @@ export type TemplateMetadata = {
 const templateSchema = z
   .object({
     id: z.string().uuid(),
-    name: z.string().min(1),
+    name: z.string().min(1).max(4_096),
     content: z
       .object({
-        nodes: z.array(
-          z
-            .object({ type: z.string(), version: z.number().finite() })
-            .passthrough(),
-        ),
+        nodes: z
+          .array(
+            z
+              .object({
+                type: z.string().min(1).max(256),
+                version: z.number().int(),
+              })
+              .passthrough(),
+          )
+          .min(1)
+          .max(10_000),
       })
       .passthrough(),
     createdAt: z.number().finite(),

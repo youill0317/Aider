@@ -20,11 +20,16 @@ export function SplitButton({
 
   return (
     <div className="smtcmp-split-button">
-      <button onClick={onPrimaryClick} className="smtcmp-split-button-primary">
+      <button
+        type="button"
+        onClick={onPrimaryClick}
+        className="smtcmp-split-button-primary"
+      >
         {primaryText}
       </button>
       <DropdownMenu.Root open={isOpen} onOpenChange={setIsOpen}>
         <DropdownMenu.Trigger
+          type="button"
           className="smtcmp-split-button-toggle"
           aria-label="Show more options"
         >

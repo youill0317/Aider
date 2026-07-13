@@ -58,17 +58,6 @@ export function useChatHistory(): UseChatHistory {
   const persistConversation = useCallback(
     async (id: string, messages: ChatMessage[]) => {
       const serializedMessages = messages.map(serializeChatMessage)
-      const existingConversation = await chatManager.findById(id)
-      if (
-        existingConversation &&
-        serializedMessagesEqual(
-          existingConversation.messages,
-          serializedMessages,
-        )
-      ) {
-        return
-      }
-
       let conversation = await chatManager.updateChat(id, {
         messages: serializedMessages,
       })
@@ -181,7 +170,9 @@ const serializeChatMessage = (message: ChatMessage): SerializedChatMessage => {
       return {
         role: 'user',
         content: message.content,
-        promptContent: message.promptContent,
+        promptContent: Array.isArray(message.promptContent)
+          ? message.promptContent.filter((part) => part.type === 'text')
+          : message.promptContent,
         id: message.id,
         mentionables: message.mentionables.map(serializeMentionable),
         similaritySearchResults: message.similaritySearchResults,
@@ -206,19 +197,6 @@ const serializeChatMessage = (message: ChatMessage): SerializedChatMessage => {
     case 'agent-command':
       return normalizeAgentCommandMessage(message)
   }
-}
-
-const serializedMessagesEqual = (
-  left: SerializedChatMessage[],
-  right: SerializedChatMessage[],
-): boolean => {
-  const keys = new Set<string>()
-  JSON.stringify([left, right], (key, value: unknown) => {
-    keys.add(key)
-    return value
-  })
-  const sortedKeys = [...keys].sort()
-  return JSON.stringify(left, sortedKeys) === JSON.stringify(right, sortedKeys)
 }
 
 const normalizeAgentCommandMessage = (
@@ -251,14 +229,25 @@ const deserializeChatMessage = (
 ): ChatMessage => {
   switch (message.role) {
     case 'user': {
+      const mentionables = message.mentionables
+        .map((m) => deserializeMentionable(m, app))
+        .filter((m): m is Mentionable => m !== null)
       return {
         role: 'user',
         content: message.content,
-        promptContent: message.promptContent,
+        promptContent: Array.isArray(message.promptContent)
+          ? [
+              ...mentionables
+                .filter((mentionable) => mentionable.type === 'image')
+                .map((mentionable) => ({
+                  type: 'image_url' as const,
+                  image_url: { url: mentionable.data },
+                })),
+              ...message.promptContent.filter((part) => part.type === 'text'),
+            ]
+          : message.promptContent,
         id: message.id,
-        mentionables: message.mentionables
-          .map((m) => deserializeMentionable(m, app))
-          .filter((m): m is Mentionable => m !== null),
+        mentionables,
         similaritySearchResults: message.similaritySearchResults,
       }
     }

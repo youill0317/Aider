@@ -2,6 +2,50 @@ import { normalizePath } from 'obsidian'
 
 import type { AiderAdoptionAdapter } from './aiderAdoptionTypes'
 
+export const MAX_ADOPTION_JSON_FILE_BYTES = 64 * 1024 * 1024
+export const MAX_ADOPTION_TOTAL_JSON_BYTES = 512 * 1024 * 1024
+export const MAX_ADOPTION_JSON_FILES = 10_000
+export const MAX_ADOPTION_DIRECTORY_DEPTH = 32
+
+export type AdoptionReadBudget = {
+  filesRead: number
+  bytesRead: number
+}
+
+export function createAdoptionReadBudget(): AdoptionReadBudget {
+  return { filesRead: 0, bytesRead: 0 }
+}
+
+export async function readBoundedTextFile(
+  adapter: AiderAdoptionAdapter,
+  path: string,
+  budget: AdoptionReadBudget,
+  maxBytes = MAX_ADOPTION_JSON_FILE_BYTES,
+): Promise<string> {
+  if (budget.filesRead >= MAX_ADOPTION_JSON_FILES) {
+    throw new Error('Adoption JSON file count exceeds the limit')
+  }
+  const stat = await adapter.stat(path)
+  if (stat?.type === 'file' && stat.size > maxBytes) {
+    throw new Error('Adoption JSON file is too large')
+  }
+
+  const content = await adapter.read(path)
+  if (content.length > maxBytes) {
+    throw new Error('Adoption JSON file is too large')
+  }
+  const contentBytes = new TextEncoder().encode(content).byteLength
+  if (contentBytes > maxBytes) {
+    throw new Error('Adoption JSON file is too large')
+  }
+  if (budget.bytesRead + contentBytes > MAX_ADOPTION_TOTAL_JSON_BYTES) {
+    throw new Error('Adoption JSON data exceeds the total size limit')
+  }
+  budget.filesRead += 1
+  budget.bytesRead += contentBytes
+  return content
+}
+
 export function parseJsonObject(
   content: string,
 ): Record<string, unknown> | null {

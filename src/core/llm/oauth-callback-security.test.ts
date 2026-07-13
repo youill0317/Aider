@@ -114,7 +114,31 @@ describe('OAuth callback safety', () => {
     ).rejects.toThrow('Gemini redirect URI must include an explicit port')
   })
 
-  it('callback server returns HTTP 400 without leaking authorization code', async () => {
+  it('settles active callback promises immediately when stopped', async () => {
+    const codexRejection = expect(
+      startCodexCallbackServer({
+        state: 'expected-state',
+        redirectUri: 'http://127.0.0.1:1455/auth/callback',
+        timeoutMs: 60_000,
+      }),
+    ).rejects.toThrow('cancelled')
+    await wait(50)
+    await stopCodexCallbackServer()
+    await codexRejection
+
+    const geminiRejection = expect(
+      startGeminiCallbackServer({
+        state: 'expected-state',
+        redirectUri: 'http://127.0.0.1:8085/oauth2callback',
+        timeoutMs: 60_000,
+      }),
+    ).rejects.toThrow('cancelled')
+    await wait(50)
+    await stopGeminiCallbackServer()
+    await geminiRejection
+  })
+
+  it('ignores invalid-state callbacks without leaking authorization codes', async () => {
     // Given: a Codex callback server is listening with a known state.
     const callbackPromise = startCodexCallbackServer({
       state: 'expected-state',
@@ -140,19 +164,17 @@ describe('OAuth callback safety', () => {
       throw error
     }
     const body = await response.text()
+    const validResponse = await fetch(
+      'http://127.0.0.1:1455/auth/callback?state=expected-state&code=valid-code',
+    )
     const result = await callbackResult
 
     // Then: the HTTP response is bounded and omits the authorization code.
     expect(response.status).toBe(400)
     expect(body).toBe('Invalid state parameter')
     expect(body).not.toContain('super-secret-code')
-    expect(result).toHaveProperty('error')
-    if ('error' in result) {
-      expect(result.error).toBeInstanceOf(Error)
-      if (result.error instanceof Error) {
-        expect(result.error.message).toBe('Invalid state parameter')
-      }
-    }
+    expect(validResponse.status).toBe(200)
+    expect(result).toEqual({ code: 'valid-code' })
   })
 
   it('returns not-found for wrong callback path', () => {

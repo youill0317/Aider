@@ -39,9 +39,11 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
 
   return (
     <div className="smtcmp-assistant-message-metadata">
-      <div
+      <button
+        type="button"
         className="smtcmp-assistant-message-metadata-toggle"
         onClick={handleToggle}
+        aria-expanded={isExpanded}
       >
         <span>Reasoning {showLoader && <DotLoader />}</span>
         {isExpanded ? (
@@ -49,7 +51,7 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
         ) : (
           <ChevronDown className="smtcmp-assistant-message-metadata-toggle-icon" />
         )}
-      </div>
+      </button>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
           <UntrustedMarkdown content={reasoning} scale="xs" />

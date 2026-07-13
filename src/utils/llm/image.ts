@@ -1,4 +1,7 @@
-import { MentionableImage } from '../../types/mentionable'
+import {
+  MAX_MENTIONABLE_IMAGE_BYTES,
+  MentionableImage,
+} from '../../types/mentionable'
 
 export function parseImageDataUrl(dataUrl: string): {
   mimeType: string
@@ -15,6 +18,12 @@ export function parseImageDataUrl(dataUrl: string): {
 export async function fileToMentionableImage(
   file: File,
 ): Promise<MentionableImage> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Only image files can be attached')
+  }
+  if (file.size > MAX_MENTIONABLE_IMAGE_BYTES) {
+    throw new Error('Image file is too large')
+  }
   const base64Data = await fileToBase64(file)
   return {
     type: 'image',

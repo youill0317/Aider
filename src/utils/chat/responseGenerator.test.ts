@@ -134,6 +134,76 @@ describe('ResponseGenerator auto tool call limit', () => {
   })
 })
 
+describe('ResponseGenerator response bounds', () => {
+  it('accumulates streamed DeepSeek reasoning metadata', async () => {
+    const { generator, latestMessages } = createGenerator([
+      [reasoningChunk('think '), reasoningChunk('hard'), reasoningChunk('!')],
+    ])
+
+    await generator.run()
+
+    expect(latestMessages()[0]).toMatchObject({
+      reasoning: 'think hard!',
+      providerMetadata: {
+        deepseek: { reasoningContent: 'think hard!' },
+      },
+    })
+  })
+
+  it('rejects an oversized assistant response', async () => {
+    const { generator } = createGenerator([
+      [contentChunk('x'.repeat(2 * 1024 * 1024 + 1))],
+    ])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant response is too large',
+    )
+  })
+
+  it('rejects oversized streamed tool arguments', async () => {
+    const chunk = toolChunk('call-1', 0)
+    const toolCall = chunk.choices[0]?.delta.tool_calls?.[0]
+    if (!toolCall?.function) throw new Error('Expected tool call fixture')
+    toolCall.function.arguments = 'x'.repeat(1024 * 1024 + 1)
+    const { generator } = createGenerator([[chunk]])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant tool call arguments are too large',
+    )
+  })
+
+  it('rejects tool call indexes outside the supported range', async () => {
+    const { generator } = createGenerator([[toolChunk('call-1', 64)]])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant response has too many tool calls',
+    )
+  })
+
+  it('rejects oversized tool call IDs', async () => {
+    const { generator } = createGenerator([[toolChunk('x'.repeat(257), 0)]])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant tool call ID is invalid',
+    )
+  })
+
+  it('rejects annotations that cannot be persisted safely', async () => {
+    const chunk = contentChunk('response')
+    chunk.choices[0].delta.annotations = [
+      {
+        type: 'url_citation',
+        url_citation: { url: `https://example.com/${'x'.repeat(16_384)}` },
+      },
+    ]
+    const { generator } = createGenerator([[chunk]])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant response has an invalid annotation',
+    )
+  })
+})
+
 function createGenerator(
   responses: LLMResponseStreaming[][],
   {
@@ -217,6 +287,23 @@ function contentChunk(content: string): LLMResponseStreaming {
     choices: [{ delta: { content }, finish_reason: null }],
     id: 'response-content',
     model: 'gpt-test',
+    object: 'chat.completion.chunk',
+  }
+}
+
+function reasoningChunk(reasoning: string): LLMResponseStreaming {
+  return {
+    choices: [
+      {
+        delta: {
+          reasoning,
+          providerMetadata: { deepseek: { reasoningContent: reasoning } },
+        },
+        finish_reason: null,
+      },
+    ],
+    id: 'response-reasoning',
+    model: 'deepseek-test',
     object: 'chat.completion.chunk',
   }
 }

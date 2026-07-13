@@ -25,14 +25,16 @@ function TitleInput({
     <input
       ref={inputRef}
       type="text"
+      aria-label="Conversation title"
       value={value}
       className="smtcmp-chat-list-dropdown-item-title-input"
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
         e.stopPropagation()
+        if (e.nativeEvent.isComposing) return
         if (e.key === 'Enter') {
-          onSubmit(value)
+          void onSubmit(value.trim() || title)
         }
       }}
       autoFocus
@@ -46,6 +48,8 @@ function ChatListItem({
   isFocused,
   isEditing,
   onMouseEnter,
+  onFocus,
+  itemRef,
   onSelect,
   onDelete,
   onStartEdit,
@@ -55,49 +59,49 @@ function ChatListItem({
   isFocused: boolean
   isEditing: boolean
   onMouseEnter: () => void
+  onFocus: () => void
+  itemRef: (element: HTMLButtonElement | null) => void
   onSelect: () => Promise<void>
   onDelete: () => Promise<void>
   onStartEdit: () => void
   onFinishEdit: (title: string) => Promise<void>
 }) {
-  const itemRef = useRef<HTMLLIElement>(null)
-
-  useEffect(() => {
-    if (isFocused && itemRef.current) {
-      itemRef.current.scrollIntoView({
-        block: 'nearest',
-      })
-    }
-  }, [isFocused])
-
   return (
-    <li
-      ref={itemRef}
-      onClick={onSelect}
-      onMouseEnter={onMouseEnter}
-      className={isFocused ? 'selected' : ''}
-    >
+    <li onMouseEnter={onMouseEnter} className={isFocused ? 'selected' : ''}>
       {isEditing ? (
         <TitleInput title={title} onSubmit={onFinishEdit} />
       ) : (
-        <div className="smtcmp-chat-list-dropdown-item-title">{title}</div>
+        <button
+          ref={itemRef}
+          type="button"
+          className="smtcmp-chat-list-dropdown-item-select"
+          onClick={onSelect}
+          onFocus={onFocus}
+          tabIndex={isFocused ? 0 : -1}
+        >
+          <span className="smtcmp-chat-list-dropdown-item-title">{title}</span>
+        </button>
       )}
       <div className="smtcmp-chat-list-dropdown-item-actions">
         <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation()
             onStartEdit()
           }}
           className="clickable-icon smtcmp-chat-list-dropdown-item-icon"
+          aria-label={`Rename ${title}`}
         >
           <Pencil />
         </button>
         <button
+          type="button"
           onClick={async (e) => {
             e.stopPropagation()
             await onDelete()
           }}
           className="clickable-icon smtcmp-chat-list-dropdown-item-icon"
+          aria-label={`Delete ${title}`}
         >
           <Trash2 />
         </button>
@@ -124,6 +128,7 @@ export function ChatListDropdown({
   const [open, setOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState<number>(0)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
     if (open) {
@@ -135,24 +140,45 @@ export function ChatListDropdown({
     }
   }, [open, chatList, currentConversationId])
 
+  const focusItem = useCallback(
+    (index: number) => {
+      if (chatList.length === 0) return
+      const nextIndex = Math.max(0, Math.min(chatList.length - 1, index))
+      setFocusedIndex(nextIndex)
+      requestAnimationFrame(() => {
+        const item = itemRefs.current[nextIndex]
+        item?.focus()
+        item?.scrollIntoView({ block: 'nearest' })
+      })
+    },
+    [chatList.length],
+  )
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.closest('.smtcmp-chat-list-dropdown-item-actions, input'))
+        return
+
       if (e.key === 'ArrowUp') {
-        setFocusedIndex(Math.max(0, focusedIndex - 1))
+        e.preventDefault()
+        focusItem(focusedIndex - 1)
       } else if (e.key === 'ArrowDown') {
-        setFocusedIndex(Math.min(chatList.length - 1, focusedIndex + 1))
-      } else if (e.key === 'Enter') {
-        onSelect(chatList[focusedIndex].id)
-        setOpen(false)
+        e.preventDefault()
+        focusItem(focusedIndex + 1)
       }
     },
-    [chatList, focusedIndex, setFocusedIndex, onSelect],
+    [focusedIndex, focusItem],
   )
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button className="clickable-icon" aria-label="Chat History">
+        <button
+          type="button"
+          className="clickable-icon"
+          aria-label="Chat History"
+        >
           {children}
         </button>
       </Popover.Trigger>
@@ -161,8 +187,16 @@ export function ChatListDropdown({
         <Popover.Content
           className="smtcmp-popover smtcmp-chat-list-dropdown-content"
           onKeyDown={handleKeyDown}
+          onOpenAutoFocus={(event) => {
+            if (chatList.length === 0) return
+            event.preventDefault()
+            const currentIndex = chatList.findIndex(
+              (chat) => chat.id === currentConversationId,
+            )
+            focusItem(currentIndex === -1 ? 0 : currentIndex)
+          }}
         >
-          <ul>
+          <ul aria-label="Chat history">
             {chatList.length === 0 ? (
               <li className="smtcmp-chat-list-dropdown-empty">
                 No conversations
@@ -174,9 +208,13 @@ export function ChatListDropdown({
                   title={chat.title}
                   isFocused={focusedIndex === index}
                   isEditing={editingId === chat.id}
+                  itemRef={(element) => {
+                    itemRefs.current[index] = element
+                  }}
                   onMouseEnter={() => {
                     setFocusedIndex(index)
                   }}
+                  onFocus={() => setFocusedIndex(index)}
                   onSelect={async () => {
                     await onSelect(chat.id)
                     setOpen(false)
@@ -190,6 +228,7 @@ export function ChatListDropdown({
                   onFinishEdit={async (title) => {
                     await onUpdateTitle(chat.id, title)
                     setEditingId(null)
+                    focusItem(index)
                   }}
                 />
               ))

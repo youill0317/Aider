@@ -86,6 +86,28 @@ describe('CodexToolRunner', () => {
     })
   })
 
+  it('reserves the single-run slot before asynchronous runtime loading', async () => {
+    const runtime = createDeferredRuntime()
+    const runner = createRunner({ runtime })
+
+    const firstRun = runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+    const secondResponse = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Run tests' }),
+      id: 'tool-call-2',
+    })
+
+    expect(secondResponse).toEqual({
+      status: ToolCallResponseStatus.Error,
+      error: 'Another Codex run is already active.',
+    })
+    await runtime.waitForExecutions(1)
+    runtime.resolveRun(createRunResult('cancelled'))
+    await firstRun
+  })
+
   it('aborts the active Codex run when the caller aborts the signal', async () => {
     const runtime = createDeferredRuntime()
     const runner = createRunner({ runtime })
@@ -103,6 +125,62 @@ describe('CodexToolRunner', () => {
 
     expect(runtime.abort).toHaveBeenCalledTimes(1)
     expect(response).toEqual({
+      status: ToolCallResponseStatus.Aborted,
+    })
+  })
+
+  it('does not start a Codex run for an already-aborted request', async () => {
+    const execute = jest.fn()
+    const runner = createRunner({ runtime: { execute } })
+    const abortController = new AbortController()
+    abortController.abort()
+
+    const response = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+      signal: abortController.signal,
+    })
+
+    expect(response).toEqual({ status: ToolCallResponseStatus.Aborted })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('does not start a Codex run after cleanup', async () => {
+    const execute = jest.fn()
+    const runner = createRunner({ runtime: { execute } })
+
+    runner.cleanup()
+    const response = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+
+    expect(response.status).toBe(ToolCallResponseStatus.Error)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('keeps an aborted run active until its process settles', async () => {
+    const runtime = createDeferredRuntime()
+    const runner = createRunner({ runtime })
+    const firstRun = runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+    await runtime.waitForExecutions(1)
+
+    expect(runner.abortToolCall('tool-call-1')).toBe(true)
+    await expect(
+      runner.callTool({
+        args: JSON.stringify({ prompt: 'Run tests' }),
+        id: 'tool-call-2',
+      }),
+    ).resolves.toMatchObject({
+      status: ToolCallResponseStatus.Error,
+      error: 'Another Codex run is already active.',
+    })
+
+    runtime.resolveRun(createRunResult('cancelled'))
+    await expect(firstRun).resolves.toEqual({
       status: ToolCallResponseStatus.Aborted,
     })
   })

@@ -50,15 +50,17 @@ export default function MarkdownCodeComponent({
     <div className="smtcmp-code-block">
       <div className="smtcmp-code-block-header">
         {filename && (
-          <div
+          <button
+            type="button"
             className="smtcmp-code-block-header-filename"
             onClick={handleOpenFile}
           >
             {filename}
-          </div>
+          </button>
         )}
         <div className="smtcmp-code-block-header-button-container">
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
             onClick={() => {
               setIsPreviewMode(!isPreviewMode)
@@ -68,6 +70,7 @@ export default function MarkdownCodeComponent({
             {isPreviewMode ? 'View Raw Text' : 'View Formatted'}
           </button>
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
             onClick={() => {
               handleCopy()
@@ -86,15 +89,10 @@ export default function MarkdownCodeComponent({
             )}
           </button>
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
-            onClick={
-              isApplying
-                ? undefined
-                : () => {
-                    onApply(String(children))
-                  }
-            }
-            aria-disabled={isApplying}
+            onClick={() => onApply(String(children))}
+            disabled={isApplying}
           >
             {isApplying ? (
               <>
@@ -124,51 +122,6 @@ export default function MarkdownCodeComponent({
           {String(children)}
         </MemoizedSyntaxHighlighterWrapper>
       )}
-      <div className="smtcmp-code-block-footer">
-        <div className="smtcmp-code-block-header-button-container">
-          <button
-            className="clickable-icon smtcmp-code-block-header-button"
-            onClick={() => {
-              handleCopy()
-            }}
-          >
-            {copied ? (
-              <>
-                <Check size={10} />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <CopyIcon size={10} />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-          <button
-            className="clickable-icon smtcmp-code-block-header-button"
-            onClick={
-              isApplying
-                ? undefined
-                : () => {
-                    onApply(String(children))
-                  }
-            }
-            aria-disabled={isApplying}
-          >
-            {isApplying ? (
-              <>
-                <Loader2 className="spinner" size={14} />
-                <span>Applying...</span>
-              </>
-            ) : (
-              <>
-                <Play size={10} />
-                <span>Apply</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

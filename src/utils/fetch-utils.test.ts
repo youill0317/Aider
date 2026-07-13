@@ -120,6 +120,30 @@ describe('public URL fetch boundary', () => {
     }
   })
 
+  it('aborts an active public URL request', async () => {
+    let activeRequest: FakeRequest | undefined
+    let markStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    mockHttpsRequest.mockImplementation(() => {
+      activeRequest = new FakeRequest()
+      markStarted?.()
+      return activeRequest
+    })
+    const controller = new AbortController()
+    const request = fetchPublicUrl('https://public.example', {
+      signal: controller.signal,
+    })
+    const observed = request.catch((error: unknown) => error)
+    await started
+
+    controller.abort()
+
+    await expect(observed).resolves.toMatchObject({ name: 'AbortError' })
+    expect(activeRequest).toBeDefined()
+  })
+
   it('caps automatic citation title requests per batch', async () => {
     mockHttpsRequest.mockImplementation(
       fakeRequest(

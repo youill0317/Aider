@@ -1,5 +1,5 @@
 import { SerializedEditorState } from 'lexical'
-import { App } from 'obsidian'
+import { App, TFile } from 'obsidian'
 
 import { RAGEngine } from '../../core/rag/ragEngine'
 import { SelectEmbedding } from '../../database/schema'
@@ -90,6 +90,127 @@ describe('PromptGenerator RAG metadata handling', () => {
     expect(instructionText).not.toContain('startLine="200"')
     expect(instructionText).not.toContain(
       'add the startLine and endLine attributes',
+    )
+  })
+
+  it('does not read mentioned files before an explicit vault search', async () => {
+    const cachedRead = jest.fn()
+    const ragEngine = {
+      processQuery: jest.fn().mockResolvedValue([]),
+    } as unknown as RAGEngine
+    const promptGenerator = new PromptGenerator(
+      async () => ragEngine,
+      { vault: { cachedRead } } as unknown as App,
+      createSettings({}),
+    )
+    const message = createVaultSearchUserMessage()
+    message.mentionables.push({
+      type: 'file',
+      file: { path: 'large.md' } as TFile,
+    })
+
+    await promptGenerator.compileUserMessagePrompt({
+      message,
+      useVaultSearch: true,
+    })
+
+    expect(cachedRead).not.toHaveBeenCalled()
+  })
+
+  it('uses file size to avoid reading mentioned files that already exceed the RAG threshold', async () => {
+    const cachedRead = jest.fn()
+    const processQuery = jest.fn().mockResolvedValue([])
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery }) as unknown as RAGEngine,
+      { vault: { cachedRead } } as unknown as App,
+      createSettings({
+        ragOptions: {
+          chunkSize: 1000,
+          thresholdTokens: 100,
+          minSimilarity: 0,
+          limit: 10,
+          excludePatterns: [],
+          includePatterns: [],
+        },
+      }),
+    )
+    const message = createVaultSearchUserMessage()
+    message.mentionables = [
+      {
+        type: 'file',
+        file: {
+          path: 'large.md',
+          stat: { size: 1_000 },
+        } as TFile,
+      },
+    ]
+
+    await promptGenerator.compileUserMessagePrompt({ message })
+
+    expect(cachedRead).not.toHaveBeenCalled()
+    expect(processQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { files: ['large.md'], folders: [] },
+      }),
+    )
+  })
+
+  it('compiles only the latest missing prompt and keeps older history plain', async () => {
+    const processQuery = jest.fn().mockResolvedValue([])
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery }) as unknown as RAGEngine,
+      { vault: {} } as App,
+      createSettings({}),
+    )
+    const olderMessage = {
+      ...createVaultSearchUserMessage(),
+      id: 'older-user',
+      content: createEditorState('  Older question  '),
+    }
+    const latestMessage = {
+      ...createVaultSearchUserMessage(),
+      id: 'latest-user',
+      content: createEditorState('Latest question'),
+      mentionables: [],
+    }
+    const compilePrompt = jest.spyOn(
+      promptGenerator,
+      'compileUserMessagePrompt',
+    )
+
+    const requestMessages = await promptGenerator.generateRequestMessages({
+      messages: [olderMessage, latestMessage],
+    })
+
+    expect(compilePrompt).toHaveBeenCalledTimes(1)
+    expect(compilePrompt).toHaveBeenCalledWith({ message: latestMessage })
+    expect(processQuery).not.toHaveBeenCalled()
+    const userMessages = requestMessages.filter(
+      (message) => message.role === 'user',
+    )
+    expect(userMessages[0]?.content).toBe('Older question')
+    expect(getTextContent(userMessages[1]?.content ?? null)).toContain(
+      'Latest question',
+    )
+  })
+
+  it('passes prompt cancellation to vault search', async () => {
+    const processQuery = jest.fn().mockResolvedValue([])
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery }) as unknown as RAGEngine,
+      { vault: {} } as App,
+      createSettings({}),
+    )
+    const abortController = new AbortController()
+
+    await promptGenerator.compileUserMessagePrompt({
+      message: createVaultSearchUserMessage(),
+      useVaultSearch: true,
+      signal: abortController.signal,
+    })
+
+    expect(processQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: abortController.signal }),
     )
   })
 })

@@ -1,5 +1,9 @@
 import type { ViewCreator } from 'obsidian'
 
+import {
+  createTestApp,
+  jsonFile,
+} from './adoption/aiderStorageAdoption.test-support'
 import { loadAiderMigrationWiring } from './aiderMigrationWiring'
 import {
   APPLY_VIEW_TYPE,
@@ -10,6 +14,7 @@ import {
 import { McpManager } from './core/mcp/mcpManager'
 import { DatabaseManager } from './database/DatabaseManager'
 import SmartComposerPlugin from './main'
+import { smartComposerSettingsSchema } from './settings/schema/setting.types'
 
 jest.mock('./ApplyView', () => ({
   ApplyView: jest.fn().mockImplementation(() => ({})),
@@ -101,6 +106,173 @@ describe('Aider plugin migration wiring', () => {
     await loadHarness(harness)
 
     expect(calls).toEqual(['adopt', 'load'])
+  })
+
+  it('does not load settings after adoption reports a failed resource', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.write(
+      '.obsidian/plugins/smart-composer/data.json',
+      jsonFile({ version: 20, providers: [] }),
+    )
+    const write = adapter.write.bind(adapter)
+    jest.spyOn(adapter, 'write').mockImplementationOnce(async (path) => {
+      await write(path, '{')
+      throw new Error('disk full')
+    })
+    jest.spyOn(console, 'error').mockImplementation(() => undefined)
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      app,
+    }) as SmartComposerPlugin
+    const harness = createHarness()
+    const loadSettings = jest.fn().mockResolvedValue(undefined)
+
+    await expect(
+      loadAiderMigrationWiring(
+        {
+          adoptSmartComposerData: () =>
+            (
+              plugin as unknown as {
+                adoptSmartComposerData(): Promise<void>
+              }
+            ).adoptSmartComposerData(),
+          loadSettings,
+          registerView: harness.registerView,
+        },
+        {
+          applyView: harness.applyView,
+          chatView: harness.chatView,
+        },
+      ),
+    ).rejects.toThrow('Adoption failed')
+    expect(loadSettings).not.toHaveBeenCalled()
+    expect(await adapter.exists('.obsidian/plugins/aider/data.json')).toBe(
+      false,
+    )
+  })
+
+  it('moves recognized plaintext secrets without discarding unknown settings', async () => {
+    const secretValues = new Map<string, string>()
+    const app = {
+      secretStorage: {
+        getSecret: async (key: string) => secretValues.get(key) ?? null,
+        setSecret: async (key: string, value: string) => {
+          secretValues.set(key, value)
+        },
+        deleteSecret: async (key: string) => {
+          secretValues.delete(key)
+        },
+      },
+    }
+    const rawSettings = {
+      ...smartComposerSettingsSchema.parse({}),
+      futureTopLevel: { keep: true },
+      providers: [
+        {
+          id: 'custom-openai',
+          type: 'openai',
+          apiKey: 'plaintext-api-key',
+          futureProviderOption: 'keep-provider',
+        },
+        {
+          id: 'openai-plan',
+          type: 'openai-plan',
+          oauth: {
+            accessToken: 'plaintext-access-token',
+            refreshToken: 'plaintext-refresh-token',
+            expiresAt: 1_893_456_000_000,
+            futureOauthOption: 'keep-oauth',
+          },
+        },
+      ],
+      mcp: {
+        futureMcpOption: 'keep-mcp',
+        servers: [
+          {
+            id: 'github',
+            enabled: true,
+            parameters: {
+              command: 'node',
+              env: { GITHUB_TOKEN: 'plaintext-mcp-token' },
+              futureParameterOption: 'keep-parameter',
+            },
+            toolOptions: {},
+            futureServerOption: 'keep-server',
+          },
+        ],
+      },
+    }
+    const firstSave = jest.fn().mockResolvedValue(undefined)
+    const firstPlugin = Object.assign(
+      Object.create(SmartComposerPlugin.prototype),
+      {
+        app,
+        loadData: jest.fn().mockResolvedValue(rawSettings),
+        saveData: firstSave,
+        secretStore: null,
+      },
+    ) as SmartComposerPlugin
+
+    await firstPlugin.loadSettings()
+
+    expect(firstSave).toHaveBeenCalledTimes(1)
+    const persistedSettings = firstSave.mock.calls[0][0]
+    expect(persistedSettings).toMatchObject({
+      futureTopLevel: { keep: true },
+      providers: [
+        {
+          id: 'custom-openai',
+          futureProviderOption: 'keep-provider',
+        },
+        {
+          id: 'openai-plan',
+          oauth: {
+            accessToken: '',
+            refreshToken: '',
+            futureOauthOption: 'keep-oauth',
+          },
+        },
+      ],
+      mcp: {
+        futureMcpOption: 'keep-mcp',
+        servers: [
+          {
+            parameters: { futureParameterOption: 'keep-parameter' },
+            futureServerOption: 'keep-server',
+          },
+        ],
+      },
+    })
+    expect(JSON.stringify(persistedSettings)).not.toContain('plaintext-')
+
+    const reloadSave = jest.fn().mockResolvedValue(undefined)
+    const reloadedPlugin = Object.assign(
+      Object.create(SmartComposerPlugin.prototype),
+      {
+        app,
+        loadData: jest.fn().mockResolvedValue(persistedSettings),
+        saveData: reloadSave,
+        secretStore: null,
+      },
+    ) as SmartComposerPlugin
+
+    await reloadedPlugin.loadSettings()
+
+    expect(reloadedPlugin.settings.providers[0].apiKey).toBe(
+      'plaintext-api-key',
+    )
+    const planProvider = reloadedPlugin.settings.providers[1]
+    expect(
+      planProvider.type === 'openai-plan' ? planProvider.oauth : undefined,
+    ).toMatchObject({
+      accessToken: 'plaintext-access-token',
+      refreshToken: 'plaintext-refresh-token',
+    })
+    expect(reloadedPlugin.settings.mcp.servers[0].parameters.env).toEqual({
+      GITHUB_TOKEN: 'plaintext-mcp-token',
+    })
+    expect(reloadSave).not.toHaveBeenCalled()
   })
 
   it('registers canonical and legacy Smart Composer view aliases for one release', async () => {

@@ -9,6 +9,7 @@ export type OAuthCallbackDecision =
       readonly statusCode: 400
       readonly responseBody: string
       readonly error: Error
+      readonly terminal: boolean
     }
   | {
       readonly kind: 'success'
@@ -38,6 +39,7 @@ export function decideOAuthCallback(
     return createErrorDecision({
       responseBody: 'Missing state parameter',
       errorMessage: 'Missing state parameter',
+      terminal: false,
     })
   }
 
@@ -45,6 +47,7 @@ export function decideOAuthCallback(
     return createErrorDecision({
       responseBody: 'Invalid state parameter',
       errorMessage: 'Invalid state parameter',
+      terminal: false,
     })
   }
 
@@ -53,6 +56,7 @@ export function decideOAuthCallback(
     return createErrorDecision({
       responseBody: `OAuth error: ${errorMessage}`,
       errorMessage,
+      terminal: true,
     })
   }
 
@@ -60,6 +64,7 @@ export function decideOAuthCallback(
     return createErrorDecision({
       responseBody: 'Missing authorization code',
       errorMessage: 'Missing authorization code',
+      terminal: true,
     })
   }
 
@@ -72,12 +77,14 @@ export function decideOAuthCallback(
 function createErrorDecision(params: {
   readonly responseBody: string
   readonly errorMessage: string
+  readonly terminal: boolean
 }): OAuthCallbackDecision {
   return {
     kind: 'error',
     statusCode: 400,
     responseBody: params.responseBody,
     error: new Error(params.errorMessage),
+    terminal: params.terminal,
   }
 }
 

@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { Book, CircleStop, History, Plus } from 'lucide-react'
+import { Book, History, Plus } from 'lucide-react'
 import { App, Notice } from 'obsidian'
 import {
   forwardRef,
@@ -56,6 +56,7 @@ import { buildChatMessageRows } from '../../utils/chat/message-groups'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { readTFileContent } from '../../utils/obsidian'
 import { redactSecrets } from '../../utils/security/redact-secrets'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { ErrorModal } from '../modals/ErrorModal'
 import { TemplateSectionModal } from '../modals/TemplateSectionModal'
 
@@ -64,7 +65,10 @@ import ChatUserInput, {
   ChatSubmitMode,
   ChatUserInputRef,
 } from './chat-input/ChatUserInput'
-import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
+import {
+  editorStateToPlainText,
+  hasSubmittableContent,
+} from './chat-input/utils/editor-state-to-plain-text'
 import { ChatListDropdown } from './ChatListDropdown'
 import QueryProgress, { QueryProgressState } from './QueryProgress'
 import { useAutoScroll } from './useAutoScroll'
@@ -163,10 +167,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const [addedBlockKey, setAddedBlockKey] = useState<string | null>(
     selectedBlock
       ? getMentionableKey(
-          serializeMentionable({
-            type: 'block',
-            ...selectedBlock,
-          }),
+          serializeMentionable({ type: 'block', ...selectedBlock }),
         )
       : null,
   )
@@ -190,6 +191,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const activeAgentTasksRef = useRef(new Set<Promise<void>>())
   const activeApprovedToolCallsRef = useRef<ActiveApprovedToolCall[]>([])
   const activeApprovedToolTasksRef = useRef(new Set<Promise<void>>())
+  const activePromptCompilationRef = useRef<AbortController | null>(null)
   const latestChatMessagesRef = useRef(chatMessages)
   const currentConversationIdRef = useRef(currentConversationId)
   const workGenerationRef = useRef(0)
@@ -319,6 +321,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const invalidateActiveWork = useCallback(() => {
     const generation = ++workGenerationRef.current
     readyWorkGenerationRef.current = -1
+    activePromptCompilationRef.current?.abort()
+    activePromptCompilationRef.current = null
     const settled = Promise.all([
       abortActiveStreams(),
       abortActiveAgentToolCalls(latestChatMessagesRef.current),
@@ -340,6 +344,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const abortActiveWork = useCallback(async () => {
     const { settled } = invalidateActiveWork()
     await settled
+    setQueryProgress({ type: 'idle' })
   }, [invalidateActiveWork])
 
   const isCurrentWork = useCallback(
@@ -531,40 +536,44 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             )
           : submittedMessages
 
-      const compiledMessages = await Promise.all(
-        messagesWithCurrentFile.map(async (message) => {
-          if (message.role === 'user' && message.id === lastMessage.id) {
-            const { promptContent, similaritySearchResults } =
-              await promptGenerator.compileUserMessagePrompt({
-                message,
-                useVaultSearch: mode === 'vault',
-                onQueryProgressChange: (progress) => {
-                  if (isCurrentWork(generation, conversationId)) {
-                    setQueryProgress(progress)
-                  }
-                },
-              })
-            return {
-              ...message,
-              promptContent,
-              similaritySearchResults,
-            }
-          } else if (message.role === 'user' && !message.promptContent) {
-            // Ensure all user messages have prompt content
-            // This is a fallback for cases where compilation was missed earlier in the process
-            const { promptContent, similaritySearchResults } =
-              await promptGenerator.compileUserMessagePrompt({
-                message,
-              })
-            return {
-              ...message,
-              promptContent,
-              similaritySearchResults,
-            }
-          }
-          return message
-        }),
-      )
+      const messageToCompile = messagesWithCurrentFile.at(-1)
+      if (messageToCompile?.role !== 'user') {
+        throw new Error('Last message is not a user message')
+      }
+      const abortController = new AbortController()
+      activePromptCompilationRef.current = abortController
+      let compiledMessages: ChatMessage[]
+      try {
+        const { promptContent, similaritySearchResults } =
+          await promptGenerator.compileUserMessagePrompt({
+            message: messageToCompile,
+            useVaultSearch: mode === 'vault',
+            signal: abortController.signal,
+            onQueryProgressChange: (progress) => {
+              if (isCurrentWork(generation, conversationId)) {
+                setQueryProgress(progress)
+              }
+            },
+          })
+        compiledMessages = [
+          ...messagesWithCurrentFile.slice(0, -1),
+          {
+            ...messageToCompile,
+            promptContent,
+            similaritySearchResults,
+          },
+        ]
+      } catch (error) {
+        if (abortController.signal.aborted) return
+        throw error
+      } finally {
+        if (activePromptCompilationRef.current === abortController) {
+          activePromptCompilationRef.current = null
+        }
+        if (isCurrentWork(generation, conversationId)) {
+          setQueryProgress({ type: 'idle' })
+        }
+      }
 
       if (!isCurrentWork(generation, conversationId)) return
       setChatMessages(compiledMessages)
@@ -873,21 +882,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         ],
       }))
     } else {
-      setChatMessages((prevChatHistory) =>
-        prevChatHistory.map((message) =>
-          message.id === focusedMessageId && message.role === 'user'
-            ? {
-                ...message,
-                mentionables: [
-                  mentionable,
-                  ...message.mentionables.filter(
-                    (mentionable) => mentionable.type !== 'current-file',
-                  ),
-                ],
-              }
-            : message,
-        ),
-      )
+      chatUserInputRefs.current
+        .get(focusedMessageId)
+        ?.setCurrentFile(activeFile)
     }
   }, [app.workspace, focusedMessageId, inputMessage.id])
 
@@ -909,10 +906,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         type: 'block',
         ...selectedBlock,
       }
-
-      setAddedBlockKey(getMentionableKey(serializeMentionable(mentionable)))
-
       if (focusedMessageId === inputMessage.id) {
+        setAddedBlockKey(getMentionableKey(serializeMentionable(mentionable)))
         setInputMessage((prevInputMessage) => {
           const mentionableKey = getMentionableKey(
             serializeMentionable(mentionable),
@@ -932,30 +927,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           }
         })
       } else {
-        setChatMessages((prevChatHistory) =>
-          prevChatHistory.map((message) => {
-            if (message.id === focusedMessageId && message.role === 'user') {
-              const mentionableKey = getMentionableKey(
-                serializeMentionable(mentionable),
-              )
-              // Check if mentionable already exists
-              if (
-                message.mentionables.some(
-                  (m) =>
-                    getMentionableKey(serializeMentionable(m)) ===
-                    mentionableKey,
-                )
-              ) {
-                return message
-              }
-              return {
-                ...message,
-                mentionables: [...message.mentionables, mentionable],
-              }
-            }
-            return message
-          }),
-        )
+        if (!focusedMessageId) return
+        chatUserInputRefs.current
+          .get(focusedMessageId)
+          ?.addMentionable(mentionable)
       }
     },
     focusMessage: () => {
@@ -969,9 +944,13 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   return (
     <div className="smtcmp-chat-container">
       <div className="smtcmp-chat-header">
-        <div className="smtcmp-chat-header-title">Chat</div>
+        <div className="smtcmp-chat-header-title">
+          {chatList.find((chat) => chat.id === currentConversationId)?.title ??
+            'New chat'}
+        </div>
         <div className="smtcmp-chat-header-buttons">
           <button
+            type="button"
             onClick={() => handleNewChat()}
             className="clickable-icon"
             aria-label="New Chat"
@@ -986,17 +965,27 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
               await handleLoadConversation(conversationId)
             }}
             onDelete={async (conversationId) => {
-              await deleteConversation(conversationId)
-              if (conversationId === currentConversationId) {
-                const nextConversation = chatList.find(
-                  (chat) => chat.id !== conversationId,
-                )
-                if (nextConversation) {
-                  void handleLoadConversation(nextConversation.id)
-                } else {
-                  handleNewChat()
-                }
-              }
+              const title =
+                chatList.find((chat) => chat.id === conversationId)?.title ??
+                'this conversation'
+              new ConfirmModal(app, {
+                title: 'Delete conversation',
+                message: `Delete “${title}”? This cannot be undone.`,
+                ctaText: 'Delete',
+                onConfirm: async () => {
+                  await deleteConversation(conversationId)
+                  if (conversationId === currentConversationId) {
+                    const nextConversation = chatList.find(
+                      (chat) => chat.id !== conversationId,
+                    )
+                    if (nextConversation) {
+                      void handleLoadConversation(nextConversation.id)
+                    } else {
+                      handleNewChat()
+                    }
+                  }
+                },
+              }).open()
             }}
             onUpdateTitle={async (conversationId, newTitle) => {
               await updateConversationTitle(conversationId, newTitle)
@@ -1005,6 +994,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             <History size={18} />
           </ChatListDropdown>
           <button
+            type="button"
             onClick={() => {
               new TemplateSectionModal(app).open()
             }}
@@ -1025,20 +1015,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                 chatUserInputRef={(ref) =>
                   registerChatUserInputRef(messageOrGroup.id, ref)
                 }
-                onInputChange={(content) => {
-                  setChatMessages((prevChatHistory) =>
-                    prevChatHistory.map((msg) =>
-                      msg.role === 'user' && msg.id === messageOrGroup.id
-                        ? {
-                            ...msg,
-                            content,
-                          }
-                        : msg,
-                    ),
-                  )
-                }}
-                onSubmit={(content, mode) => {
-                  if (editorStateToPlainText(content).trim() === '') return
+                onSubmit={(content, mentionables, mode) => {
+                  if (!hasSubmittableContent(content, mentionables)) return
                   handleUserMessageSubmit({
                     inputChatMessages: [
                       ...chatMessages.slice(0, endIndex - 1),
@@ -1047,24 +1025,20 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                         content: content,
                         promptContent: null,
                         id: messageOrGroup.id,
-                        mentionables: messageOrGroup.mentionables,
+                        mentionables,
                       },
                     ],
                     mode,
                   })
-                  chatUserInputRefs.current.get(inputMessage.id)?.focus()
                 }}
                 onFocus={() => {
                   setFocusedMessageId(messageOrGroup.id)
                 }}
-                onMentionablesChange={(mentionables) => {
-                  setChatMessages((prevChatHistory) =>
-                    prevChatHistory.map((msg) =>
-                      msg.id === messageOrGroup.id
-                        ? { ...msg, mentionables }
-                        : msg,
-                    ),
-                  )
+                onEditEnd={() => {
+                  setFocusedMessageId(inputMessage.id)
+                  requestAnimationFrame(() => {
+                    chatUserInputRefs.current.get(inputMessage.id)?.focus()
+                  })
                 }}
               />
             ) : (
@@ -1100,18 +1074,13 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           {showContinueResponseButton && (
             <div className="smtcmp-continue-response-button-container">
               <button
+                type="button"
                 className="smtcmp-continue-response-button"
                 onClick={handleContinueResponse}
               >
                 <div>Continue Response</div>
               </button>
             </div>
-          )}
-          {(submitChatMutation.isPending || activeAgentToolCallCount > 0) && (
-            <button onClick={abortActiveWork} className="smtcmp-stop-gen-btn">
-              <CircleStop size={16} />
-              <div>Stop Generation</div>
-            </button>
           )}
         </div>
         <ChatUserInput
@@ -1125,7 +1094,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             }))
           }}
           onSubmit={(content, mode) => {
-            if (editorStateToPlainText(content).trim() === '') return
+            if (!hasSubmittableContent(content, inputMessage.mentionables))
+              return
             handleUserMessageSubmit({
               inputChatMessages: [
                 ...chatMessages,
@@ -1147,6 +1117,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           }}
           autoFocus
           addedBlockKey={addedBlockKey}
+          isWorking={
+            submitChatMutation.isPending ||
+            activeAgentToolCallCount > 0 ||
+            queryProgress.type !== 'idle'
+          }
+          onStop={abortActiveWork}
         />
       </>
     </div>

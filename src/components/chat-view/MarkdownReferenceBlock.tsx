@@ -57,15 +57,17 @@ export default function MarkdownReferenceBlock({
       <div className={clsx('smtcmp-code-block', filename && 'has-filename')}>
         <div className="smtcmp-code-block-header">
           {filename && (
-            <div
+            <button
+              type="button"
               className="smtcmp-code-block-header-filename"
               onClick={handleOpenFile}
             >
               {filename}
-            </div>
+            </button>
           )}
           <div className="smtcmp-code-block-header-button-container">
             <button
+              type="button"
               className="clickable-icon smtcmp-code-block-header-button"
               onClick={() => {
                 setIsPreviewMode(!isPreviewMode)

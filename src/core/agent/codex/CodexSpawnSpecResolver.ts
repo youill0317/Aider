@@ -1,5 +1,57 @@
 const WINDOWS_CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g
 
+const SAFE_CODEX_ENV_KEYS = [
+  'APPDATA',
+  'CODEX_HOME',
+  'COLORTERM',
+  'ComSpec',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LANG',
+  'LANGUAGE',
+  'LC_ADDRESS',
+  'LC_ALL',
+  'LC_COLLATE',
+  'LC_CTYPE',
+  'LC_IDENTIFICATION',
+  'LC_MEASUREMENT',
+  'LC_MESSAGES',
+  'LC_MONETARY',
+  'LC_NAME',
+  'LC_NUMERIC',
+  'LC_PAPER',
+  'LC_TELEPHONE',
+  'LC_TIME',
+  'LOCALAPPDATA',
+  'LOGNAME',
+  'NO_COLOR',
+  'PATH',
+  'PATHEXT',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'SHELL',
+  'SystemDrive',
+  'SystemRoot',
+  'TEMP',
+  'TERM',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'USER',
+  'USERNAME',
+  'USERPROFILE',
+  'WINDIR',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_RUNTIME_DIR',
+  'XDG_STATE_HOME',
+  'comspec',
+] as const
+
 type CodexFileSystem = {
   readonly existsFile: (filePath: string) => boolean
 }
@@ -50,6 +102,13 @@ export class CodexSpawnSpecResolver {
       }) ?? requestedCommand
 
     if (platform === 'win32' && command.toLowerCase().endsWith('.cmd')) {
+      for (const value of [command, ...args]) {
+        if (/[\r\n]/.test(value)) {
+          throw new Error(
+            'Windows command arguments cannot contain line breaks.',
+          )
+        }
+      }
       const shellCommand = [
         escapeWindowsShellCommand(command),
         ...args.map(escapeWindowsCmdShimArgument),
@@ -92,9 +151,18 @@ function buildCodexEnvironment(
   )
 
   return {
-    ...baseEnv,
+    ...pickSafeEnvironment(baseEnv),
     PATH: pathValue,
   }
+}
+
+function pickSafeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    SAFE_CODEX_ENV_KEYS.flatMap((key) => {
+      const value = env[key]
+      return typeof value === 'string' ? [[key, value]] : []
+    }),
+  )
 }
 
 function resolveCommandPath(

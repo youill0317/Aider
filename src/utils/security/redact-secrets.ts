@@ -12,6 +12,7 @@ const SECRET_ASSIGNMENT_PATTERN =
   /((?:[A-Z0-9_]*?(?:API[_-]?KEY|ACCESS[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|ID[_-]?TOKEN|CLIENT[_-]?SECRET|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*?)=)[^&\s'",}]+/gi
 
 function redactSecretAssignments(value: string): string {
+  if (!value.includes('=')) return value
   return value
     .replace(
       QUOTED_SECRET_ASSIGNMENT_PATTERN,

@@ -21,11 +21,7 @@ export const getMigratedProviders = (
         (p as { id: string }).id === provider.id,
     )
     return existingProvider
-      ? // FIXME: Replace Object.assign with deep merge to properly handle nested objects
-        // like reasoning, thinking, web_search_options. Object.assign only does shallow
-        // merging, which overwrites entire nested objects instead of merging their properties.
-        // This causes user settings to be overwritten by default settings.
-        Object.assign(existingProvider, provider)
+      ? mergeDefaultRecord(existingProvider, provider)
       : provider
   })
   const customProviders = (existingData.providers as unknown[]).filter(
@@ -70,11 +66,7 @@ export const getMigratedChatModels = (
       },
     )
     if (existingModel) {
-      // FIXME: Replace Object.assign with deep merge to properly handle nested objects
-      // like reasoning, thinking, web_search_options. Object.assign only does shallow
-      // merging, which overwrites entire nested objects instead of merging their properties.
-      // This causes user settings to be overwritten by default settings.
-      return Object.assign(existingModel, model)
+      return mergeDefaultRecord(existingModel, model)
     }
     return model
   })
@@ -87,4 +79,27 @@ export const getMigratedChatModels = (
   )
 
   return [...defaultChatModels, ...customChatModels]
+}
+
+function mergeDefaultRecord(
+  existingValue: unknown,
+  defaultValue: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isRecord(existingValue)) return defaultValue
+
+  const merged: Record<string, unknown> = {
+    ...existingValue,
+    ...defaultValue,
+  }
+  for (const [key, nestedDefault] of Object.entries(defaultValue)) {
+    const nestedExisting = existingValue[key]
+    if (isRecord(nestedDefault) && isRecord(nestedExisting)) {
+      merged[key] = { ...nestedDefault, ...nestedExisting }
+    }
+  }
+  return merged
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

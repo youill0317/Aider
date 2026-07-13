@@ -19,17 +19,19 @@ const AssistantMessageAnnotations = memo(function AssistantMessageAnnotations({
 
   return (
     <div className="smtcmp-assistant-message-metadata">
-      <div
+      <button
+        type="button"
         className="smtcmp-assistant-message-metadata-toggle"
         onClick={handleToggle}
+        aria-expanded={isExpanded}
       >
-        <span>View Sources ({annotations.length})</span>
+        <span>Sources ({annotations.length})</span>
         {isExpanded ? (
           <ChevronUp className="smtcmp-assistant-message-metadata-toggle-icon" />
         ) : (
           <ChevronDown className="smtcmp-assistant-message-metadata-toggle-icon" />
         )}
-      </div>
+      </button>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
           <div className="smtcmp-assistant-message-metadata-annotations">

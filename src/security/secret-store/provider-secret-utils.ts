@@ -24,7 +24,7 @@ export type ProviderWithOAuth = Extract<
   readonly oauth?: OAuthState
 }
 
-type ProviderSecretKeys = {
+export type ProviderSecretKeys = {
   readonly current: string
   readonly legacy: readonly string[]
 }
@@ -83,6 +83,7 @@ export function hasOAuth(provider: LLMProvider): provider is ProviderWithOAuth {
 export function providerSecretKeys(
   provider: LLMProvider,
   field: 'apiKey' | OAuthSecretField,
+  options: { includeUnversionedLegacy?: boolean } = {},
 ): ProviderSecretKeys {
   const keyParts = {
     providerId: provider.id,
@@ -91,17 +92,37 @@ export function providerSecretKeys(
   }
   const current = createSecretStoreKey(keyParts)
 
+  const legacy = [
+    createLegacySmartComposerSecretStoreKey(keyParts),
+    createLegacyAiderSecretStoreKey(keyParts),
+    ...(options.includeUnversionedLegacy
+      ? [
+          createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
+          createUnversionedLegacyAiderSecretStoreKey(keyParts),
+        ]
+      : []),
+  ]
   return {
     current,
-    legacy: Array.from(
-      new Set([
-        createLegacySmartComposerSecretStoreKey(keyParts),
-        createLegacyAiderSecretStoreKey(keyParts),
-        createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
-        createUnversionedLegacyAiderSecretStoreKey(keyParts),
-      ]),
-    ).filter((legacyKey) => legacyKey !== current),
+    legacy: Array.from(new Set(legacy)).filter(
+      (legacyKey) => legacyKey !== current,
+    ),
   }
+}
+
+export function unversionedProviderSecretKeys(
+  provider: LLMProvider,
+  field: 'apiKey' | OAuthSecretField,
+): readonly string[] {
+  const keyParts = {
+    providerId: provider.id,
+    providerType: provider.type,
+    field,
+  }
+  return [
+    createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
+    createUnversionedLegacyAiderSecretStoreKey(keyParts),
+  ]
 }
 
 export async function writeSecret(
@@ -109,11 +130,26 @@ export async function writeSecret(
   key: string | readonly string[] | ProviderSecretKeys,
   value: string,
 ): Promise<boolean> {
-  const keys: readonly string[] = Array.isArray(key)
-    ? key
-    : isProviderSecretKeys(key)
-      ? [key.current, ...key.legacy]
-      : [key]
+  if (isProviderSecretKeys(key)) {
+    try {
+      await writeRequiredSecret(secretStore, key.current, value)
+      return true
+    } catch (currentWriteError) {
+      let currentValue: string | null
+      try {
+        currentValue = await secretStore.getSecret(key.current)
+      } catch {
+        throw currentWriteError
+      }
+
+      if (currentValue === value) return true
+      if (currentValue !== null) throw currentWriteError
+
+      return writeSecret(secretStore, key.legacy, value)
+    }
+  }
+
+  const keys: readonly string[] = Array.isArray(key) ? key : [key]
   let lastError: unknown
 
   for (const candidateKey of new Set(keys)) {

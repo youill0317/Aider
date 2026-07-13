@@ -7,25 +7,27 @@ import { parseSmartComposerSettings } from './settings'
 describe('security baseline protects provider and MCP secret fields', () => {
   it('keeps provider and MCP secrets out of ordinary settings', async () => {
     // Given: current-version settings containing representative fake secrets.
+    const defaults = parseSmartComposerSettings({})
     const storedSettings = {
+      ...defaults,
       version: SETTINGS_SCHEMA_VERSION,
-      providers: [
-        {
-          id: 'openai',
-          type: 'openai',
-          apiKey: 'sk-baseline-openai-secret',
-        },
-        {
-          id: 'openai-plan',
-          type: 'openai-plan',
-          oauth: {
-            accessToken: 'baseline-access-token',
-            refreshToken: 'baseline-refresh-token',
-            expiresAt: 1_893_456_000_000,
-            accountId: 'account-baseline',
-          },
-        },
-      ],
+      providers: defaults.providers.map((provider) => {
+        if (provider.id === 'openai') {
+          return { ...provider, apiKey: 'sk-baseline-openai-secret' }
+        }
+        if (provider.id === 'openai-plan') {
+          return {
+            ...provider,
+            oauth: {
+              accessToken: 'baseline-access-token',
+              refreshToken: 'baseline-refresh-token',
+              expiresAt: 1_893_456_000_000,
+              accountId: 'account-baseline',
+            },
+          }
+        }
+        return provider
+      }),
       mcp: {
         servers: [
           {

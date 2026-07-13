@@ -51,6 +51,27 @@ class MemoryVaultAdapter {
     this.binaryFiles.set(path, content.slice(0))
   }
 
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    const text = this.textFiles.get(oldPath)
+    if (text !== undefined) {
+      this.textFiles.set(newPath, text)
+      this.textFiles.delete(oldPath)
+      return
+    }
+    const binary = this.binaryFiles.get(oldPath)
+    if (binary !== undefined) {
+      this.binaryFiles.set(newPath, binary)
+      this.binaryFiles.delete(oldPath)
+      return
+    }
+    throw new Error(`Missing file: ${oldPath}`)
+  }
+
+  async remove(path: string): Promise<void> {
+    this.textFiles.delete(path)
+    this.binaryFiles.delete(path)
+  }
+
   async list(path: string): Promise<ListedFiles> {
     if (this.listError !== null) {
       throw this.listError

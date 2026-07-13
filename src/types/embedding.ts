@@ -17,10 +17,14 @@ export type EmbeddingModelClient = {
   providerType: LLMProviderType
   model: string
   dimension: number
-  getEmbedding: (text: string) => Promise<number[]>
+  indexProfile?: string
+  getEmbedding: (text: string, signal?: AbortSignal) => Promise<number[]>
   getContextualEmbeddings?: (
     text: string,
-    options: { inputType: ContextualEmbeddingInputType },
+    options: {
+      inputType: ContextualEmbeddingInputType
+      signal?: AbortSignal
+    },
   ) => Promise<ContextualEmbeddingsResult>
 }
 

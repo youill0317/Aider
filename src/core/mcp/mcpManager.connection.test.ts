@@ -1,4 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from '@modelcontextprotocol/sdk/client/stdio.js'
+import { shellEnv } from 'shell-env'
 
 import { smartComposerSettingsSchema } from '../../settings/schema/setting.types'
 import {
@@ -14,10 +19,154 @@ jest.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: jest.fn(),
 }))
 jest.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
+  getDefaultEnvironment: jest.fn(),
   StdioClientTransport: jest.fn(),
+}))
+jest.mock('shell-env', () => ({
+  shellEnv: jest.fn(),
 }))
 
 describe('McpManager connection lifecycle', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(getDefaultEnvironment as jest.Mock).mockReturnValue({
+      HOME: '/home/user',
+      PATH: '/usr/bin',
+      USER: 'user',
+    })
+    ;(shellEnv as jest.Mock).mockResolvedValue({ PATH: '/login/bin' })
+  })
+
+  it('passes only the safe environment, login PATH, and explicit variables', async () => {
+    const close = jest.fn().mockResolvedValue(undefined)
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({ tools: [] }),
+    }))
+    ;(shellEnv as jest.Mock).mockResolvedValue({
+      GITHUB_PAT: 'inherited-secret',
+      PATH: '/login/bin',
+      SENTRY_DSN: 'inherited-dsn',
+    })
+    const { manager } = createManager({
+      command: 'node',
+      env: { EXPLICIT_ENV: 'configured' },
+    })
+
+    await manager.initialize()
+
+    expect(StdioClientTransport).toHaveBeenCalledWith({
+      command: 'node',
+      stderr: 'ignore',
+      env: {
+        EXPLICIT_ENV: 'configured',
+        HOME: '/home/user',
+        PATH: '/login/bin',
+        USER: 'user',
+      },
+    })
+    manager.cleanup()
+  })
+
+  it('loads the safe default environment when settings update before initialize', async () => {
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close: jest.fn().mockResolvedValue(undefined),
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({ tools: [] }),
+    }))
+    const { manager, serverConfig } = createManager({ command: 'node' })
+    const settings = smartComposerSettingsSchema.parse({
+      mcp: { servers: [serverConfig] },
+    })
+
+    await manager.handleSettingsUpdate(settings)
+
+    expect(StdioClientTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          HOME: '/home/user',
+          PATH: '/login/bin',
+          USER: 'user',
+        }),
+      }),
+    )
+    manager.cleanup()
+  })
+
+  it('does not start an MCP process before the exact command is trusted', async () => {
+    const settings = smartComposerSettingsSchema.parse({
+      mcp: {
+        servers: [
+          {
+            enabled: true,
+            id: 'untrusted',
+            parameters: { command: 'node', args: ['server.js'] },
+            toolOptions: {},
+          },
+        ],
+      },
+    })
+    const manager = new McpManager({
+      registerSettingsListener: () => () => undefined,
+      settings,
+      isServerTrusted: async () => false,
+    })
+    Object.defineProperty(manager, 'disabled', { value: false })
+
+    await manager.initialize()
+
+    expect(manager.getServers()[0]?.status).toBe(
+      McpServerStatus.ApprovalRequired,
+    )
+    expect(StdioClientTransport).not.toHaveBeenCalled()
+    expect(Client).not.toHaveBeenCalled()
+    manager.cleanup()
+  })
+
+  it('limits concurrent MCP process connections', async () => {
+    const settings = smartComposerSettingsSchema.parse({
+      mcp: {
+        servers: Array.from({ length: 9 }, (_, index) => ({
+          enabled: true,
+          id: `server-${index}`,
+          parameters: { command: 'node' },
+          toolOptions: {},
+        })),
+      },
+    })
+    const manager = new McpManager({
+      registerSettingsListener: () => () => undefined,
+      settings,
+      isServerTrusted: async () => true,
+    })
+    Object.defineProperty(manager, 'disabled', { value: false })
+    let active = 0
+    let maximumActive = 0
+    const connectServer = jest.fn(async (config: McpServerConfig) => {
+      active += 1
+      maximumActive = Math.max(maximumActive, active)
+      await Promise.resolve()
+      active -= 1
+      return {
+        name: config.id,
+        config,
+        status: McpServerStatus.Disconnected,
+      } as McpServerState
+    })
+    ;(
+      manager as unknown as {
+        connectServer: typeof connectServer
+      }
+    ).connectServer = connectServer
+
+    await manager.initialize()
+
+    expect(connectServer).toHaveBeenCalledTimes(9)
+    expect(maximumActive).toBe(4)
+    manager.cleanup()
+  })
+
   it('closes a connected client when initial tool discovery fails', async () => {
     const close = jest.fn().mockRejectedValue(new Error('close failed'))
     ;(Client as unknown as jest.Mock).mockImplementation(() => ({
@@ -40,6 +189,22 @@ describe('McpManager connection lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('returns an error state when the default environment cannot be loaded', async () => {
+    ;(shellEnv as jest.Mock).mockRejectedValueOnce(new Error('shell failed'))
+    const { manager } = createManager()
+
+    await expect(manager.initialize()).resolves.toBeUndefined()
+
+    expect(manager.getServers()).toHaveLength(1)
+    expect(manager.getServers()[0]).toMatchObject({
+      status: McpServerStatus.Error,
+      error: expect.objectContaining({
+        message: expect.stringContaining('shell failed'),
+      }),
+    })
+    manager.cleanup()
+  })
+
   it('closes every client even when one close fails', async () => {
     const first = { close: jest.fn().mockRejectedValue(new Error('failed')) }
     const second = { close: jest.fn().mockResolvedValue(undefined) }
@@ -59,16 +224,70 @@ describe('McpManager connection lifecycle', () => {
     expect(first.close).toHaveBeenCalledTimes(1)
     expect(second.close).toHaveBeenCalledTimes(1)
   })
+
+  it('aborts active tool calls during cleanup', () => {
+    const { manager } = createManager()
+    const controller = new AbortController()
+    const mutableManager = manager as unknown as {
+      activeToolCalls: Map<string, AbortController>
+    }
+    mutableManager.activeToolCalls.set('call-1', controller)
+
+    manager.cleanup()
+
+    expect(controller.signal.aborted).toBe(true)
+    expect(mutableManager.activeToolCalls.size).toBe(0)
+  })
+
+  it('closes a client that is still connecting during cleanup', async () => {
+    const { close, started } = mockPendingClient()
+    const { manager, serverConfig } = createManager()
+    const connection = (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+    await started
+
+    manager.cleanup()
+
+    await expect(connection).resolves.toMatchObject({
+      status: McpServerStatus.Error,
+    })
+    expect(close).toHaveBeenCalled()
+  })
+
+  it('closes a pending client when settings supersede its revision', async () => {
+    const { close, started } = mockPendingClient()
+    const { manager, serverConfig } = createManager()
+    const connection = (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+    await started
+
+    await manager.handleSettingsUpdate(
+      smartComposerSettingsSchema.parse({ mcp: { servers: [] } }),
+    )
+
+    await expect(connection).resolves.toMatchObject({
+      status: McpServerStatus.Error,
+    })
+    expect(close).toHaveBeenCalled()
+  })
 })
 
-function createManager() {
+function createManager(
+  parameters: McpServerConfig['parameters'] = { command: 'node' },
+) {
   const settings = smartComposerSettingsSchema.parse({
     mcp: {
       servers: [
         {
           enabled: true,
           id: 'github',
-          parameters: { command: 'node' },
+          parameters,
           toolOptions: {},
         },
       ],
@@ -77,7 +296,34 @@ function createManager() {
   const manager = new McpManager({
     registerSettingsListener: () => () => undefined,
     settings,
+    isServerTrusted: async () => true,
   })
   Object.defineProperty(manager, 'disabled', { value: false })
   return { manager, serverConfig: settings.mcp.servers[0] }
+}
+
+function mockPendingClient(): {
+  close: jest.Mock
+  started: Promise<void>
+} {
+  let rejectConnect: ((error: Error) => void) | undefined
+  let markStarted: (() => void) | undefined
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
+  const close = jest.fn().mockImplementation(async () => {
+    rejectConnect?.(new Error('connection closed'))
+  })
+  ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+    close,
+    connect: jest.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectConnect = reject
+          markStarted?.()
+        }),
+    ),
+    listTools: jest.fn(),
+  }))
+  return { close, started }
 }

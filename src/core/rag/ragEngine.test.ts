@@ -65,6 +65,7 @@ describe('RAGEngine contextual embedding routing', () => {
       {
         dimensions: undefined,
         inputType: 'query',
+        signal: expect.anything(),
       },
     )
     expect(performSimilaritySearch).toHaveBeenCalledWith(
@@ -112,6 +113,7 @@ describe('RAGEngine contextual embedding routing', () => {
 
     expect(getEmbedding).toHaveBeenCalledWith('voyage-4', 'standard query', {
       dimensions: undefined,
+      signal: expect.anything(),
     })
     expect(contextualEmbedding).not.toHaveBeenCalled()
     expect(performSimilaritySearch).toHaveBeenCalledWith(
@@ -125,6 +127,57 @@ describe('RAGEngine contextual embedding routing', () => {
       expect.any(Object),
       expect.objectContaining({ scope }),
       expect.any(Function),
+    )
+  })
+
+  it('does not publish similarity results after the query is aborted', async () => {
+    getProviderClientMock.mockReturnValue(
+      createProviderClient({
+        getEmbedding: jest.fn().mockResolvedValue([0.3, 0.4]),
+      }),
+    )
+    let finishSearch: ((value: []) => void) | undefined
+    let markSearchStarted: (() => void) | undefined
+    const searchStarted = new Promise<void>((resolve) => {
+      markSearchStarted = resolve
+    })
+    const performSimilaritySearch = jest.fn(
+      () =>
+        new Promise<[]>((resolve) => {
+          finishSearch = resolve
+          markSearchStarted?.()
+        }),
+    )
+    const engine = new RAGEngine(
+      createSettings({
+        embeddingModelId: 'voyage/voyage-4',
+        embeddingModels: [
+          {
+            providerType: 'voyage',
+            providerId: 'voyage',
+            id: 'voyage/voyage-4',
+            model: 'voyage-4',
+            dimension: 1024,
+          },
+        ],
+      }),
+      createVectorManager({ performSimilaritySearch }),
+    )
+    const controller = new AbortController()
+    const onProgress = jest.fn()
+
+    const query = engine.processQuery({
+      query: 'cancelled search',
+      signal: controller.signal,
+      onQueryProgressChange: onProgress,
+    })
+    await searchStarted
+    controller.abort()
+    finishSearch?.([])
+
+    await expect(query).rejects.toMatchObject({ name: 'AbortError' })
+    expect(onProgress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'querying-done' }),
     )
   })
 
@@ -166,7 +219,7 @@ describe('RAGEngine contextual embedding routing', () => {
     expect(maxActiveUpdates).toBe(1)
   })
 
-  it('keeps one model snapshot and drains active queries before cleanup', async () => {
+  it('keeps one model snapshot across settings changes', async () => {
     const getEmbedding = jest.fn().mockResolvedValue([0.3, 0.4])
     getProviderClientMock.mockReturnValue(
       createProviderClient({ getEmbedding }),
@@ -213,28 +266,66 @@ describe('RAGEngine contextual embedding routing', () => {
         },
       ],
     })
-    let cleanupFinished = false
-    const cleanup = engine.cleanup().then(() => {
-      cleanupFinished = true
-    })
-    await Promise.resolve()
-    expect(cleanupFinished).toBe(false)
-
     finishIndex?.()
     await query
-    await cleanup
 
     expect(getEmbedding).toHaveBeenCalledWith('voyage-4', 'stable model', {
       dimensions: undefined,
+      signal: expect.anything(),
     })
     expect(performSimilaritySearch).toHaveBeenCalledWith(
       [0.3, 0.4],
       expect.objectContaining({ id: 'voyage/voyage-4' }),
       expect.any(Object),
     )
+    await engine.cleanup()
     await expect(engine.updateVaultIndex()).rejects.toThrow(
       'RAG engine is closed',
     )
+  })
+
+  it('aborts an active index request before cleanup waits for it', async () => {
+    getProviderClientMock.mockReturnValue(createProviderClient({}))
+    let markStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    let receivedSignal: AbortSignal | undefined
+    const updateVaultIndex = jest.fn(
+      (_model, options: { signal?: AbortSignal }) =>
+        new Promise<void>((_resolve, reject) => {
+          receivedSignal = options.signal
+          markStarted?.()
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Operation aborted', 'AbortError')),
+            { once: true },
+          )
+        }),
+    )
+    const engine = new RAGEngine(
+      createSettings({
+        embeddingModelId: 'voyage/voyage-4',
+        embeddingModels: [
+          {
+            providerType: 'voyage',
+            providerId: 'voyage',
+            id: 'voyage/voyage-4',
+            model: 'voyage-4',
+            dimension: 1024,
+          },
+        ],
+      }),
+      { updateVaultIndex } as unknown as VectorManager,
+    )
+
+    const update = engine.updateVaultIndex()
+    const observedUpdate = update.catch((error: unknown) => error)
+    await started
+    await engine.cleanup()
+
+    expect(receivedSignal?.aborted).toBe(true)
+    await expect(observedUpdate).resolves.toMatchObject({ name: 'AbortError' })
   })
 })
 

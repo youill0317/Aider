@@ -10,6 +10,9 @@ import {
   jsonFile,
 } from './aiderStorageAdoption.test-support'
 
+const LEGACY_TEMPLATE_ID = '11111111-1111-4111-8111-111111111111'
+const AIDER_TEMPLATE_ID = '22222222-2222-4222-8222-222222222222'
+
 describe('Aider JSON storage adoption', () => {
   it('preserves existing Aider JSON records when legacy JSON has the same record id', async () => {
     const app = createTestApp()
@@ -58,11 +61,11 @@ describe('Aider JSON storage adoption', () => {
 
     await app.vault.adapter.mkdir('.smtcmp_json_db/templates')
     await app.vault.adapter.write(
-      '.smtcmp_json_db/templates/v1_Shared_20_legacy-template.json',
+      `.smtcmp_json_db/templates/v1_Shared_${LEGACY_TEMPLATE_ID}.json`,
       jsonFile({
-        id: 'legacy-template',
+        id: LEGACY_TEMPLATE_ID,
         name: 'Shared',
-        content: { nodes: [] },
+        content: { nodes: [{ type: 'text', version: 1 }] },
         createdAt: 10,
         updatedAt: 20,
         schemaVersion: 1,
@@ -71,11 +74,11 @@ describe('Aider JSON storage adoption', () => {
 
     await app.vault.adapter.mkdir('.aider_json_db/templates')
     await app.vault.adapter.write(
-      '.aider_json_db/templates/v1_Shared_30_aider-template.json',
+      `.aider_json_db/templates/v1_Shared_${AIDER_TEMPLATE_ID}.json`,
       jsonFile({
-        id: 'aider-template',
+        id: AIDER_TEMPLATE_ID,
         name: 'Shared',
-        content: { nodes: [] },
+        content: { nodes: [{ type: 'text', version: 1 }] },
         createdAt: 30,
         updatedAt: 30,
         schemaVersion: 1,
@@ -88,13 +91,114 @@ describe('Aider JSON storage adoption', () => {
       '.aider_json_db/templates',
     )
     expect(adoptedFiles.files).toEqual([
-      '.aider_json_db/templates/v1_Shared_30_aider-template.json',
+      `.aider_json_db/templates/v1_Shared_${AIDER_TEMPLATE_ID}.json`,
     ])
     expect(
       await app.vault.adapter.read(
-        '.aider_json_db/templates/v1_Shared_30_aider-template.json',
+        `.aider_json_db/templates/v1_Shared_${AIDER_TEMPLATE_ID}.json`,
       ),
-    ).toContain('"id": "aider-template"')
+    ).toContain(`"id": "${AIDER_TEMPLATE_ID}"`)
+  })
+
+  it('does not let an invalid canonical chat block a valid legacy record', async () => {
+    const app = createTestApp()
+
+    await app.vault.adapter.mkdir('.smtcmp_json_db/chats')
+    await app.vault.adapter.write(
+      '.smtcmp_json_db/chats/v1_Legacy_20_shared-chat.json',
+      jsonFile({
+        id: 'shared-chat',
+        title: 'Legacy',
+        messages: [],
+        createdAt: 10,
+        updatedAt: 20,
+        schemaVersion: 1,
+      }),
+    )
+    await app.vault.adapter.mkdir('.aider_json_db/chats')
+    await app.vault.adapter.write(
+      '.aider_json_db/chats/v1_Broken_30_shared-chat.json',
+      jsonFile({ id: 'shared-chat' }),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.jsonDb?.status).toBe('completed')
+    expect(
+      await app.vault.adapter.exists(
+        '.aider_json_db/chats/v1_Legacy_20_shared-chat.json',
+      ),
+    ).toBe(true)
+  })
+
+  it('does not let an invalid canonical template reserve a legacy name', async () => {
+    const app = createTestApp()
+
+    await app.vault.adapter.mkdir('.smtcmp_json_db/templates')
+    await app.vault.adapter.write(
+      `.smtcmp_json_db/templates/v1_Shared_${LEGACY_TEMPLATE_ID}.json`,
+      jsonFile({
+        id: LEGACY_TEMPLATE_ID,
+        name: 'Shared',
+        content: { nodes: [{ type: 'text', version: 1 }] },
+        createdAt: 10,
+        updatedAt: 20,
+        schemaVersion: 1,
+      }),
+    )
+    await app.vault.adapter.mkdir('.aider_json_db/templates')
+    await app.vault.adapter.write(
+      `.aider_json_db/templates/v1_Shared_${AIDER_TEMPLATE_ID}.json`,
+      jsonFile({ id: AIDER_TEMPLATE_ID, name: 'Shared' }),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.jsonDb?.status).toBe('completed')
+    expect(
+      await app.vault.adapter.exists(
+        `.aider_json_db/templates/v1_Shared_${LEGACY_TEMPLATE_ID}.json`,
+      ),
+    ).toBe(true)
+  })
+
+  it('normalizes legacy agent commands while adopting JSON chats', async () => {
+    const app = createTestApp()
+    const targetPath =
+      '.aider_json_db/chats/v1_Legacy_agent_20_legacy-agent.json'
+
+    await app.vault.adapter.mkdir('.smtcmp_json_db/chats')
+    await app.vault.adapter.write(
+      '.smtcmp_json_db/chats/v1_Legacy_agent_20_legacy-agent.json',
+      jsonFile({
+        id: 'legacy-agent',
+        title: 'Legacy agent',
+        messages: [
+          {
+            id: 'command-1',
+            role: 'agent-command',
+            command: 'git status',
+            output: 'clean',
+            status: 'success',
+            exitCode: 0,
+          },
+        ],
+        createdAt: 10,
+        updatedAt: 20,
+        schemaVersion: 1,
+      }),
+    )
+
+    const marker = await adoptAiderStorage(app)
+    const adopted = JSON.parse(await app.vault.adapter.read(targetPath))
+
+    expect(marker.resources.jsonDb?.status).toBe('completed')
+    expect(adopted.messages[0]).toMatchObject({
+      title: 'git status',
+      detail: '',
+      input: 'git status',
+      kind: 'command',
+    })
   })
 
   it('continues adopting valid legacy JSON files when one legacy JSON file is malformed', async () => {

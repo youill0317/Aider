@@ -1,10 +1,23 @@
 import { z } from 'zod'
 
 export const baseLlmProviderSchema = z.object({
-  id: z.string().min(1, 'id is required'),
-  baseUrl: z.string().optional(),
-  apiKey: z.string().optional(),
-  additionalSettings: z.record(z.string(), z.string()).optional(),
+  id: z.string().min(1, 'id is required').max(128),
+  baseUrl: z.string().max(4_096).optional(),
+  apiKey: z
+    .string()
+    .max(1024 * 1024)
+    .optional(),
+  additionalSettings: z
+    .record(z.string().max(256), z.string().max(16_384))
+    .superRefine((settings, context) => {
+      if (Object.keys(settings).length > 256) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Provider has too many additional settings',
+        })
+      }
+    })
+    .optional(),
 })
 
 /**
@@ -20,10 +33,10 @@ export const llmProviderSchema = z.discriminatedUnion('type', [
     ...baseLlmProviderSchema.shape,
     oauth: z
       .object({
-        accessToken: z.string(),
-        refreshToken: z.string(),
-        expiresAt: z.number(),
-        accountId: z.string().optional(),
+        accessToken: z.string().max(1024 * 1024),
+        refreshToken: z.string().max(1024 * 1024),
+        expiresAt: z.number().finite(),
+        accountId: z.string().max(4_096).optional(),
       })
       .optional(),
   }),
@@ -32,10 +45,10 @@ export const llmProviderSchema = z.discriminatedUnion('type', [
     ...baseLlmProviderSchema.shape,
     oauth: z
       .object({
-        accessToken: z.string(),
-        refreshToken: z.string(),
-        expiresAt: z.number(),
-        accountId: z.string().optional(),
+        accessToken: z.string().max(1024 * 1024),
+        refreshToken: z.string().max(1024 * 1024),
+        expiresAt: z.number().finite(),
+        accountId: z.string().max(4_096).optional(),
       })
       .optional(),
   }),
@@ -44,12 +57,12 @@ export const llmProviderSchema = z.discriminatedUnion('type', [
     ...baseLlmProviderSchema.shape,
     oauth: z
       .object({
-        accessToken: z.string(),
-        refreshToken: z.string(),
-        expiresAt: z.number(),
-        projectId: z.string().optional(),
-        managedProjectId: z.string().optional(),
-        email: z.string().optional(),
+        accessToken: z.string().max(1024 * 1024),
+        refreshToken: z.string().max(1024 * 1024),
+        expiresAt: z.number().finite(),
+        projectId: z.string().max(4_096).optional(),
+        managedProjectId: z.string().max(4_096).optional(),
+        email: z.string().max(4_096).optional(),
       })
       .optional(),
   }),
@@ -105,12 +118,14 @@ export const llmProviderSchema = z.discriminatedUnion('type', [
         .string({
           required_error: 'deployment is required',
         })
-        .min(1, 'deployment is required'),
+        .min(1, 'deployment is required')
+        .max(4_096),
       apiVersion: z
         .string({
           required_error: 'apiVersion is required',
         })
-        .min(1, 'apiVersion is required'),
+        .min(1, 'apiVersion is required')
+        .max(4_096),
     }),
   }),
   z.object({
@@ -120,7 +135,8 @@ export const llmProviderSchema = z.discriminatedUnion('type', [
       .string({
         required_error: 'base URL is required',
       })
-      .min(1, 'base URL is required'),
+      .min(1, 'base URL is required')
+      .max(4_096),
     additionalSettings: z
       .object({
         noStainless: z.boolean().optional(),

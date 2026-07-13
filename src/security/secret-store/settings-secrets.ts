@@ -1,6 +1,13 @@
-import type { SmartComposerSettings } from '../../settings/schema/setting.types'
-import type { McpServerConfig } from '../../types/mcp.types'
-import type { LLMProvider } from '../../types/provider.types'
+import {
+  type SmartComposerSettings,
+  assertUniqueSettingsIds,
+} from '../../settings/schema/setting.types'
+import { loadProviderRouteTrust } from '../config-trust'
+import {
+  type McpServerConfig,
+  mcpServerConfigSchema,
+} from '../../types/mcp.types'
+import { type LLMProvider, llmProviderSchema } from '../../types/provider.types'
 
 import {
   OAUTH_SECRET_FIELDS,
@@ -9,6 +16,7 @@ import {
   isNonEmptySecret,
   providerSecretKeys,
   readProviderSecret,
+  unversionedProviderSecretKeys,
   writeSecret,
 } from './provider-secret-utils'
 import type { SecretStore } from './secret-store'
@@ -17,6 +25,10 @@ import { createMcpEnvSecretStoreKey } from './secret-store'
 type ProviderSecretKeys = ReturnType<typeof providerSecretKeys>
 type SecretSnapshot = {
   values: readonly { key: string; value: string | null }[]
+}
+type RawSettingsSecretMigration = {
+  data: Record<string, unknown>
+  changed: boolean
 }
 
 function allSecretKeys(keys: ProviderSecretKeys): string[] {
@@ -80,11 +92,16 @@ async function writeProviderSecret(
 async function hydrateProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
+  ambiguousUnversionedKeys: ReadonlySet<string>,
 ): Promise<LLMProvider> {
   const hydratedProvider = { ...provider }
   const apiKey = await readProviderSecret(
     secretStore,
-    providerSecretKeys(provider, 'apiKey'),
+    providerSecretKeysForHydration(
+      provider,
+      'apiKey',
+      ambiguousUnversionedKeys,
+    ),
   )
 
   if (!isNonEmptySecret(hydratedProvider.apiKey) && apiKey !== null) {
@@ -100,7 +117,7 @@ async function hydrateProvider(
   for (const field of OAUTH_SECRET_FIELDS) {
     const secret = await readProviderSecret(
       secretStore,
-      providerSecretKeys(provider, field),
+      providerSecretKeysForHydration(provider, field, ambiguousUnversionedKeys),
     )
     if (!isNonEmptySecret(hydratedOauth[field]) && secret !== null) {
       hydratedOauth[field] = secret
@@ -134,26 +151,61 @@ function serializeMcpEnv(env: Record<string, string>): string {
   )
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function hasPlaintextProviderSecret(provider: LLMProvider): boolean {
+  return (
+    isNonEmptySecret(provider.apiKey) ||
+    (hasOAuth(provider) &&
+      provider.oauth !== undefined &&
+      OAUTH_SECRET_FIELDS.some((field) =>
+        isNonEmptySecret(provider.oauth?.[field]),
+      ))
+  )
+}
+
 async function hydrateMcpServer(
   server: McpServerConfig,
   secretStore: SecretStore,
 ): Promise<McpServerConfig> {
-  const storedEnv = await secretStore.getSecret(
-    createMcpEnvSecretStoreKey(server.id),
-  )
-  if (storedEnv === null) {
+  let storedEnv: string | null
+  try {
+    storedEnv = await secretStore.getSecret(
+      createMcpEnvSecretStoreKey(server.id),
+    )
+  } catch {
+    console.warn('MCP environment secret could not be read; ignoring it')
     return server
   }
-  return {
+  if (storedEnv === null) return server
+
+  let env: Record<string, string>
+  try {
+    env = parseMcpEnv(storedEnv)
+  } catch {
+    console.warn('MCP environment secret is invalid; ignoring it')
+    return server
+  }
+  const hydratedServer = {
     ...server,
     parameters: {
       ...server.parameters,
       env: {
-        ...parseMcpEnv(storedEnv),
+        ...env,
         ...(server.parameters.env ?? {}),
       },
     },
   }
+  const result = mcpServerConfigSchema.safeParse(hydratedServer)
+  if (!result.success) {
+    console.warn('MCP environment secret exceeds supported limits; ignoring it')
+    return server
+  }
+  return result.data
 }
 
 async function sanitizeProvider(
@@ -325,14 +377,172 @@ async function deleteMcpEnvSecret(
   await secretStore.deleteSecret(key)
 }
 
+async function migrateRecognizedProviderSecrets(
+  data: Record<string, unknown>,
+  secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
+): Promise<RawSettingsSecretMigration> {
+  if (!Array.isArray(data.providers)) {
+    return { data, changed: false }
+  }
+
+  const parsedProviders = data.providers.map((provider) =>
+    llmProviderSchema.safeParse(provider),
+  )
+  const providerKeyCounts = new Map<string, number>()
+
+  for (const result of parsedProviders) {
+    if (!result.success) continue
+    const key = providerSecretKeys(result.data, 'apiKey').current
+    providerKeyCounts.set(key, (providerKeyCounts.get(key) ?? 0) + 1)
+  }
+
+  const providers = [...data.providers]
+  let changed = false
+
+  for (const [index, result] of parsedProviders.entries()) {
+    if (!result.success || !hasPlaintextProviderSecret(result.data)) continue
+
+    const providerKey = providerSecretKeys(result.data, 'apiKey').current
+    if (providerKeyCounts.get(providerKey) !== 1) continue
+
+    const rawProvider = asRecord(data.providers[index])
+    if (!rawProvider) continue
+
+    await sanitizeProvider(result.data, secretStore, snapshots)
+    const nextProvider = { ...rawProvider }
+
+    if (isNonEmptySecret(result.data.apiKey)) {
+      delete nextProvider.apiKey
+    }
+
+    if (hasOAuth(result.data) && result.data.oauth) {
+      const rawOauth = asRecord(rawProvider.oauth)
+      if (rawOauth) {
+        const nextOauth = { ...rawOauth }
+        for (const field of OAUTH_SECRET_FIELDS) {
+          if (isNonEmptySecret(result.data.oauth[field])) {
+            nextOauth[field] = ''
+          }
+        }
+        nextProvider.oauth = nextOauth
+      }
+    }
+
+    providers[index] = nextProvider
+    changed = true
+  }
+
+  return {
+    data: changed ? { ...data, providers } : data,
+    changed,
+  }
+}
+
+async function migrateRecognizedMcpSecrets(
+  data: Record<string, unknown>,
+  secretStore: SecretStore,
+  snapshots: SecretSnapshot[],
+): Promise<RawSettingsSecretMigration> {
+  const rawMcp = asRecord(data.mcp)
+  if (!rawMcp || !Array.isArray(rawMcp.servers)) {
+    return { data, changed: false }
+  }
+
+  const parsedServers = rawMcp.servers.map((server) =>
+    mcpServerConfigSchema.safeParse(server),
+  )
+  const serverKeyCounts = new Map<string, number>()
+
+  for (const result of parsedServers) {
+    if (!result.success) continue
+    const key = createMcpEnvSecretStoreKey(result.data.id)
+    serverKeyCounts.set(key, (serverKeyCounts.get(key) ?? 0) + 1)
+  }
+
+  const servers = [...rawMcp.servers]
+  let changed = false
+
+  for (const [index, result] of parsedServers.entries()) {
+    if (!result.success) continue
+
+    const env = result.data.parameters.env
+    if (!env || Object.keys(env).length === 0) continue
+
+    const key = createMcpEnvSecretStoreKey(result.data.id)
+    if (serverKeyCounts.get(key) !== 1) continue
+
+    const rawServer = asRecord(rawMcp.servers[index])
+    const rawParameters = asRecord(rawServer?.parameters)
+    if (!rawServer || !rawParameters) continue
+
+    const value = serializeMcpEnv(env)
+    if ((await secretStore.getSecret(key)) !== value) {
+      await writeMcpEnvSecret(secretStore, result.data.id, value, snapshots)
+    }
+
+    const nextParameters = { ...rawParameters }
+    delete nextParameters.env
+    servers[index] = { ...rawServer, parameters: nextParameters }
+    changed = true
+  }
+
+  return {
+    data: changed ? { ...data, mcp: { ...rawMcp, servers } } : data,
+    changed,
+  }
+}
+
+export async function persistRecognizedRawSettingsSecrets({
+  rawData,
+  secretStore,
+  saveData,
+}: {
+  rawData: unknown
+  secretStore: SecretStore
+  saveData: (data: Record<string, unknown>) => Promise<void>
+}): Promise<void> {
+  const settingsData = asRecord(rawData)
+  if (!settingsData) return
+
+  const snapshots: SecretSnapshot[] = []
+
+  try {
+    const providerMigration = await migrateRecognizedProviderSecrets(
+      settingsData,
+      secretStore,
+      snapshots,
+    )
+    const mcpMigration = await migrateRecognizedMcpSecrets(
+      providerMigration.data,
+      secretStore,
+      snapshots,
+    )
+
+    if (providerMigration.changed || mcpMigration.changed) {
+      await saveData(mcpMigration.data)
+    }
+  } catch (error) {
+    if (!(await restoreSecretSnapshots(secretStore, snapshots))) {
+      throw new Error(
+        'Settings update failed and previous secrets could not be restored',
+      )
+    }
+    throw error
+  }
+}
+
 export async function hydrateSettingsSecrets(
   settings: SmartComposerSettings,
   secretStore: SecretStore,
 ): Promise<SmartComposerSettings> {
+  const ambiguousUnversionedKeys = findAmbiguousUnversionedSecretKeys(
+    settings.providers,
+  )
   const [providers, servers] = await Promise.all([
     Promise.all(
       settings.providers.map((provider) =>
-        hydrateProvider(provider, secretStore),
+        hydrateProvider(provider, secretStore, ambiguousUnversionedKeys),
       ),
     ),
     Promise.all(
@@ -341,6 +551,9 @@ export async function hydrateSettingsSecrets(
       ),
     ),
   ])
+  await Promise.all(
+    providers.map((provider) => loadProviderRouteTrust(provider, secretStore)),
+  )
 
   return {
     ...settings,
@@ -349,11 +562,45 @@ export async function hydrateSettingsSecrets(
   }
 }
 
+function providerSecretKeysForHydration(
+  provider: LLMProvider,
+  field: 'apiKey' | (typeof OAUTH_SECRET_FIELDS)[number],
+  ambiguousKeys: ReadonlySet<string>,
+): ProviderSecretKeys {
+  const unversionedKeys = unversionedProviderSecretKeys(provider, field)
+  return providerSecretKeys(provider, field, {
+    includeUnversionedLegacy: !unversionedKeys.some((key) =>
+      ambiguousKeys.has(key),
+    ),
+  })
+}
+
+function findAmbiguousUnversionedSecretKeys(
+  providers: readonly LLMProvider[],
+): Set<string> {
+  const ownershipCounts = new Map<string, number>()
+  for (const provider of providers) {
+    const fields: ('apiKey' | (typeof OAUTH_SECRET_FIELDS)[number])[] = [
+      'apiKey',
+      ...(hasOAuth(provider) ? [...OAUTH_SECRET_FIELDS] : []),
+    ]
+    for (const field of fields) {
+      for (const key of unversionedProviderSecretKeys(provider, field)) {
+        ownershipCounts.set(key, (ownershipCounts.get(key) ?? 0) + 1)
+      }
+    }
+  }
+  return new Set(
+    [...ownershipCounts].filter(([, count]) => count > 1).map(([key]) => key),
+  )
+}
+
 export async function sanitizeSettingsForPersistence(
   settings: SmartComposerSettings,
   secretStore: SecretStore,
   previousSettings?: SmartComposerSettings,
 ): Promise<SmartComposerSettings> {
+  assertUniqueSettingsIds(settings)
   const snapshots: SecretSnapshot[] = []
 
   try {
@@ -485,6 +732,7 @@ export async function persistSettingsUpdate({
   publishRuntimeSettings: (settings: SmartComposerSettings) => void
   saveData: (settings: SmartComposerSettings) => Promise<void>
 }): Promise<void> {
+  assertUniqueSettingsIds(nextSettings)
   publishRuntimeSettings(nextSettings)
   const snapshots: SecretSnapshot[] = []
 

@@ -22,18 +22,6 @@ type SettingsTabRootProps = {
 export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
   return (
     <>
-      <ObsidianSetting
-        name="Support Aider"
-        desc="If you find Aider valuable, consider supporting its development!"
-        heading
-        className="smtcmp-settings-support-smart-composer"
-      >
-        <ObsidianButton
-          text="Open Repository"
-          onClick={() => window.open('https://github.com/youill0317/Aider')}
-          cta
-        />
-      </ObsidianSetting>
       <PlanConnectionsSection app={app} plugin={plugin} />
       <ChatSection />
       <CodexToolSection />
@@ -43,6 +31,16 @@ export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
       <McpSection app={app} plugin={plugin} />
       <TemplateSection app={app} />
       <EtcSection app={app} plugin={plugin} />
+      <ObsidianSetting
+        name="Support Aider"
+        desc="If you find Aider valuable, consider supporting its development!"
+        className="smtcmp-settings-support-smart-composer"
+      >
+        <ObsidianButton
+          text="Open Repository"
+          onClick={() => window.open('https://github.com/youill0317/Aider')}
+        />
+      </ObsidianSetting>
     </>
   )
 }

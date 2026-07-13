@@ -149,6 +149,41 @@ describe('CodexToolRunner security boundaries', () => {
       }),
     ).toBe(false)
   })
+
+  it('bounds remembered approvals by conversation and execution', () => {
+    const runner = createRunner()
+    for (let index = 0; index <= 1_000; index += 1) {
+      runner.allowToolForConversation(
+        JSON.stringify({ prompt: `Conversation prompt ${index}` }),
+        `conversation-${index}`,
+      )
+    }
+    for (let index = 0; index <= 100; index += 1) {
+      runner.allowToolForConversation(
+        JSON.stringify({ prompt: `Execution prompt ${index}` }),
+        'conversation-1000',
+      )
+    }
+
+    expect(
+      runner.isExecutionAllowed({
+        conversationId: 'conversation-0',
+        requestArgs: JSON.stringify({ prompt: 'Conversation prompt 0' }),
+      }),
+    ).toBe(false)
+    expect(
+      runner.isExecutionAllowed({
+        conversationId: 'conversation-1000',
+        requestArgs: JSON.stringify({ prompt: 'Execution prompt 0' }),
+      }),
+    ).toBe(false)
+    expect(
+      runner.isExecutionAllowed({
+        conversationId: 'conversation-1000',
+        requestArgs: JSON.stringify({ prompt: 'Execution prompt 100' }),
+      }),
+    ).toBe(true)
+  })
 })
 
 function createRunner({

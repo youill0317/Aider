@@ -61,6 +61,7 @@ export class YoutubeTranscriptNotAvailableLanguageError extends YoutubeTranscrip
 
 export type TranscriptConfig = {
   lang?: string
+  signal?: AbortSignal
 }
 export type Transcript = {
   text: string
@@ -92,6 +93,7 @@ export class YoutubeTranscript {
       `https://www.youtube.com/watch?v=${identifier}`,
       {
         maxBytes: 2 * 1024 * 1024,
+        signal: config?.signal,
         headers: {
           ...(config?.lang && { 'Accept-Language': config.lang }),
           'User-Agent': USER_AGENT,
@@ -162,6 +164,7 @@ export class YoutubeTranscript {
     ).baseUrl
 
     const transcriptResponse = await fetchPublicUrl(transcriptURL, {
+      signal: config?.signal,
       headers: {
         ...(config?.lang && { 'Accept-Language': config.lang }),
         'User-Agent': USER_AGENT,

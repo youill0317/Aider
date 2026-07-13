@@ -450,10 +450,9 @@ describe('Migration from v13 to v14', () => {
     const o4Mini = chatModels.find((m) => m.id === 'o4-mini')
 
     expect(o4Mini).toBeDefined()
-    // Note: Object.assign does shallow merge, so reasoning settings from default override user settings
     expect(o4Mini?.reasoning).toEqual({
       enabled: true,
-      reasoning_effort: 'medium',
+      reasoning_effort: 'high',
     })
   })
 })

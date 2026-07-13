@@ -19,6 +19,66 @@ test('drains saves queued while a flush is running', async () => {
   expect(saved).toEqual(['first', 'second'])
 })
 
+test('retries a failed save on the next flush', async () => {
+  const saveError = new Error('disk full')
+  const persist = jest
+    .fn<Promise<void>, [string, ChatMessage[]]>()
+    .mockRejectedValueOnce(saveError)
+    .mockResolvedValueOnce(undefined)
+  const onError = jest.fn()
+  const queue = new ChatSaveQueue(persist, onError)
+  queue.schedule('chat', messages)
+
+  await expect(queue.flush()).rejects.toBe(saveError)
+  await expect(queue.flush()).resolves.toBeUndefined()
+
+  expect(persist).toHaveBeenCalledTimes(2)
+  expect(onError).toHaveBeenCalledWith(saveError)
+})
+
+test('retains entries not reached before a save failure', async () => {
+  const saveError = new Error('disk full')
+  const saved: string[] = []
+  let failFirst = true
+  const queue = new ChatSaveQueue(async (id) => {
+    saved.push(id)
+    if (failFirst) {
+      failFirst = false
+      throw saveError
+    }
+  }, jest.fn())
+  queue.schedule('first', messages)
+  queue.schedule('second', messages)
+
+  await expect(queue.flush()).rejects.toBe(saveError)
+  await queue.flush()
+
+  expect(saved).toEqual(['first', 'first', 'second'])
+})
+
+test('keeps the latest snapshot scheduled while a save fails', async () => {
+  const saveError = new Error('disk full')
+  const latestMessages = [
+    { role: 'assistant', id: 'latest-answer', content: 'latest' },
+  ] as ChatMessage[]
+  const saved: ChatMessage[][] = []
+  let failFirst = true
+  const queue = new ChatSaveQueue(async (id, nextMessages) => {
+    saved.push(nextMessages)
+    if (failFirst) {
+      failFirst = false
+      queue.schedule(id, latestMessages)
+      throw saveError
+    }
+  }, jest.fn())
+  queue.schedule('chat', messages)
+
+  await expect(queue.flush()).rejects.toBe(saveError)
+  await queue.flush()
+
+  expect(saved).toEqual([messages, latestMessages])
+})
+
 test('serializes deletion after pending saves and blocks resurrection', async () => {
   let finishSave: (() => void) | undefined
   const events: string[] = []
@@ -40,9 +100,19 @@ test('serializes deletion after pending saves and blocks resurrection', async ()
   await Promise.resolve()
   finishSave?.()
   await deletion
+  queue.schedule('deleted', [
+    { role: 'assistant', id: 'after-delete', content: 'drop me' },
+  ] as ChatMessage[])
   await queue.flush()
 
   expect(events).toEqual(['save:deleted', 'delete:deleted'])
+  expect(
+    (
+      queue as unknown as {
+        deleteRecovery: Map<string, ChatMessage[]>
+      }
+    ).deleteRecovery.size,
+  ).toBe(0)
 })
 
 test('restores the latest blocked save when deletion fails', async () => {
@@ -99,6 +169,18 @@ test('runs metadata mutations after pending message saves', async () => {
   await mutation
 
   expect(events).toEqual(['save', 'title'])
+})
+
+test('bounds deleted chat tombstones', async () => {
+  const queue = new ChatSaveQueue(jest.fn(), fail)
+
+  for (let index = 0; index < 1_001; index += 1) {
+    await queue.delete(`chat-${index}`, async () => undefined)
+  }
+
+  expect((queue as unknown as { deleted: Set<string> }).deleted.size).toBe(
+    1_000,
+  )
 })
 
 function fail(error: unknown): never {

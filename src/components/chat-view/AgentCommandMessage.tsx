@@ -33,9 +33,11 @@ const AgentCommandMessage = memo(function AgentCommandMessage({
   return (
     <div className="smtcmp-toolcall-container">
       <div className="smtcmp-toolcall">
-        <div
+        <button
+          type="button"
           onClick={() => setIsOpen(!isOpen)}
           className="smtcmp-toolcall-header"
+          aria-expanded={isOpen}
         >
           <div className="smtcmp-toolcall-header-icon">
             {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -50,7 +52,7 @@ const AgentCommandMessage = memo(function AgentCommandMessage({
           <div className="smtcmp-toolcall-header-icon smtcmp-toolcall-header-icon--status">
             <StatusIcon status={message.status} />
           </div>
-        </div>
+        </button>
         {isOpen && (
           <div className="smtcmp-toolcall-content">
             {message.detail.length > 0 && (

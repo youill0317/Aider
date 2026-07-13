@@ -2,6 +2,7 @@ import { normalizePath } from 'obsidian'
 
 import { LEGACY_PGLITE_DB_PATH, PGLITE_DB_PATH } from '../constants'
 import { LEGACY_ROOT_DIR, ROOT_DIR } from '../database/json/constants'
+import { writeFileAtomically } from '../utils/atomic-file'
 import {
   CHAT_HISTORY_DIR,
   LEGACY_CHAT_HISTORY_DIR,
@@ -18,12 +19,16 @@ import {
   isAdoptionStatusKind,
 } from './aiderAdoptionTypes'
 import {
+  createAdoptionReadBudget,
   ensureFolderTree,
   hasObjectProperty,
   hasStringProperty,
   parentPath,
   parseJsonObject,
+  readBoundedTextFile,
 } from './aiderAdoptionUtils'
+
+const MAX_ADOPTION_MARKER_BYTES = 1024 * 1024
 
 export async function readAdoptionMarker(
   app: AiderAdoptionApp,
@@ -33,7 +38,14 @@ export async function readAdoptionMarker(
     return { resources: {} }
   }
 
-  return parseAdoptionMarker(await app.vault.adapter.read(markerPath))
+  return parseAdoptionMarker(
+    await readBoundedTextFile(
+      app.vault.adapter,
+      markerPath,
+      createAdoptionReadBudget(),
+      MAX_ADOPTION_MARKER_BYTES,
+    ),
+  )
 }
 
 export async function writeUpdatedMarker(
@@ -42,7 +54,8 @@ export async function writeUpdatedMarker(
   resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>>,
 ): Promise<Partial<Record<AdoptionResource, AdoptionResourceStatus>>> {
   await ensureFolderTree(app.vault.adapter, parentPath(markerPath))
-  await app.vault.adapter.write(
+  await writeFileAtomically(
+    app.vault.adapter,
     markerPath,
     JSON.stringify({ resources }, null, 2),
   )

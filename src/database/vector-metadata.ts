@@ -2,6 +2,7 @@ export type LineVectorMetaData = {
   linkMode?: 'line'
   startLine: number
   endLine: number
+  indexProfile?: string
 }
 
 export type FileOnlyVectorMetaData = {
@@ -43,30 +44,26 @@ export function getVectorLineRange(metadata: unknown): VectorLineRange | null {
 
 export function createVoyageContextualMetadata({
   chunkerVersion,
-  dimension,
-  modelId,
+  embeddingProfile,
 }: {
   chunkerVersion?: string
-  dimension: number
-  modelId: string
+  embeddingProfile: string
 }): FileOnlyVectorMetaData {
   return {
     linkMode: 'file-only',
     source: 'voyage-auto-chunk',
     ...(chunkerVersion ? { chunkerVersion } : {}),
     chunkSizeMode: 'server-default',
-    indexProfile: getVoyageContextualIndexProfile({ dimension, modelId }),
+    indexProfile: getVoyageContextualIndexProfile(embeddingProfile),
   }
 }
 
 export function hasMatchingVoyageContextualIndexProfile({
-  dimension,
+  embeddingProfile,
   metadata,
-  modelId,
 }: {
-  dimension: number
+  embeddingProfile: string
   metadata: unknown
-  modelId: string
 }): boolean {
   if (!isRecord(metadata)) {
     return false
@@ -75,26 +72,41 @@ export function hasMatchingVoyageContextualIndexProfile({
     metadata.linkMode === 'file-only' &&
     metadata.source === 'voyage-auto-chunk' &&
     metadata.chunkSizeMode === 'server-default' &&
-    metadata.indexProfile ===
-      getVoyageContextualIndexProfile({ dimension, modelId })
+    metadata.indexProfile === getVoyageContextualIndexProfile(embeddingProfile)
   )
 }
 
-export function getVoyageContextualIndexProfile({
-  dimension,
-  modelId,
-}: {
-  dimension: number
-  modelId: string
-}): string {
-  return [
+export function getVoyageContextualIndexProfile(
+  embeddingProfile: string,
+): string {
+  return JSON.stringify([
+    'voyage-contextual-v2',
     'route=voyage-contextual-auto-chunk',
     'endpoint=contextualizedembeddings',
-    `model=${modelId}`,
-    `dimension=${dimension}`,
     'autoChunking=true',
     'chunkSizeMode=server-default',
-  ].join(';')
+    embeddingProfile,
+  ])
+}
+
+export function getStandardIndexProfile({
+  chunkSize,
+  embeddingProfile,
+}: {
+  chunkSize: number
+  embeddingProfile: string
+}): string {
+  return JSON.stringify(['standard-v1', embeddingProfile, chunkSize])
+}
+
+export function hasMatchingStandardIndexProfile({
+  indexProfile,
+  metadata,
+}: {
+  indexProfile: string
+  metadata: unknown
+}): boolean {
+  return isRecord(metadata) && metadata.indexProfile === indexProfile
 }
 
 function isPositiveInteger(value: unknown): value is number {

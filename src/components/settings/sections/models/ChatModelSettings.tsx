@@ -61,11 +61,6 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
       )
 
       const handleSubmit = async () => {
-        if (!['low', 'medium', 'high'].includes(reasoningEffort)) {
-          new Notice('Reasoning effort must be one of "low", "medium", "high"')
-          return
-        }
-
         const updatedModel = {
           ...typedModel,
           reasoning: {
@@ -85,7 +80,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
         await plugin.setSettings({
           ...plugin.settings,
           chatModels: plugin.settings.chatModels.map((m) =>
-            m.id === model.id ? updatedModel : m,
+            m.id === model.id ? validationResult.data : m,
           ),
         })
         onClose()
@@ -112,9 +107,12 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
               <ObsidianDropdown
                 value={reasoningEffort}
                 options={{
+                  none: 'none',
+                  minimal: 'minimal',
                   low: 'low',
                   medium: 'medium',
                   high: 'high',
+                  xhigh: 'xhigh',
                 }}
                 onChange={(value: string) => setReasoningEffort(value)}
               />
@@ -171,7 +169,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
         await plugin.setSettings({
           ...plugin.settings,
           chatModels: plugin.settings.chatModels.map((m) =>
-            m.id === model.id ? updatedModel : m,
+            m.id === model.id ? validationResult.data : m,
           ),
         })
         onClose()
@@ -530,7 +528,9 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
                 medium: 'medium',
                 high: 'high',
               }}
-              onChange={(value: string) => setSearchContextSize(value)}
+              onChange={(value: string) =>
+                setSearchContextSize(value as typeof searchContextSize)
+              }
             />
           </ObsidianSetting>
 

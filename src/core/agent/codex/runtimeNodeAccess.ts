@@ -41,6 +41,7 @@ export function createRuntimeNodeAccess(): RuntimeNodeAccess {
             return false
           }
         },
+        readTextFile: (filePath) => fs.readFileSync(filePath, 'utf8'),
       },
       pathTools: {
         delimiter: path.delimiter,

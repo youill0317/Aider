@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian'
+import { App, TFile, TFolder } from 'obsidian'
 
 import { LLMRateLimitExceededException } from '../../../core/llm/exception'
 import { InsertEmbedding } from '../../schema'
@@ -440,6 +440,46 @@ describe('VectorManager contextual embedding route', () => {
     expect(getEmbedding).not.toHaveBeenCalled()
   })
 
+  it('deletes rebuilt paths occupied by folders or non-Markdown files', async () => {
+    const repository = createRepository()
+    repository.getIndexedFiles.mockResolvedValue([
+      { path: 'folder.md', mtime: 90, metadata: {}, dimension: 2 },
+      { path: 'attachment.png', mtime: 90, metadata: {}, dimension: 2 },
+    ])
+    const app = createApp({})
+    jest
+      .spyOn(app.vault, 'getAbstractFileByPath')
+      .mockImplementation((path) =>
+        path === 'folder.md'
+          ? ({ path, children: [] } as unknown as TFolder)
+          : ({ path, extension: 'png' } as TFile),
+      )
+    const save = jest.fn().mockResolvedValue(undefined)
+    const manager = createVectorManager(app, repository, save)
+
+    await manager.updateVaultIndex(
+      {
+        id: 'voyage/voyage-4',
+        providerType: 'voyage',
+        model: 'voyage-4',
+        dimension: 2,
+        getEmbedding: jest.fn(),
+      },
+      {
+        chunkSize: 1000,
+        excludePatterns: [],
+        includePatterns: [],
+        reindexAll: true,
+      },
+    )
+
+    expect(repository.deleteVectorsForMultipleFiles).toHaveBeenCalledWith(
+      ['folder.md', 'attachment.png'],
+      expect.objectContaining({ id: 'voyage/voyage-4' }),
+    )
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
   it('deletes and saves indexed files excluded by current filters', async () => {
     const repository = createRepository()
     repository.getIndexedFiles.mockResolvedValue([
@@ -644,7 +684,7 @@ describe('VectorManager contextual embedding route', () => {
       includePatterns: [],
     })
     await replacementStarted
-    const clear = manager.clearAllVectors(embeddingModel)
+    const clear = manager.clearAllVectors(embeddingModel.id)
     await Promise.resolve()
 
     expect(repository.clearAllVectors).not.toHaveBeenCalled()
@@ -688,7 +728,7 @@ describe('VectorManager contextual embedding route', () => {
     await embeddingStarted
     const close = manager.close()
 
-    await expect(manager.clearAllVectors(embeddingModel)).rejects.toThrow(
+    await expect(manager.clearAllVectors(embeddingModel.id)).rejects.toThrow(
       'Vector manager is closed',
     )
     releaseEmbedding?.()
@@ -711,10 +751,10 @@ describe('VectorManager contextual embedding route', () => {
       getEmbedding: jest.fn(),
     }
 
-    await expect(manager.clearAllVectors(embeddingModel)).rejects.toThrow(
+    await expect(manager.clearAllVectors(embeddingModel.id)).rejects.toThrow(
       'vacuum failed',
     )
-    expect(repository.clearAllVectors).toHaveBeenCalledTimes(1)
+    expect(repository.clearAllVectors).toHaveBeenCalledWith(embeddingModel.id)
     expect(save).toHaveBeenCalledTimes(1)
   })
 

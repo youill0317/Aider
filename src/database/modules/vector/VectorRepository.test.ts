@@ -159,4 +159,14 @@ describe('VectorRepository SQL', () => {
     expect(queries).toHaveLength(1)
     expect(queries[0].query).toMatch(/^delete from "embeddings"/)
   })
+
+  it('clears vectors by model id without an embedding client', async () => {
+    const { queries, repository } = createRepository()
+
+    await repository.clearAllVectors('retired-model')
+
+    expect(queries).toHaveLength(1)
+    expect(queries[0].query).toMatch(/^delete from "embeddings"/)
+    expect(queries[0].params).toEqual(['retired-model'])
+  })
 })

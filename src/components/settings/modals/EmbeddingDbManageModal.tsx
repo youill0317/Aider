@@ -146,11 +146,7 @@ function EmbeddingDbManageModalComponent() {
 
   const handleRemoveIndex = async (modelId: string) => {
     try {
-      const embeddingModel = getEmbeddingModelClient({
-        settings,
-        embeddingModelId: modelId,
-      })
-      await (await getVectorManager()).clearAllVectors(embeddingModel)
+      await (await getVectorManager()).clearAllVectors(modelId)
     } catch (error) {
       console.error(error)
       new Notice('Failed to remove index')

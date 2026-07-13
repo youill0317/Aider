@@ -6,6 +6,8 @@ describe('CodexSpawnSpecResolver', () => {
 
     const spawnSpec = resolver.resolve(['codex', 'exec'], {
       env: {
+        CODEX_ACCESS_TOKEN: 'access-token',
+        CODEX_API_KEY: 'codex-api-secret',
         CODEX_HOME: '/home/me/.codex',
         DATABASE_URL: 'database-secret',
         HOME: '/home/me',
@@ -20,6 +22,8 @@ describe('CodexSpawnSpecResolver', () => {
 
     expect(spawnSpec.env).toEqual(
       expect.objectContaining({
+        CODEX_ACCESS_TOKEN: 'access-token',
+        CODEX_API_KEY: 'codex-api-secret',
         CODEX_HOME: '/home/me/.codex',
         HOME: '/home/me',
         LANG: 'en_US.UTF-8',
@@ -30,6 +34,43 @@ describe('CodexSpawnSpecResolver', () => {
     expect(spawnSpec.env).not.toHaveProperty('DATABASE_URL')
     expect(spawnSpec.env).not.toHaveProperty('NODE_OPTIONS')
     expect(spawnSpec.env).not.toHaveProperty('OPENAI_API_KEY')
+  })
+
+  it('passes custom provider keys declared in the Codex config', () => {
+    const resolver = new CodexSpawnSpecResolver()
+
+    const spawnSpec = resolver.resolve(['codex', 'exec'], {
+      env: {
+        CUSTOM_PROVIDER_KEY: 'provider-secret',
+        DATABASE_URL: 'database-secret',
+        HOME: '/home/me',
+        INLINE_PROVIDER_KEY: 'inline-secret',
+        NODE_OPTIONS: '--require=/tmp/injected.js',
+        PATH: '/usr/bin',
+      },
+      fileSystem: {
+        existsFile: () => false,
+        readTextFile: (filePath) => {
+          expect(filePath).toBe('/home/me/.codex/config.toml')
+          return [
+            'large_integer = 9223372036854775807',
+            '[model_providers]',
+            'inline = { "env_key" = "INLINE_PROVIDER_KEY" }',
+            'unsafe = { env_key = "NODE_OPTIONS" }',
+            '[model_providers.custom]',
+            'env_key = "CUSTOM_PROVIDER_KEY"',
+            '[mcp_servers.database]',
+            'env_key = "DATABASE_URL"',
+          ].join('\n')
+        },
+      },
+      platform: 'linux',
+    })
+
+    expect(spawnSpec.env.CUSTOM_PROVIDER_KEY).toBe('provider-secret')
+    expect(spawnSpec.env.INLINE_PROVIDER_KEY).toBe('inline-secret')
+    expect(spawnSpec.env).not.toHaveProperty('DATABASE_URL')
+    expect(spawnSpec.env).not.toHaveProperty('NODE_OPTIONS')
   })
 
   it('resolves codex from an enhanced Windows npm PATH location', () => {

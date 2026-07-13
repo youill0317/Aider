@@ -1,7 +1,20 @@
+import { parse } from 'smol-toml'
+
 const WINDOWS_CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g
+
+const UNSAFE_PROVIDER_ENV_KEYS = new Set([
+  'BASH_ENV',
+  'ENV',
+  'GCONV_PATH',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'SHELLOPTS',
+])
 
 const SAFE_CODEX_ENV_KEYS = [
   'APPDATA',
+  'CODEX_ACCESS_TOKEN',
+  'CODEX_API_KEY',
   'CODEX_HOME',
   'COLORTERM',
   'ComSpec',
@@ -54,6 +67,7 @@ const SAFE_CODEX_ENV_KEYS = [
 
 type CodexFileSystem = {
   readonly existsFile: (filePath: string) => boolean
+  readonly readTextFile?: (filePath: string) => string
 }
 
 type CodexPathTools = {
@@ -151,18 +165,77 @@ function buildCodexEnvironment(
   )
 
   return {
-    ...pickSafeEnvironment(baseEnv),
+    ...pickSafeEnvironment(
+      baseEnv,
+      configuredProviderEnvironmentKeys(baseEnv, options.fileSystem, pathTools),
+    ),
     PATH: pathValue,
   }
 }
 
-function pickSafeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function pickSafeEnvironment(
+  env: NodeJS.ProcessEnv,
+  additionalKeys: readonly string[],
+): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    SAFE_CODEX_ENV_KEYS.flatMap((key) => {
+    [...SAFE_CODEX_ENV_KEYS, ...additionalKeys].flatMap((key) => {
       const value = env[key]
       return typeof value === 'string' ? [[key, value]] : []
     }),
   )
+}
+
+function configuredProviderEnvironmentKeys(
+  env: NodeJS.ProcessEnv,
+  fileSystem: CodexFileSystem | undefined,
+  pathTools: CodexPathTools,
+): readonly string[] {
+  const home =
+    env.CODEX_HOME ??
+    ((env.HOME ?? env.USERPROFILE)
+      ? pathTools.join(env.HOME ?? env.USERPROFILE ?? '', '.codex')
+      : '')
+
+  if (!home || !fileSystem?.readTextFile) {
+    return []
+  }
+
+  let config: Record<string, unknown>
+  try {
+    config = parse(
+      fileSystem.readTextFile(pathTools.join(home, 'config.toml')),
+      {
+        integersAsBigInt: 'asNeeded',
+      },
+    )
+  } catch {
+    return []
+  }
+
+  const providers = config.model_providers
+  return isRecord(providers)
+    ? Object.values(providers).flatMap((provider) => {
+        if (!isRecord(provider) || typeof provider.env_key !== 'string') {
+          return []
+        }
+        const key = provider.env_key
+        return isSafeProviderEnvironmentKey(key) ? [key] : []
+      })
+    : []
+}
+
+function isSafeProviderEnvironmentKey(key: string): boolean {
+  const normalizedKey = key.toUpperCase()
+  return (
+    /^[A-Z_][A-Z0-9_]*$/.test(normalizedKey) &&
+    !UNSAFE_PROVIDER_ENV_KEYS.has(normalizedKey) &&
+    !normalizedKey.startsWith('LD_') &&
+    !normalizedKey.startsWith('DYLD_')
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function resolveCommandPath(

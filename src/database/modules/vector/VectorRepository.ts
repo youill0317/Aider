@@ -79,13 +79,13 @@ export class VectorRepository {
       )
   }
 
-  async clearAllVectors(embeddingModel: EmbeddingModelClient): Promise<void> {
+  async clearAllVectors(modelId: string): Promise<void> {
     if (!this.db) {
       throw new DatabaseNotInitializedException()
     }
     await this.db
       .delete(embeddingTable)
-      .where(eq(embeddingTable.model, embeddingModel.id))
+      .where(eq(embeddingTable.model, modelId))
   }
 
   async replaceVectorsForFile(

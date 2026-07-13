@@ -7,7 +7,6 @@ import {
   PROVIDER_TYPES_INFO,
 } from '../../../constants'
 import { useSettings } from '../../../contexts/settings-context'
-import { getEmbeddingModelClient } from '../../../core/rag/embedding'
 import SmartComposerPlugin from '../../../main'
 import { LLMProvider } from '../../../types/provider.types'
 import { ConfirmModal } from '../../modals/ConfirmModal'
@@ -75,11 +74,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
 
           if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
             // only clear when there's data
-            const embeddingModelClient = getEmbeddingModelClient({
-              settings,
-              embeddingModelId: embeddingModel.id,
-            })
-            await vectorManager.clearAllVectors(embeddingModelClient)
+            await vectorManager.clearAllVectors(embeddingModel.id)
           }
         }
 

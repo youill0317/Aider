@@ -409,14 +409,12 @@ Please report this issue to the developer if it persists.`,
     this.lastIndexSnapshot = { key: snapshotKey, vaultRevision }
   }
 
-  async clearAllVectors(embeddingModel: EmbeddingModelClient): Promise<void> {
-    return this.enqueueMutation(() => this.clearAllVectorsNow(embeddingModel))
+  async clearAllVectors(modelId: string): Promise<void> {
+    return this.enqueueMutation(() => this.clearAllVectorsNow(modelId))
   }
 
-  private async clearAllVectorsNow(
-    embeddingModel: EmbeddingModelClient,
-  ): Promise<void> {
-    await this.repository.clearAllVectors(embeddingModel)
+  private async clearAllVectorsNow(modelId: string): Promise<void> {
+    await this.repository.clearAllVectors(modelId)
     this.vaultRevision += 1
     this.lastIndexSnapshot = undefined
     try {
@@ -623,12 +621,14 @@ Please report this issue to the developer if it persists.`,
     embeddingModel: EmbeddingModelClient,
     matchesIndexFilters: (filePath: string) => boolean,
   ) {
+    const markdownFilePaths = new Set(
+      this.app.vault.getMarkdownFiles().map(({ path }) => path),
+    )
     const staleFilePaths = [
       ...new Set(indexedFiles.map(({ path }) => path)),
     ].filter(
       (filePath) =>
-        !this.app.vault.getAbstractFileByPath(filePath) ||
-        !matchesIndexFilters(filePath),
+        !markdownFilePaths.has(filePath) || !matchesIndexFilters(filePath),
     )
     if (staleFilePaths.length === 0) {
       return false

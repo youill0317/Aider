@@ -86,7 +86,11 @@ describe('RAGEngine contextual embedding routing', () => {
       }),
     )
     const performSimilaritySearch = jest.fn().mockResolvedValue([])
-    const vectorManager = createVectorManager({ performSimilaritySearch })
+    const updateVaultIndex = jest.fn().mockResolvedValue(undefined)
+    const vectorManager = createVectorManager({
+      performSimilaritySearch,
+      updateVaultIndex,
+    })
     const engine = new RAGEngine(
       createSettings({
         embeddingModelId: 'voyage/voyage-4',
@@ -103,7 +107,8 @@ describe('RAGEngine contextual embedding routing', () => {
       vectorManager,
     )
 
-    await engine.processQuery({ query: 'standard query' })
+    const scope = { files: ['picked.md'], folders: ['notes'] }
+    await engine.processQuery({ query: 'standard query', scope })
 
     expect(getEmbedding).toHaveBeenCalledWith('voyage-4', 'standard query', {
       dimensions: undefined,
@@ -114,7 +119,12 @@ describe('RAGEngine contextual embedding routing', () => {
       expect.objectContaining({
         id: 'voyage/voyage-4',
       }),
+      expect.objectContaining({ scope }),
+    )
+    expect(updateVaultIndex).toHaveBeenCalledWith(
       expect.any(Object),
+      expect.objectContaining({ scope }),
+      expect.any(Function),
     )
   })
 
@@ -290,11 +300,13 @@ class FakeProvider extends BaseLLMProvider<LLMProvider> {
 
 function createVectorManager({
   performSimilaritySearch,
+  updateVaultIndex = jest.fn().mockResolvedValue(undefined),
 }: {
   performSimilaritySearch: jest.Mock
+  updateVaultIndex?: jest.Mock
 }): VectorManager {
   return {
-    updateVaultIndex: jest.fn().mockResolvedValue(undefined),
+    updateVaultIndex,
     performSimilaritySearch,
   } as unknown as VectorManager
 }

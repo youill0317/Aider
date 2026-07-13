@@ -13,6 +13,7 @@ import { extractAgentText, statusMessage } from './agent-output'
 import { createCodexExecRuntime } from './codex/createCodexExecRuntime'
 import type {
   CodexAgentEvent,
+  CodexApprovalPolicy,
   CodexExecRequest,
   CodexRunHandle,
   CodexRuntime,
@@ -41,6 +42,7 @@ type CodexToolRunnerOptions = {
 }
 
 type CodexExecutionKeyParams = {
+  readonly approvalPolicy: CodexApprovalPolicy
   readonly command: string
   readonly cwd: string
   readonly model?: string
@@ -255,6 +257,7 @@ export class CodexToolRunner {
           prompt: '',
         }
     return buildExecutionKey({
+      approvalPolicy: this.settings.agent.codex.approvalPolicy,
       command: this.settings.agent.codex.command,
       cwd: this.resolveDefaultCwd(),
       model: normalizeOptionalString(codexArgs.model),
@@ -306,6 +309,7 @@ export class CodexToolRunner {
 }
 
 function buildExecutionKey({
+  approvalPolicy,
   command,
   cwd,
   model,
@@ -313,6 +317,7 @@ function buildExecutionKey({
   sandbox,
 }: CodexExecutionKeyParams): string {
   return JSON.stringify({
+    approvalPolicy,
     command,
     cwd,
     model,

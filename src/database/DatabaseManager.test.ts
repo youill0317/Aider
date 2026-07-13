@@ -1,7 +1,11 @@
+import { gzipSync } from 'zlib'
+
 import type { App } from 'obsidian'
 import { requestUrl } from 'obsidian'
 
-import { DatabaseManager } from './DatabaseManager'
+import { MAX_PGLITE_DATABASE_BYTES } from '../constants'
+
+import { DatabaseManager, decompressPGliteArchive } from './DatabaseManager'
 
 jest.mock('obsidian', () => ({
   ...jest.requireActual<typeof import('../../__mocks__/obsidian')>(
@@ -48,6 +52,7 @@ describe('DatabaseManager integrity', () => {
         adapter: {
           writeBinary,
           exists: jest.fn().mockResolvedValue(true),
+          stat: jest.fn().mockResolvedValue(null),
           readBinary: jest.fn().mockRejectedValue(readError),
         },
       },
@@ -55,6 +60,42 @@ describe('DatabaseManager integrity', () => {
 
     await expect(DatabaseManager.create(app)).rejects.toBe(readError)
     expect(writeBinary).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized database before reading it into memory', async () => {
+    const readBinary = jest.fn()
+    const app = {
+      vault: {
+        adapter: {
+          exists: jest.fn().mockResolvedValue(true),
+          stat: jest.fn().mockResolvedValue({
+            type: 'file',
+            ctime: 0,
+            mtime: 0,
+            size: MAX_PGLITE_DATABASE_BYTES + 1,
+          }),
+          readBinary,
+        },
+      },
+    } as unknown as App
+
+    await expect(DatabaseManager.create(app)).rejects.toThrow(
+      'PGlite database archive is too large',
+    )
+    expect(readBinary).not.toHaveBeenCalled()
+  })
+
+  it('stops gzip expansion at the decompressed database limit', async () => {
+    const compressed = gzipSync(Buffer.alloc(4096))
+
+    await expect(
+      decompressPGliteArchive(
+        new Blob([Uint8Array.from(compressed)], {
+          type: 'application/x-gzip',
+        }),
+        1024,
+      ),
+    ).rejects.toThrow('expands beyond the size limit')
   })
 
   it('serializes concurrent database dumps and writes', async () => {
@@ -96,6 +137,21 @@ describe('DatabaseManager integrity', () => {
     })
 
     await expect(manager.save()).rejects.toBe(saveError)
+  })
+
+  it('does not save a database that cannot be loaded within the size limit', async () => {
+    const writeBinary = jest.fn()
+    const dumpDataDir = jest.fn().mockResolvedValue({
+      size: MAX_PGLITE_DATABASE_BYTES + 1,
+    })
+    const manager = createManager({ writeBinary })
+    setPgClient(manager, { dumpDataDir })
+
+    await expect(manager.save()).rejects.toThrow(
+      'PGlite database archive is too large',
+    )
+    expect(dumpDataDir).toHaveBeenCalledWith('none')
+    expect(writeBinary).not.toHaveBeenCalled()
   })
 
   it('closes and clears the database when the final save fails', async () => {

@@ -9,6 +9,7 @@ import {
   CHAT_SCHEMA_VERSION,
   ChatConversation,
   ChatConversationMetadata,
+  isChatConversation,
 } from './types'
 
 const SAFE_CHAT_ID_PATTERN = /^[A-Za-z0-9_-]+$/
@@ -46,6 +47,10 @@ export class ChatManager extends AbstractJsonRepository<
       title,
       updatedAt,
     }
+  }
+
+  protected isValidRow(row: unknown): row is ChatConversation {
+    return isChatConversation(row)
   }
 
   public async createChat(

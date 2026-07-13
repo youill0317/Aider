@@ -39,6 +39,10 @@ export type AiderAdoptionAdapter = {
   readonly readBinary: (path: string) => Promise<ArrayBuffer>
   readonly writeBinary: (path: string, content: ArrayBuffer) => Promise<void>
   readonly list: (path: string) => Promise<AdapterList>
+  readonly stat: (path: string) => Promise<{
+    readonly type: 'file' | 'folder'
+    readonly size: number
+  } | null>
 }
 
 export type AiderAdoptionApp = {

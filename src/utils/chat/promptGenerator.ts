@@ -31,6 +31,7 @@ import {
   readMultipleTFiles,
   readTFileContent,
 } from '../obsidian'
+import { redactSecrets } from '../security/redact-secrets'
 
 import {
   wrapUntrustedContext,
@@ -456,7 +457,7 @@ ${await this.getWebsiteContent(url)}
         similaritySearchResults: similaritySearchResults,
       }
     } catch (error) {
-      console.error('Failed to compile user message', error)
+      console.error('Failed to compile user message', redactSecrets(error))
       onQueryProgressChange?.({
         type: 'idle',
       })
@@ -630,7 +631,10 @@ ${transcript.map((t) => `${t.offset}: ${t.text}`).join('\n')}`.slice(
       const response = await fetchPublicUrl(url)
       return htmlToMarkdown(response.text).slice(0, MAX_WEBSITE_CONTENT_CHARS)
     } catch (error) {
-      console.warn('Website content could not be fetched safely:', error)
+      console.warn(
+        'Website content could not be fetched safely:',
+        redactSecrets(error),
+      )
       return 'Website content unavailable.'
     }
   }

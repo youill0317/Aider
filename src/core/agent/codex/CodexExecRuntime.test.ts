@@ -102,7 +102,14 @@ describe('CodexExecRuntime', () => {
     const childProcess = new FakeChildProcess()
     const runtime = new CodexExecRuntime({
       spawnSpecResolverOptions: {
-        env: { PATH: '/usr/bin', SERVICE_TOKEN: 'bare-codex-secret' },
+        env: {
+          DATABASE_URL: 'database-url-secret',
+          MYSTERY_VALUE: 'arbitrary-long-secret',
+          NORMAL_FLAG: 'debug',
+          OPENAI_KEY: 'openai-key-secret',
+          PATH: '/usr/bin',
+          REDIS_URL: 'redis-url-secret',
+        },
         platform: 'linux',
       },
       spawnProcess: () => childProcess,
@@ -124,8 +131,9 @@ describe('CodexExecRuntime', () => {
           id: 'command-1',
           type: 'command_execution',
           status: 'completed',
-          command: 'echo bare-codex-secret',
-          aggregated_output: `bare-codex-secret${'x'.repeat(30_000)}`,
+          command:
+            'echo database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug',
+          aggregated_output: `database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug${'x'.repeat(30_000)}`,
           result: { token: 'nested-secret' },
         },
       })}\n`,
@@ -135,8 +143,12 @@ describe('CodexExecRuntime', () => {
     await handle.done
     const event = events[0]
     const item = event?.kind === 'item.completed' ? event.item : {}
-    expect(JSON.stringify(item)).not.toContain('bare-codex-secret')
+    expect(JSON.stringify(item)).not.toContain('database-url-secret')
+    expect(JSON.stringify(item)).not.toContain('openai-key-secret')
+    expect(JSON.stringify(item)).not.toContain('redis-url-secret')
+    expect(JSON.stringify(item)).toContain('arbitrary-long-secret')
     expect(JSON.stringify(item)).not.toContain('nested-secret')
+    expect(JSON.stringify(item)).toContain('debug')
     expect(String(item.aggregated_output)).toHaveLength(24_000)
   })
 

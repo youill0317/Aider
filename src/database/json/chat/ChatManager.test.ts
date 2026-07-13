@@ -10,6 +10,7 @@ const mockAdapter = {
   write: jest.fn().mockResolvedValue(undefined),
   rename: jest.fn().mockResolvedValue(undefined),
   remove: jest.fn().mockResolvedValue(undefined),
+  stat: jest.fn().mockResolvedValue({ type: 'file', size: 1 }),
   list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
 }
 
@@ -153,5 +154,23 @@ describe('ChatManager', () => {
     )
 
     expect(metadata?.id).toBe('legacy_chat-123')
+  })
+
+  it.each([
+    ['invalid message collection', 'not-an-array'],
+    ['invalid nested message', [{ id: 'message-id', role: 'user' }]],
+  ])('ignores conversation JSON with %s', async (_case, messages) => {
+    mockAdapter.read.mockResolvedValue(
+      JSON.stringify({
+        id: 'valid-id',
+        title: 'Broken chat',
+        messages,
+        createdAt: 1,
+        updatedAt: 1,
+        schemaVersion: CHAT_SCHEMA_VERSION,
+      }),
+    )
+
+    await expect(chatManager.read('chat.json')).resolves.toBeNull()
   })
 })

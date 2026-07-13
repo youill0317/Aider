@@ -76,6 +76,7 @@ export class RAGEngine {
       excludePatterns: string[]
       includePatterns: string[]
       reindexAll: boolean
+      scope?: { files: string[]; folders: string[] }
     },
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void,
   ): Promise<void> {
@@ -163,7 +164,7 @@ export class RAGEngine {
     await this.enqueueIndexUpdate(
       embeddingModel,
       vectorManager,
-      { ...ragOptions, reindexAll: false },
+      { ...ragOptions, reindexAll: false, scope },
       onQueryProgressChange,
     )
     const queryEmbedding = await this.getQueryEmbedding(query, embeddingModel)

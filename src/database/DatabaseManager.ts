@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { PgliteDatabase, drizzle } from 'drizzle-orm/pglite'
 import { App, normalizePath, requestUrl } from 'obsidian'
 
-import { PGLITE_DB_PATH } from '../constants'
+import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
 
 import { PGLiteAbortedException } from './exception'
 import migrations from './migrations.json'
@@ -140,8 +140,20 @@ export class DatabaseManager {
       if (!databaseFileExists) {
         return null
       }
+      const databaseStat = await this.app.vault.adapter.stat(this.dbPath)
+      if (
+        databaseStat?.type === 'file' &&
+        databaseStat.size > MAX_PGLITE_DATABASE_BYTES
+      ) {
+        throw new Error('PGlite database archive is too large')
+      }
       const fileBuffer = await this.app.vault.adapter.readBinary(this.dbPath)
-      const fileBlob = new Blob([fileBuffer], { type: 'application/x-gzip' })
+      if (fileBuffer.byteLength > MAX_PGLITE_DATABASE_BYTES) {
+        throw new Error('PGlite database archive is too large')
+      }
+      const fileBlob = await decompressPGliteArchive(
+        new Blob([fileBuffer], { type: 'application/x-gzip' }),
+      )
       const { fsBundle, wasmModule, vectorExtensionBundlePath } =
         await this.loadPGliteResources()
       this.pgClient = await PGlite.create({
@@ -191,7 +203,16 @@ export class DatabaseManager {
         if (!this.pgClient) {
           return
         }
-        const blob: Blob = await this.pgClient.dumpDataDir('gzip')
+        const tarBlob: Blob = await this.pgClient.dumpDataDir('none')
+        if (tarBlob.size > MAX_PGLITE_DATABASE_BYTES) {
+          throw new Error('PGlite database archive is too large')
+        }
+        const blob = await new Response(
+          tarBlob.stream().pipeThrough(new CompressionStream('gzip')),
+        ).blob()
+        if (blob.size > MAX_PGLITE_DATABASE_BYTES) {
+          throw new Error('PGlite database archive is too large')
+        }
         await this.app.vault.adapter.writeBinary(
           this.dbPath,
           Buffer.from(await blob.arrayBuffer()),
@@ -271,6 +292,38 @@ export class DatabaseManager {
       throw error
     }
   }
+}
+
+export async function decompressPGliteArchive(
+  archive: Blob,
+  maxBytes = MAX_PGLITE_DATABASE_BYTES,
+): Promise<Blob> {
+  const stream = archive
+    .stream()
+    .pipeThrough(new DecompressionStream('gzip')) as ReadableStream<Uint8Array>
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        break
+      }
+      size += value.byteLength
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        throw new Error('PGlite database archive expands beyond the size limit')
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return new Blob(chunks, { type: 'application/x-tar' })
 }
 
 async function verifySha256(

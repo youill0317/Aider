@@ -68,6 +68,20 @@ class MemoryVaultAdapter {
     return { files, folders }
   }
 
+  async stat(path: string) {
+    const binary = this.binaryFiles.get(path)
+    if (binary !== undefined)
+      return { type: 'file' as const, size: binary.byteLength }
+    const text = this.textFiles.get(path)
+    if (text !== undefined) {
+      return {
+        type: 'file' as const,
+        size: new TextEncoder().encode(text).byteLength,
+      }
+    }
+    return this.folders.has(path) ? { type: 'folder' as const, size: 0 } : null
+  }
+
   failLists(error: Error): void {
     this.listError = error
   }

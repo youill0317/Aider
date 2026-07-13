@@ -1,6 +1,13 @@
 import { App, DataAdapter, normalizePath } from 'obsidian'
 import * as path from 'path-browserify'
 
+// ponytail: JSON.parse is all-at-once; replace it before supporting files over 128 MiB.
+const MAX_JSON_FILE_BYTES = 128 * 1024 * 1024
+
+function isJsonFileTooLarge(content: string): boolean {
+  return new Blob([content]).size > MAX_JSON_FILE_BYTES
+}
+
 export async function writeFileAtomically(
   adapter: DataAdapter,
   filePath: string,
@@ -53,6 +60,9 @@ export abstract class AbstractJsonRepository<T, M> {
   // Each subclass implements how to parse a file name into metadata.
   protected abstract parseFileName(fileName: string): M | null
 
+  // Each subclass validates untrusted JSON before it reaches application code.
+  protected abstract isValidRow(row: unknown): row is T
+
   private getFilePath(fileName: string): string {
     if (
       !fileName ||
@@ -69,6 +79,9 @@ export abstract class AbstractJsonRepository<T, M> {
     const fileName = this.generateFileName(row)
     const filePath = this.getFilePath(fileName)
     const content = JSON.stringify(row, null, 2)
+    if (isJsonFileTooLarge(content)) {
+      throw new Error('JSON database record is too large')
+    }
 
     if (await this.app.vault.adapter.exists(filePath)) {
       throw new Error(`File already exists: ${filePath}`)
@@ -82,6 +95,9 @@ export abstract class AbstractJsonRepository<T, M> {
     const oldFileName = this.generateFileName(oldRow)
     const newFileName = this.generateFileName(newRow)
     const content = JSON.stringify(newRow, null, 2)
+    if (isJsonFileTooLarge(content)) {
+      throw new Error('JSON database record is too large')
+    }
 
     if (oldFileName === newFileName) {
       // Simple update - filename hasn't changed
@@ -123,8 +139,20 @@ export abstract class AbstractJsonRepository<T, M> {
     const filePath = this.getFilePath(fileName)
     if (!(await this.app.vault.adapter.exists(filePath))) return null
 
+    const fileStat = await this.app.vault.adapter.stat(filePath)
+    if (fileStat?.type === 'file' && fileStat.size > MAX_JSON_FILE_BYTES) {
+      return null
+    }
+
     const content = await this.app.vault.adapter.read(filePath)
-    return JSON.parse(content) as T
+    if (isJsonFileTooLarge(content)) return null
+
+    try {
+      const row: unknown = JSON.parse(content)
+      return this.isValidRow(row) ? row : null
+    } catch {
+      return null
+    }
   }
 
   public async delete(fileName: string): Promise<void> {

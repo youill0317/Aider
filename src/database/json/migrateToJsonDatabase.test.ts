@@ -111,6 +111,27 @@ describe('migrateToJsonDatabase', () => {
     )
   })
 
+  it('ignores unsafe legacy chat ids before reading migration files', async () => {
+    const { app, adapter } = createApp()
+    const { getDatabaseManager } = createDatabaseGetter()
+    adapter.read.mockResolvedValue(
+      JSON.stringify([
+        {
+          ...legacyChat,
+          id: '../.obsidian/plugins/aider/data',
+        },
+      ]),
+    )
+    const findTarget = jest.spyOn(ChatManager.prototype, 'findById')
+    const importChat = jest.spyOn(ChatManager.prototype, 'importChat')
+
+    await migrateToJsonDatabase(app, getDatabaseManager)
+
+    expect(adapter.read).toHaveBeenCalledTimes(1)
+    expect(findTarget).not.toHaveBeenCalled()
+    expect(importChat).not.toHaveBeenCalled()
+  })
+
   it('deletes a source only after verification and atomically marks success', async () => {
     const { app, adapter } = createApp()
     const { getDatabaseManager } = createDatabaseGetter()

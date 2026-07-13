@@ -9,6 +9,8 @@ export const LEGACY_APPLY_VIEW_TYPE = 'smtcmp-apply-view'
 
 export const PGLITE_DB_PATH = '.aider_vector_db.tar.gz'
 export const LEGACY_PGLITE_DB_PATH = '.smtcmp_vector_db.tar.gz'
+// ponytail: PGlite imports are in-memory; raise this only with a streaming import path.
+export const MAX_PGLITE_DATABASE_BYTES = 512 * 1024 * 1024
 
 export const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const CODEX_ISSUER = 'https://auth.openai.com'

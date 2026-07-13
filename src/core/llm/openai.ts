@@ -20,6 +20,7 @@ import {
   LLMRateLimitExceededException,
 } from './exception'
 import { OpenAIMessageAdapter } from './openaiMessageAdapter'
+import { redactAuthError } from './redactAuthError'
 
 export class OpenAIAuthenticatedProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'openai' }>
@@ -89,11 +90,12 @@ export class OpenAIAuthenticatedProvider extends BaseLLMProvider<
 
       return finalResponse
     } catch (error) {
-      console.error('Error in generateResponse:', error)
+      const safeError = redactAuthError(error, [this.provider.apiKey ?? ''])
+      console.error('Error in generateResponse:', safeError)
       if (error instanceof OpenAI.AuthenticationError) {
         throw new LLMAPIKeyInvalidException(
           'OpenAI API key is invalid. Please update it in settings menu.',
-          error,
+          safeError,
         )
       }
       throw error
@@ -126,11 +128,12 @@ export class OpenAIAuthenticatedProvider extends BaseLLMProvider<
         options,
       )
     } catch (error) {
-      console.error('Error in streamResponse:', error)
+      const safeError = redactAuthError(error, [this.provider.apiKey ?? ''])
+      console.error('Error in streamResponse:', safeError)
       if (error instanceof OpenAI.AuthenticationError) {
         throw new LLMAPIKeyInvalidException(
           'OpenAI API key is invalid. Please update it in settings menu.',
-          error,
+          safeError,
         )
       }
       throw error

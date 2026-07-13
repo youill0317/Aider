@@ -103,6 +103,10 @@ export class VectorManager {
       excludePatterns: string[]
       includePatterns: string[]
       reindexAll?: boolean
+      scope?: {
+        files: string[]
+        folders: string[]
+      }
     },
     updateProgress?: (indexProgress: IndexProgress) => void,
   ): Promise<void> {
@@ -130,6 +134,7 @@ export class VectorManager {
         excludePatterns: options.excludePatterns,
         includePatterns: options.includePatterns,
         indexedFiles,
+        scope: options.scope,
       })
       if (filesToIndex.length > 0) {
         await this.repository.deleteVectorsForMultipleFiles(
@@ -530,17 +535,21 @@ Please report this issue to the developer if it persists.`,
     includePatterns,
     indexedFiles = [],
     reindexAll,
+    scope,
   }: {
     embeddingModel: EmbeddingModelClient
     excludePatterns: string[]
     includePatterns: string[]
     indexedFiles?: IndexedVectorFile[]
     reindexAll?: boolean
+    scope?: { files: string[]; folders: string[] }
   }): Promise<TFile[]> {
     let filesToIndex = this.app.vault.getMarkdownFiles()
 
-    filesToIndex = filesToIndex.filter((file) =>
-      this.matchesIndexFilters(file.path, excludePatterns, includePatterns),
+    filesToIndex = filesToIndex.filter(
+      (file) =>
+        this.matchesIndexFilters(file.path, excludePatterns, includePatterns) &&
+        this.matchesScope(file.path, scope),
     )
 
     if (reindexAll) {
@@ -600,6 +609,18 @@ Please report this issue to the developer if it persists.`,
       !excludePatterns.some((pattern) => minimatch(filePath, pattern)) &&
       (includePatterns.length === 0 ||
         includePatterns.some((pattern) => minimatch(filePath, pattern)))
+    )
+  }
+
+  private matchesScope(
+    filePath: string,
+    scope?: { files: string[]; folders: string[] },
+  ): boolean {
+    return (
+      !scope ||
+      (scope.files.length === 0 && scope.folders.length === 0) ||
+      scope.files.includes(filePath) ||
+      scope.folders.some((folder) => filePath.startsWith(`${folder}/`))
     )
   }
 

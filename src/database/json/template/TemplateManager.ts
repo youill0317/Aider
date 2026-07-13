@@ -9,7 +9,12 @@ import {
   EmptyTemplateNameException,
 } from '../exception'
 
-import { TEMPLATE_SCHEMA_VERSION, Template, TemplateMetadata } from './types'
+import {
+  TEMPLATE_SCHEMA_VERSION,
+  Template,
+  TemplateMetadata,
+  isTemplate,
+} from './types'
 
 export class TemplateManager extends AbstractJsonRepository<
   Template,
@@ -37,6 +42,10 @@ export class TemplateManager extends AbstractJsonRepository<
     const name = decodeURIComponent(encodedName)
 
     return { id, name, schemaVersion: TEMPLATE_SCHEMA_VERSION }
+  }
+
+  protected isValidRow(row: unknown): row is Template {
+    return isTemplate(row)
   }
 
   public async createTemplate(

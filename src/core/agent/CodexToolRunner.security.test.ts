@@ -105,6 +105,50 @@ describe('CodexToolRunner security boundaries', () => {
       }),
     ).toBe(false)
   })
+
+  it('invalidates chat approval when the approval policy changes', () => {
+    const initialSettings = smartComposerSettingsSchema.parse({
+      agent: {
+        codex: {
+          approvalPolicy: 'on-request',
+          customCwd: '/vault',
+          cwdMode: 'custom',
+        },
+      },
+    })
+    let updateSettings: (settings: typeof initialSettings) => void = () =>
+      undefined
+    const runner = new CodexToolRunner({
+      app: {} as never,
+      settings: initialSettings,
+      registerSettingsListener: (listener) => {
+        updateSettings = listener
+        return () => undefined
+      },
+      runtime: createCompletedRuntime(),
+    })
+    const requestArgs = JSON.stringify({ prompt: 'Inspect the project' })
+    runner.allowToolForConversation(requestArgs, 'conversation-1')
+
+    updateSettings(
+      smartComposerSettingsSchema.parse({
+        ...initialSettings,
+        agent: {
+          codex: {
+            ...initialSettings.agent.codex,
+            approvalPolicy: 'never',
+          },
+        },
+      }),
+    )
+
+    expect(
+      runner.isExecutionAllowed({
+        conversationId: 'conversation-1',
+        requestArgs,
+      }),
+    ).toBe(false)
+  })
 })
 
 function createRunner({

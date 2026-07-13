@@ -1,4 +1,4 @@
-import { PGLITE_DB_PATH } from '../constants'
+import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
 import { ROOT_DIR } from '../database/json/constants'
 import { CHAT_HISTORY_DIR } from '../utils/chat/chatHistoryManager'
 
@@ -109,6 +109,25 @@ describe('Aider storage adoption', () => {
     expect(
       decodeText(await app.vault.adapter.readBinary('.aider_vector_db.tar.gz')),
     ).toBe('aider-vector')
+  })
+
+  it('rejects an oversized legacy vector archive before reading it', async () => {
+    const app = createTestApp()
+    const readBinary = jest.spyOn(app.vault.adapter, 'readBinary')
+    jest.spyOn(app.vault.adapter, 'stat').mockResolvedValue({
+      type: 'file',
+      size: MAX_PGLITE_DATABASE_BYTES + 1,
+    })
+    await app.vault.adapter.writeBinary(
+      '.smtcmp_vector_db.tar.gz',
+      encodeText('oversized'),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.vectorDb?.status).toBe('failed')
+    expect(readBinary).not.toHaveBeenCalled()
+    expect(await app.vault.adapter.exists(PGLITE_DB_PATH)).toBe(false)
   })
 
   it('keeps legacy chat histories after adopting missing Aider chat histories', async () => {

@@ -1,3 +1,5 @@
+import { MAX_PGLITE_DATABASE_BYTES } from '../constants'
+
 import { completed, existing, failed, missing } from './aiderAdoptionOutcomes'
 import type {
   AdoptionOutcome,
@@ -49,6 +51,18 @@ export async function adoptVectorDatabase(
   }
   if (!(await adapter.exists(paths.legacyVectorPath))) {
     return missing(paths.legacyVectorPath, paths.canonicalVectorPath)
+  }
+
+  const legacyStat = await adapter.stat(paths.legacyVectorPath)
+  if (
+    legacyStat?.type === 'file' &&
+    legacyStat.size > MAX_PGLITE_DATABASE_BYTES
+  ) {
+    return failed(
+      paths.legacyVectorPath,
+      paths.canonicalVectorPath,
+      'Legacy vector database archive is too large',
+    )
   }
 
   await adapter.writeBinary(

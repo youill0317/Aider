@@ -93,6 +93,44 @@ describe('VectorManager contextual embedding route', () => {
     })
   })
 
+  it('embeds only files inside a query scope', async () => {
+    const repository = createRepository()
+    const manager = createVectorManager(
+      createApp({
+        'picked.md': 'picked',
+        'notes/inside.md': 'inside',
+        'notes-copy/outside.md': 'outside sibling',
+        'private/secret.md': 'outside vault file',
+      }),
+      repository,
+    )
+    const getEmbedding = jest.fn().mockResolvedValue([0.5, 0.6])
+
+    await manager.updateVaultIndex(
+      {
+        id: 'voyage/voyage-4',
+        providerType: 'voyage',
+        model: 'voyage-4',
+        dimension: 1024,
+        getEmbedding,
+      },
+      {
+        chunkSize: 1000,
+        excludePatterns: [],
+        includePatterns: [],
+        scope: { files: ['picked.md'], folders: ['notes'] },
+      },
+    )
+
+    expect(getEmbedding).toHaveBeenCalledTimes(2)
+    expect(getEmbedding).toHaveBeenNthCalledWith(1, 'picked')
+    expect(getEmbedding).toHaveBeenNthCalledWith(2, 'inside')
+    expect(repository.insertedVectors.map(({ path }) => path)).toEqual([
+      'picked.md',
+      'notes/inside.md',
+    ])
+  })
+
   it('uses one index snapshot and batches deleted paths', async () => {
     const repository = createRepository()
     repository.getIndexedFiles.mockResolvedValue([

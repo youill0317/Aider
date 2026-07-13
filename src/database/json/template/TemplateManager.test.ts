@@ -10,6 +10,7 @@ const mockAdapter = {
   write: jest.fn().mockResolvedValue(undefined),
   rename: jest.fn().mockResolvedValue(undefined),
   remove: jest.fn().mockResolvedValue(undefined),
+  stat: jest.fn().mockResolvedValue({ type: 'file', size: 1 }),
   list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
 }
 
@@ -117,5 +118,23 @@ describe('TemplateManager', () => {
     expect(JSON.parse(String(mockAdapter.write.mock.calls[0][1]))).toEqual(
       template,
     )
+  })
+
+  it.each([
+    ['invalid node collection', { nodes: 'not-an-array' }],
+    ['invalid nested node', { nodes: [null] }],
+  ])('ignores template JSON with %s', async (_case, content) => {
+    mockAdapter.read.mockResolvedValue(
+      JSON.stringify({
+        id: '123e4567-e89b-42d3-a456-426614174000',
+        name: 'Broken template',
+        content,
+        createdAt: 1,
+        updatedAt: 1,
+        schemaVersion: TEMPLATE_SCHEMA_VERSION,
+      }),
+    )
+
+    await expect(templateManager.read('template.json')).resolves.toBeNull()
   })
 })

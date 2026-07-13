@@ -15,6 +15,7 @@ const SUPPORTED_SCHEMA_VERSION = 2
 export const CHAT_HISTORY_DIR = '.aider_chat_histories'
 export const LEGACY_CHAT_HISTORY_DIR = '.smtcmp_chat_histories'
 const CHAT_LIST_FILE = 'chat_list.json'
+const SAFE_CHAT_CONVERSATION_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export class ChatConversationManager {
   private app: App
@@ -51,8 +52,10 @@ export class ChatConversationManager {
     const filePath = this.getChatConversationPath(id)
     if (await this.app.vault.adapter.exists(filePath)) {
       const content = await this.app.vault.adapter.read(filePath)
-      const chatConversation = JSON.parse(content) as ChatConversation
-      return chatConversation
+      const chatConversation: unknown = JSON.parse(content)
+      return this.isChatConversation(chatConversation, id)
+        ? chatConversation
+        : null
     }
     return null
   }
@@ -60,8 +63,8 @@ export class ChatConversationManager {
   async saveChatConversation(
     chatConversation: ChatConversation,
   ): Promise<void> {
-    await this.ensureChatConversationDir()
     const filePath = this.getChatConversationPath(chatConversation.id)
+    await this.ensureChatConversationDir()
     await this.app.vault.adapter.write(
       filePath,
       JSON.stringify(chatConversation),
@@ -73,10 +76,16 @@ export class ChatConversationManager {
     const chatListPath = this.getChatListPath()
     if (await this.app.vault.adapter.exists(chatListPath)) {
       const content = await this.app.vault.adapter.read(chatListPath)
-      const chatList = JSON.parse(content) as ChatConversationMeta[]
-      return chatList.filter(
+      const chatList: unknown = JSON.parse(content)
+      if (!Array.isArray(chatList)) {
+        return []
+      }
+      const chatItems: unknown[] = chatList
+      return chatItems.filter(
         // TODO: should migrate from 2 to 3
-        (chat) => chat.schemaVersion >= SUPPORTED_SCHEMA_VERSION,
+        (chat): chat is ChatConversationMeta =>
+          this.isChatConversationMeta(chat) &&
+          chat.schemaVersion >= SUPPORTED_SCHEMA_VERSION,
       )
     }
     return []
@@ -120,6 +129,42 @@ export class ChatConversationManager {
   }
 
   private getChatConversationPath(id: string): string {
+    if (!this.isSafeChatConversationId(id)) {
+      throw new Error('Invalid chat conversation id')
+    }
     return normalizePath(`${CHAT_HISTORY_DIR}/${id}.json`)
   }
+
+  private isSafeChatConversationId(id: unknown): id is string {
+    return typeof id === 'string' && SAFE_CHAT_CONVERSATION_ID_PATTERN.test(id)
+  }
+
+  private isChatConversationMeta(
+    value: unknown,
+  ): value is ChatConversationMeta {
+    return (
+      isRecord(value) &&
+      this.isSafeChatConversationId(value.id) &&
+      typeof value.schemaVersion === 'number' &&
+      typeof value.title === 'string' &&
+      typeof value.createdAt === 'number' &&
+      typeof value.updatedAt === 'number'
+    )
+  }
+
+  private isChatConversation(
+    value: unknown,
+    expectedId: string,
+  ): value is ChatConversation {
+    const messages = isRecord(value) ? value.messages : undefined
+    return (
+      this.isChatConversationMeta(value) &&
+      value.id === expectedId &&
+      Array.isArray(messages)
+    )
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

@@ -17,16 +17,18 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: Set Tag variable
+      - name: Validate and set tag variable
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
-
-      - name: Validate release tag
-        run: |
-          node -e "const tag = process.env.TAG; if (!/^\\d+\\.\\d+\\.\\d+$/.test(tag)) { console.error('Release tags must be exact versions like 2.0.0 without a leading v.'); process.exit(1); }"
+          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must be exact versions like 2.0.0 without a leading v." >&2
+            exit 1
+          fi
+          printf 'TAG=%s\n' "$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Bump version
-        run: npm run version $TAG
+        run: npm run version -- "$TAG"
 
       - name: Build plugin
         run: |

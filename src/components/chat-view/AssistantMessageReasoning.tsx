@@ -3,7 +3,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 
 import DotLoader from '../common/DotLoader'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
   reasoning,
@@ -52,7 +52,7 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
       </div>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
-          <ObsidianMarkdown content={reasoning} scale="xs" />
+          <UntrustedMarkdown content={reasoning} scale="xs" />
         </div>
       )}
     </div>

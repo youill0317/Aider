@@ -5,8 +5,8 @@ import { useApp } from '../../contexts/app-context'
 import { useDarkModeContext } from '../../contexts/dark-mode-context'
 import { openMarkdownFile } from '../../utils/obsidian'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
 import { MemoizedSyntaxHighlighterWrapper } from './SyntaxHighlighterWrapper'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 export default function MarkdownCodeComponent({
   onApply,
@@ -23,7 +23,7 @@ export default function MarkdownCodeComponent({
   const app = useApp()
   const { isDarkMode } = useDarkModeContext()
 
-  const [isPreviewMode, setIsPreviewMode] = useState(true)
+  const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const wrapLines = useMemo(() => {
@@ -112,7 +112,7 @@ export default function MarkdownCodeComponent({
       </div>
       {isPreviewMode ? (
         <div className="smtcmp-code-block-obsidian-markdown">
-          <ObsidianMarkdown content={String(children)} scale="sm" />
+          <UntrustedMarkdown content={String(children)} scale="sm" />
         </div>
       ) : (
         <MemoizedSyntaxHighlighterWrapper

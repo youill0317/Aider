@@ -42,6 +42,28 @@ describe('redactSecrets', () => {
     )
   })
 
+  it('redacts quoted and unquoted shell secret assignments', () => {
+    const diagnostic = [
+      'AWS_SECRET_ACCESS_KEY="aws-secret"',
+      'OPENAI_API_KEY=sk-secret',
+      'CLIENT_SECRET="alpha\\"omega"',
+      "REFRESH_TOKEN='line1\nline2'",
+      'SAFE=value',
+    ].join(' ')
+
+    const redacted = redactSecrets(diagnostic)
+
+    expect(redacted).toContain('AWS_SECRET_ACCESS_KEY="[REDACTED]"')
+    expect(redacted).toContain('OPENAI_API_KEY=[REDACTED]')
+    expect(redacted).toContain('CLIENT_SECRET="[REDACTED]"')
+    expect(redacted).toContain("REFRESH_TOKEN='[REDACTED]'")
+    expect(redacted).toContain('SAFE=value')
+    expect(redacted).not.toContain('aws-secret')
+    expect(redacted).not.toContain('sk-secret')
+    expect(redacted).not.toContain('omega')
+    expect(redacted).not.toContain('line2')
+  })
+
   it('redacts URL query secret parameters', () => {
     // Given: provider errors can include callback URLs or request URLs.
     const diagnostic =

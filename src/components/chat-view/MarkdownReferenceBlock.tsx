@@ -6,8 +6,8 @@ import { useApp } from '../../contexts/app-context'
 import { useDarkModeContext } from '../../contexts/dark-mode-context'
 import { openMarkdownFile, readTFileContent } from '../../utils/obsidian'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
 import { MemoizedSyntaxHighlighterWrapper } from './SyntaxHighlighterWrapper'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 export default function MarkdownReferenceBlock({
   filename,
@@ -78,7 +78,7 @@ export default function MarkdownReferenceBlock({
         </div>
         {isPreviewMode ? (
           <div className="smtcmp-code-block-obsidian-markdown">
-            <ObsidianMarkdown content={blockContent} scale="sm" />
+            <UntrustedMarkdown content={blockContent} scale="sm" />
           </div>
         ) : (
           <MemoizedSyntaxHighlighterWrapper

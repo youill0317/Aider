@@ -2,6 +2,7 @@ import { Platform } from 'obsidian'
 
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import {
+  McpClient,
   McpServerConfig,
   McpServerState,
   McpServerStatus,
@@ -17,9 +18,7 @@ import { InvalidToolNameException, McpNotAvailableException } from './exception'
 import {
   equalServerParameters,
   hasAdvertisedTool,
-  mergeMcpRedactionEnv,
   redactMcpError,
-  withMcpRedactionEnv,
 } from './mcp-security'
 import {
   DEFAULT_TOOL_NAME_DELIMITER,
@@ -32,6 +31,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const MAX_MCP_TOOL_OUTPUT_CHARS = 24_000
+
 export class McpManager {
   static readonly TOOL_NAME_DELIMITER = DEFAULT_TOOL_NAME_DELIMITER // Delimiter for tool name construction (serverName__toolName)
 
@@ -40,7 +41,7 @@ export class McpManager {
   private settings: SmartComposerSettings
   private unsubscribeFromSettings: () => void
   private defaultEnv: Record<string, string> = {}
-  private redactionEnvByServer = new Map<string, Record<string, string>>()
+  private settingsRevision = 0
 
   private servers: McpServerState[] = [] // IMPORTANT: Always use this.updateServers() to update this array
   private activeToolCalls: Map<string, AbortController> = new Map()
@@ -69,6 +70,8 @@ export class McpManager {
       return
     }
 
+    const revision = this.settingsRevision
+
     // Get default environment variables
     const { shellEnvSync } = await import('shell-env')
     this.defaultEnv = shellEnvSync()
@@ -79,15 +82,19 @@ export class McpManager {
         this.connectServer(serverConfig),
       ),
     )
+    if (revision !== this.settingsRevision) {
+      await this.closeConnectedServers(servers)
+      return
+    }
     this.updateServers(servers)
   }
 
   public cleanup() {
-    // Disconnect all clients
-    void Promise.all(
+    this.settingsRevision += 1
+    void this.closeClients(
       this.servers
         .filter((s) => s.status === McpServerStatus.Connected)
-        .map((s) => s.client.close()),
+        .map((s) => s.client),
     )
 
     if (this.unsubscribeFromSettings) {
@@ -109,6 +116,7 @@ export class McpManager {
   }
 
   public async handleSettingsUpdate(settings: SmartComposerSettings) {
+    const revision = ++this.settingsRevision
     this.settings = settings
     const updatedServers = settings.mcp.servers.map(
       (serverConfig: McpServerConfig): McpServerState => {
@@ -144,6 +152,10 @@ export class McpManager {
         .filter((s) => s.status === McpServerStatus.Connecting)
         .map(async (s) => {
           const server = await this.connectServer(s.config)
+          if (revision !== this.settingsRevision) {
+            await this.closeConnectedServers([server])
+            return
+          }
           this.updateServers((prevServers) =>
             prevServers.map((prevServer) =>
               prevServer.name === server.name ? server : prevServer,
@@ -151,6 +163,18 @@ export class McpManager {
           )
         }),
     )
+  }
+
+  private async closeConnectedServers(servers: McpServerState[]) {
+    await this.closeClients(
+      servers
+        .filter((server) => server.status === McpServerStatus.Connected)
+        .map((server) => server.client),
+    )
+  }
+
+  private async closeClients(clients: McpClient[]) {
+    await Promise.allSettled(clients.map(async (client) => client.close()))
   }
 
   private notifySubscribers() {
@@ -183,17 +207,11 @@ export class McpManager {
 
     // Disconnect clients in the background
     if (clientsToDisconnect.length > 0) {
-      void Promise.all(clientsToDisconnect.map((client) => client.close()))
+      void this.closeClients(clientsToDisconnect)
     }
 
     this.servers = nextServers
     this.availableToolsCache = null // Invalidate available tools cache
-    this.redactionEnvByServer = new Map(
-      nextServers.map((server) => [
-        server.name,
-        mergeMcpRedactionEnv(this.defaultEnv, server.config),
-      ]),
-    )
     this.notifySubscribers() // Should call after invalidating the cache
   }
 
@@ -242,6 +260,7 @@ export class McpManager {
         }),
       )
     } catch (error) {
+      await this.closeClients([client])
       return {
         name,
         config: serverConfig,
@@ -249,10 +268,8 @@ export class McpManager {
         error: new Error(
           redactMcpError(
             `Failed to connect to MCP server ${name}: ${errorMessage(error)}`,
-            withMcpRedactionEnv(
-              serverConfig,
-              mergeMcpRedactionEnv(this.defaultEnv, serverConfig),
-            ),
+            serverConfig,
+            this.defaultEnv,
           ),
         ),
       }
@@ -268,6 +285,7 @@ export class McpManager {
         tools: toolList.tools,
       }
     } catch (error) {
+      await this.closeClients([client])
       return {
         name,
         config: serverConfig,
@@ -275,10 +293,8 @@ export class McpManager {
         error: new Error(
           redactMcpError(
             `Failed to list tools for MCP server ${name}: ${errorMessage(error)}`,
-            withMcpRedactionEnv(
-              serverConfig,
-              mergeMcpRedactionEnv(this.defaultEnv, serverConfig),
-            ),
+            serverConfig,
+            this.defaultEnv,
           ),
         ),
       }
@@ -286,7 +302,7 @@ export class McpManager {
   }
 
   public async listAvailableTools(): Promise<McpTool[]> {
-    if (this.disabled) {
+    if (this.disabled || !this.settings.chatOptions.enableTools) {
       return []
     }
 
@@ -294,6 +310,7 @@ export class McpManager {
       return this.availableToolsCache
     }
 
+    const revision = this.settingsRevision
     const availableTools = (
       await Promise.all(
         this.servers.map(async (server): Promise<McpTool[]> => {
@@ -312,12 +329,8 @@ export class McpManager {
             console.error(
               redactMcpError(
                 `Failed to list tools for MCP server ${server.name}: ${errorMessage(error)}`,
-                withMcpRedactionEnv(
-                  server.config,
-                  this.redactionEnvByServer.get(server.name) ?? {
-                    ...(server.config.parameters.env ?? {}),
-                  },
-                ),
+                server.config,
+                this.defaultEnv,
               ),
             )
             return []
@@ -325,6 +338,13 @@ export class McpManager {
         }),
       )
     ).flat()
+
+    if (
+      revision !== this.settingsRevision ||
+      !this.settings.chatOptions.enableTools
+    ) {
+      return []
+    }
 
     this.availableToolsCache = [...availableTools]
     return availableTools
@@ -334,6 +354,9 @@ export class McpManager {
     requestToolName: string,
     conversationId: string,
   ): void {
+    if (this.disabled || !this.settings.chatOptions.enableTools) {
+      return
+    }
     let allowedTools = this.allowedToolsByConversation.get(conversationId)
     if (!allowedTools) {
       allowedTools = new Set<string>()
@@ -349,7 +372,7 @@ export class McpManager {
     requestToolName: string
     conversationId?: string
   }): boolean {
-    if (this.disabled) {
+    if (this.disabled || !this.settings.chatOptions.enableTools) {
       return false
     }
 
@@ -423,6 +446,9 @@ export class McpManager {
     }
 
     try {
+      if (!this.settings.chatOptions.enableTools) {
+        throw new Error('MCP tools are disabled')
+      }
       const { serverName, toolName } = parseToolName(name)
       const server = this.servers.find((server) => server.name === serverName)
       if (!server) {
@@ -431,14 +457,7 @@ export class McpManager {
       if (server.status !== McpServerStatus.Connected) {
         throw new Error(`MCP server ${serverName} is not connected`)
       }
-      serverConfigForRedaction = {
-        ...withMcpRedactionEnv(
-          server.config,
-          this.redactionEnvByServer.get(server.name) ?? {
-            ...(server.config.parameters.env ?? {}),
-          },
-        ),
-      }
+      serverConfigForRedaction = server.config
       const toolOption = server.config.toolOptions[toolName]
       if (toolOption?.disabled) {
         throw new Error(`MCP tool ${serverName}:${toolName} is disabled`)
@@ -473,7 +492,7 @@ export class McpManager {
       if (result.isError) {
         return {
           status: ToolCallResponseStatus.Error,
-          error: redactMcpError(
+          error: this.boundAndRedactToolOutput(
             result.content[0].text,
             serverConfigForRedaction,
           ),
@@ -483,7 +502,7 @@ export class McpManager {
         status: ToolCallResponseStatus.Success,
         data: {
           type: 'text',
-          text: redactMcpError(
+          text: this.boundAndRedactToolOutput(
             result.content[0].text,
             serverConfigForRedaction,
           ),
@@ -499,7 +518,7 @@ export class McpManager {
       // Handle other errors
       return {
         status: ToolCallResponseStatus.Error,
-        error: redactMcpError(
+        error: this.boundAndRedactToolOutput(
           error instanceof Error ? error.message : 'Unknown error occurred',
           serverConfigForRedaction,
         ),
@@ -509,6 +528,16 @@ export class McpManager {
         this.activeToolCalls.delete(id)
       }
     }
+  }
+
+  private boundAndRedactToolOutput(
+    value: string,
+    serverConfig?: McpServerConfig,
+  ): string {
+    return redactMcpError(value, serverConfig, this.defaultEnv).slice(
+      0,
+      MAX_MCP_TOOL_OUTPUT_CHARS,
+    )
   }
 
   public abortToolCall(id: string): boolean {

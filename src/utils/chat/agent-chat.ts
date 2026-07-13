@@ -10,8 +10,13 @@ import {
 } from '../../types/chat'
 import { MentionableCurrentFile } from '../../types/mentionable'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
+import { redactSecrets } from '../security/redact-secrets'
 
 import { getLastChatTurns } from './promptGenerator'
+import {
+  wrapUntrustedContext,
+  wrapUntrustedToolOutput,
+} from './untrusted-context'
 export {
   buildAgentCommandMessageFromEvent,
   upsertAgentCommandMessage,
@@ -21,6 +26,7 @@ export const AGENT_CHAT_SUMMARY = 'Agent Chat'
 
 export const AGENT_CHAT_CONTEXT_HEADING = '## Current Obsidian Markdown File'
 const AGENT_CHAT_HISTORY_TURNS = 10
+const MAX_AGENT_HISTORY_CONTENT_CHARS = 24_000
 
 type BuildAgentChatToolMessageParams = {
   readonly conversationId: string
@@ -152,11 +158,13 @@ function formatAgentHistoryMessage(message: ChatMessage): string {
     case 'user':
       return `User:\n${formatUserPromptContent(message.promptContent)}`
     case 'assistant':
-      return message.content.trim() ? `Assistant:\n${message.content}` : ''
+      return message.content.trim()
+        ? `Assistant:\n${sanitizeUntrustedContext(message.content)}`
+        : ''
     case 'tool':
       return formatToolMessage(message)
-    case 'agent-command':
-      return [
+    case 'agent-command': {
+      const activity = [
         [message.title, message.detail].filter(Boolean).join(' '),
         `Status: ${message.status}`,
         ...(message.exitCode !== undefined
@@ -167,7 +175,27 @@ function formatAgentHistoryMessage(message: ChatMessage): string {
       ]
         .filter((line) => line.length > 0)
         .join('\n')
+      return activity ? sanitizeUntrustedToolOutput(activity) : ''
+    }
   }
+}
+
+function sanitizeUntrustedContext(content: string): string {
+  return wrapUntrustedContext(redactAndLimitAgentHistoryContent(content))
+}
+
+function sanitizeUntrustedToolOutput(content: string): string {
+  return wrapUntrustedToolOutput(redactAndLimitAgentHistoryContent(content))
+}
+
+function redactAndLimitAgentHistoryContent(content: string): string {
+  const redactedContent = redactSecrets(content)
+  if (redactedContent.length <= MAX_AGENT_HISTORY_CONTENT_CHARS) {
+    return redactedContent
+  }
+
+  return `${redactedContent.slice(0, MAX_AGENT_HISTORY_CONTENT_CHARS)}
+[Truncated]`
 }
 
 function formatUserPromptContent(
@@ -188,17 +216,22 @@ function formatToolMessage(message: ChatToolMessage): string {
   return message.toolCalls
     .map((toolCall) => {
       const header = `Tool ${toolCall.request.name}:`
+      let content: string
       switch (toolCall.response.status) {
         case ToolCallResponseStatus.PendingApproval:
         case ToolCallResponseStatus.Running:
         case ToolCallResponseStatus.Rejected:
         case ToolCallResponseStatus.Aborted:
-          return `${header}\nTool call ${toolCall.request.id} is ${toolCall.response.status}`
+          content = `${header}\nTool call ${toolCall.request.id} is ${toolCall.response.status}`
+          break
         case ToolCallResponseStatus.Success:
-          return `${header}\n${toolCall.response.data.text}`
+          content = `${header}\n${toolCall.response.data.text}`
+          break
         case ToolCallResponseStatus.Error:
-          return `${header}\nError:\n${toolCall.response.error}`
+          content = `${header}\nError:\n${toolCall.response.error}`
+          break
       }
+      return sanitizeUntrustedToolOutput(content)
     })
     .join('\n\n')
 }

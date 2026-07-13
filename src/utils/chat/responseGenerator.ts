@@ -28,6 +28,7 @@ export type ResponseGeneratorParams = {
   promptGenerator: PromptGenerator
   toolDispatcher: ToolDispatcher
   abortSignal?: AbortSignal
+  isToolsEnabled?: () => boolean
 }
 
 export class ResponseGenerator {
@@ -35,6 +36,7 @@ export class ResponseGenerator {
   private readonly model: ChatModel
   private readonly conversationId: string
   private readonly enableTools: boolean
+  private readonly isToolsEnabled: () => boolean
   private readonly promptGenerator: PromptGenerator
   private readonly toolDispatcher: ToolDispatcher
   private readonly abortSignal?: AbortSignal
@@ -49,7 +51,8 @@ export class ResponseGenerator {
     this.model = params.model
     this.conversationId = params.conversationId
     this.enableTools = params.enableTools
-    this.maxAutoIterations = Math.max(1, params.maxAutoIterations) // Ensure maxAutoIterations is at least 1
+    this.isToolsEnabled = params.isToolsEnabled ?? (() => this.enableTools)
+    this.maxAutoIterations = Math.max(1, Math.floor(params.maxAutoIterations))
     this.receivedMessages = params.messages
     this.promptGenerator = params.promptGenerator
     this.toolDispatcher = params.toolDispatcher
@@ -65,27 +68,37 @@ export class ResponseGenerator {
   }
 
   public async run() {
-    for (let i = 0; i <= this.maxAutoIterations; i++) {
+    let remainingAutoToolCalls = this.maxAutoIterations
+    for (;;) {
       const { toolCallRequests } = await this.streamSingleResponse()
       if (toolCallRequests.length === 0) {
+        return
+      }
+      if (!this.isToolsEnabled()) {
         return
       }
 
       const toolMessage: ChatToolMessage = {
         role: 'tool' as const,
         id: uuidv4(),
-        toolCalls: toolCallRequests.map((toolCall) => ({
-          request: toolCall,
-          response: {
-            status: this.toolDispatcher.isToolExecutionAllowed({
+        toolCalls: toolCallRequests.map((toolCall) => {
+          const shouldRun =
+            remainingAutoToolCalls > 0 &&
+            this.toolDispatcher.isToolExecutionAllowed({
               requestToolName: toolCall.name,
               requestArgs: toolCall.arguments,
               conversationId: this.conversationId,
             })
-              ? ToolCallResponseStatus.Running
-              : ToolCallResponseStatus.PendingApproval,
-          },
-        })),
+          if (shouldRun) remainingAutoToolCalls -= 1
+          return {
+            request: toolCall,
+            response: {
+              status: shouldRun
+                ? ToolCallResponseStatus.Running
+                : ToolCallResponseStatus.PendingApproval,
+            },
+          }
+        }),
       }
 
       this.updateResponseMessages((messages) => [...messages, toolMessage])
@@ -148,10 +161,12 @@ export class ResponseGenerator {
       messages: [...this.receivedMessages, ...this.responseMessages],
     })
 
-    const tools = this.enableTools
+    const listedTools = this.isToolsEnabled()
       ? await this.toolDispatcher.listAvailableTools()
       : []
+    const tools = this.isToolsEnabled() ? listedTools : []
     const requestTools = tools.length > 0 ? tools : undefined
+    const advertisedToolNames = new Set(tools.map((tool) => tool.function.name))
 
     const stream = await this.providerClient.streamResponse(
       this.model,
@@ -195,6 +210,12 @@ export class ResponseGenerator {
       .map((toolCall) => {
         // filter out invalid tool calls without a name
         if (!toolCall.function?.name) {
+          return null
+        }
+        if (
+          !this.isToolsEnabled() ||
+          !advertisedToolNames.has(toolCall.function.name)
+        ) {
           return null
         }
         return {

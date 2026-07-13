@@ -1,4 +1,5 @@
 import { CheckIcon, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Notice } from 'obsidian'
 import {
   forwardRef,
   useCallback,
@@ -7,7 +8,6 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Notice } from 'obsidian'
 
 import { ApplyViewState } from '../../ApplyView'
 import { useApp } from '../../contexts/app-context'

@@ -2,12 +2,12 @@ import {
   type SmartComposerSettings,
   assertUniqueSettingsIds,
 } from '../../settings/schema/setting.types'
-import { loadProviderRouteTrust } from '../config-trust'
 import {
   type McpServerConfig,
   mcpServerConfigSchema,
 } from '../../types/mcp.types'
 import { type LLMProvider, llmProviderSchema } from '../../types/provider.types'
+import { loadProviderRouteTrust } from '../config-trust'
 
 import {
   OAUTH_SECRET_FIELDS,

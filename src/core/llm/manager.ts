@@ -1,5 +1,5 @@
-import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import { assertProviderRouteTrusted } from '../../security/config-trust'
+import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import { ChatModel } from '../../types/chat-model.types'
 import { LLMProvider } from '../../types/provider.types'
 

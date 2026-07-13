@@ -280,7 +280,7 @@ function normalizeLegacyAgentCommands(value: unknown): unknown {
   if (!isRecord(value) || !Array.isArray(value.messages)) return value
   return {
     ...value,
-    messages: value.messages.map((message) => {
+    messages: value.messages.map((message: unknown) => {
       if (
         !isRecord(message) ||
         message.role !== 'agent-command' ||

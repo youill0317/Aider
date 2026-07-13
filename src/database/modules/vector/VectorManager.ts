@@ -22,8 +22,8 @@ import { splitMarkdown } from '../../../utils/markdown-text-splitter'
 import {
   createVoyageContextualMetadata,
   getStandardIndexProfile,
-  hasMatchingVoyageContextualIndexProfile,
   hasMatchingStandardIndexProfile,
+  hasMatchingVoyageContextualIndexProfile,
 } from '../../vector-metadata'
 
 import { IndexedVectorFile, VectorRepository } from './VectorRepository'

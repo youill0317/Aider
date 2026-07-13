@@ -4,8 +4,8 @@ import {
   GEMINI_CODE_ASSIST_ENDPOINT,
   GEMINI_CODE_ASSIST_HEADERS,
 } from '../../constants'
-import { redactSecrets } from '../../utils/security/redact-secrets'
 import { withRequestTimeout } from '../../utils/llm/httpTransport'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 
 type GeminiOAuthState = {
   refreshToken: string

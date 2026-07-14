@@ -84,7 +84,8 @@ export default function ToolBadge() {
           </span>
         </span>
       </button>
-      {toolCount !== null && toolCount > 0 && (
+      {(!settings.chatOptions.enableTools ||
+        (toolCount !== null && toolCount > 0)) && (
         <button
           type="button"
           className="smtcmp-chat-user-input-file-badge-eye"

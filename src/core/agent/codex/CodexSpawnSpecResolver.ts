@@ -12,6 +12,7 @@ const UNSAFE_PROVIDER_ENV_KEYS = new Set([
 ])
 
 const SAFE_CODEX_ENV_KEYS = [
+  'ALL_PROXY',
   'APPDATA',
   'CODEX_ACCESS_TOKEN',
   'CODEX_API_KEY',
@@ -21,6 +22,8 @@ const SAFE_CODEX_ENV_KEYS = [
   'HOME',
   'HOMEDRIVE',
   'HOMEPATH',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
   'LANG',
   'LANGUAGE',
   'LC_ADDRESS',
@@ -39,6 +42,7 @@ const SAFE_CODEX_ENV_KEYS = [
   'LOCALAPPDATA',
   'LOGNAME',
   'NO_COLOR',
+  'NO_PROXY',
   'PATH',
   'PATHEXT',
   'ProgramData',
@@ -62,7 +66,11 @@ const SAFE_CODEX_ENV_KEYS = [
   'XDG_DATA_HOME',
   'XDG_RUNTIME_DIR',
   'XDG_STATE_HOME',
+  'all_proxy',
   'comspec',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
 ] as const
 
 type CodexFileSystem = {

@@ -90,6 +90,40 @@ describe('parseJsonSseStream', () => {
     }
   })
 
+  it('refreshes the timeout when a web stream keeps producing data', async () => {
+    jest.useFakeTimers()
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    const stream = new ReadableStream<Uint8Array>({
+      start(value) {
+        controller = value
+      },
+    })
+    const iterator = parseJsonSseStream<{ value: number }>(stream)[
+      Symbol.asyncIterator
+    ]()
+
+    try {
+      const first = iterator.next()
+      jest.advanceTimersByTime(9 * 60_000)
+      controller?.enqueue(new TextEncoder().encode('data: {"value":1}\n\n'))
+      await expect(first).resolves.toEqual({
+        done: false,
+        value: { value: 1 },
+      })
+
+      const second = iterator.next()
+      jest.advanceTimersByTime(9 * 60_000)
+      controller?.enqueue(new TextEncoder().encode('data: {"value":2}\n\n'))
+      await expect(second).resolves.toEqual({
+        done: false,
+        value: { value: 2 },
+      })
+    } finally {
+      await iterator.return?.()
+      jest.useRealTimers()
+    }
+  })
+
   it('rejects cumulative oversized content and destroys the node stream', async () => {
     const event = `:${'x'.repeat(1024 * 1024 - 3)}\n\n`
     const stream = Readable.from(Array(65).fill(event))

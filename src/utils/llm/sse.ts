@@ -8,7 +8,7 @@ type SseBoundary = {
 const MAX_SSE_BUFFER_CHARS = 1024 * 1024
 const MAX_SSE_STREAM_CHARS = 64 * 1024 * 1024
 const MAX_SSE_EVENTS = 100_000
-const MAX_SSE_DURATION_MS = 10 * 60_000
+const MAX_SSE_IDLE_MS = 10 * 60_000
 
 export async function* parseJsonSseStream<T>(
   body: StreamSource,
@@ -17,13 +17,23 @@ export async function* parseJsonSseStream<T>(
   let buffer = ''
   let totalChars = 0
   let totalEvents = 0
-  let durationTimeout: ReturnType<typeof setTimeout> | undefined
-  const durationExceeded = new Promise<never>((_resolve, reject) => {
-    durationTimeout = setTimeout(
-      () => reject(new Error('SSE stream timed out')),
-      MAX_SSE_DURATION_MS,
-    )
-  })
+  let idleTimeout: ReturnType<typeof setTimeout> | undefined
+  const waitForChunk = async <Result>(
+    next: Promise<Result>,
+  ): Promise<Result> => {
+    const idleExceeded = new Promise<never>((_resolve, reject) => {
+      idleTimeout = setTimeout(
+        () => reject(new Error('SSE stream timed out')),
+        MAX_SSE_IDLE_MS,
+      )
+    })
+    try {
+      return await Promise.race([next, idleExceeded])
+    } finally {
+      if (idleTimeout) clearTimeout(idleTimeout)
+      idleTimeout = undefined
+    }
+  }
   const appendChunk = (chunk: string) => {
     totalChars += chunk.length
     if (totalChars > MAX_SSE_STREAM_CHARS) {
@@ -45,10 +55,7 @@ export async function* parseJsonSseStream<T>(
       let completed = false
       try {
         while (true) {
-          const { value, done } = await Promise.race([
-            reader.read(),
-            durationExceeded,
-          ])
+          const { value, done } = await waitForChunk(reader.read())
           if (value) {
             appendChunk(decoder.decode(value, { stream: true }))
           }
@@ -87,10 +94,7 @@ export async function* parseJsonSseStream<T>(
     let completed = false
     try {
       while (true) {
-        const { value: chunk, done } = await Promise.race([
-          iterator.next(),
-          durationExceeded,
-        ])
+        const { value: chunk, done } = await waitForChunk(iterator.next())
         if (done) break
         appendChunk(
           typeof chunk === 'string'
@@ -122,7 +126,7 @@ export async function* parseJsonSseStream<T>(
       }
     }
   } finally {
-    if (durationTimeout) clearTimeout(durationTimeout)
+    if (idleTimeout) clearTimeout(idleTimeout)
   }
 }
 

@@ -6,12 +6,16 @@ describe('CodexSpawnSpecResolver', () => {
 
     const spawnSpec = resolver.resolve(['codex', 'exec'], {
       env: {
+        ALL_PROXY: 'socks5://proxy.example:1080',
         CODEX_ACCESS_TOKEN: 'access-token',
         CODEX_API_KEY: 'codex-api-secret',
         CODEX_HOME: '/home/me/.codex',
         DATABASE_URL: 'database-secret',
         HOME: '/home/me',
+        HTTP_PROXY: 'http://proxy.example:8080',
+        HTTPS_PROXY: 'http://proxy.example:8080',
         LANG: 'en_US.UTF-8',
+        NO_PROXY: 'localhost,127.0.0.1',
         NODE_OPTIONS: '--require=/tmp/injected.js',
         OPENAI_API_KEY: 'api-secret',
         PATH: '/usr/bin',
@@ -22,11 +26,15 @@ describe('CodexSpawnSpecResolver', () => {
 
     expect(spawnSpec.env).toEqual(
       expect.objectContaining({
+        ALL_PROXY: 'socks5://proxy.example:1080',
         CODEX_ACCESS_TOKEN: 'access-token',
         CODEX_API_KEY: 'codex-api-secret',
         CODEX_HOME: '/home/me/.codex',
         HOME: '/home/me',
+        HTTP_PROXY: 'http://proxy.example:8080',
+        HTTPS_PROXY: 'http://proxy.example:8080',
         LANG: 'en_US.UTF-8',
+        NO_PROXY: 'localhost,127.0.0.1',
         PATH: expect.stringContaining('/usr/bin'),
         TMPDIR: '/tmp',
       }),

@@ -448,11 +448,9 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     await revokeMcpServerTrust(serverId, this.getSecretStore())
   }
 
-  async trustProviderRoute(providerId: string): Promise<void> {
-    const provider = this.settings.providers.find(
-      (candidate) => candidate.id === providerId,
-    )
-    if (!provider) throw new Error(`Provider ${providerId} not found`)
+  async trustProviderRoute(
+    provider: SmartComposerSettings['providers'][number],
+  ): Promise<void> {
     await trustProviderRoute(provider, this.getSecretStore())
   }
 

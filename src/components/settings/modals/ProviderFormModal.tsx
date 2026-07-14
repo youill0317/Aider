@@ -83,6 +83,7 @@ function ProviderFormComponent({
         return
       }
 
+      await plugin.trustProviderRoute(formData)
       await plugin.setSettings({
         ...plugin.settings,
         providers: [
@@ -91,7 +92,6 @@ function ProviderFormComponent({
           ...plugin.settings.providers.slice(currentProviderIndex + 1),
         ],
       })
-      await plugin.trustProviderRoute(formData.id)
     } else {
       if (
         plugin.settings.providers.some((p: LLMProvider) => p.id === formData.id)
@@ -108,11 +108,11 @@ function ProviderFormComponent({
         return
       }
 
+      await plugin.trustProviderRoute(formData)
       await plugin.setSettings({
         ...plugin.settings,
         providers: [...plugin.settings.providers, formData],
       })
-      await plugin.trustProviderRoute(formData.id)
     }
 
     onClose()

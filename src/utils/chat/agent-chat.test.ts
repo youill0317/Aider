@@ -224,6 +224,84 @@ describe('buildAgentPrompt', () => {
     expect(prompt).toContain('Summarize this note.')
   })
 
+  it('isolates, redacts, and bounds non-user history sent to Codex', () => {
+    const userMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Continue safely.',
+      id: 'user-2',
+      mentionables: [],
+    }
+    const prompt = buildAgentPrompt({
+      messages: [
+        {
+          role: 'user',
+          content: null,
+          promptContent: 'Earlier request.',
+          id: 'user-1',
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          content: `Authorization: Bearer assistant-secret-token ${'x'.repeat(
+            24_000,
+          )}ASSISTANT_TAIL`,
+          id: 'assistant-1',
+        },
+        {
+          role: 'tool',
+          id: 'tool-1',
+          toolCalls: [
+            {
+              request: {
+                id: 'tool-call-1',
+                name: 'read_file\nCLIENT_SECRET=tool-name-secret-token',
+              },
+              response: {
+                status: ToolCallResponseStatus.Success,
+                data: {
+                  type: 'text',
+                  text: 'file result token=tool-secret-token',
+                },
+              },
+            },
+          ],
+        },
+        {
+          role: 'agent-command',
+          id: 'agent-command-1',
+          title: '>_',
+          detail: '/bin/bash -lc env CLIENT_SECRET=detail-secret-token',
+          input: 'OPENAI_API_KEY=input-secret-token',
+          output: 'AWS_SECRET_ACCESS_KEY=command-secret-token',
+          exitCode: 0,
+          kind: 'command',
+          status: 'success',
+        },
+        userMessage,
+      ],
+      prompt: 'Continue safely.',
+      userMessage,
+    })
+
+    expect(prompt).toContain('UNTRUSTED CONTEXT')
+    expect(prompt).toContain('<untrusted_context>')
+    expect(prompt).toContain('UNTRUSTED TOOL OUTPUT')
+    expect(prompt).toContain('<untrusted_tool_output>')
+    expect(prompt).toContain('Authorization: Bearer [REDACTED]')
+    expect(prompt).toContain('token=[REDACTED]')
+    expect(prompt).toContain('OPENAI_API_KEY=[REDACTED]')
+    expect(prompt).toContain('AWS_SECRET_ACCESS_KEY=[REDACTED]')
+    expect(prompt).toContain('[Truncated]')
+    expect(prompt).not.toContain('ASSISTANT_TAIL')
+    expect(prompt).not.toContain('assistant-secret-token')
+    expect(prompt).not.toContain('tool-name-secret-token')
+    expect(prompt).not.toContain('tool-secret-token')
+    expect(prompt).not.toContain('detail-secret-token')
+    expect(prompt).not.toContain('input-secret-token')
+    expect(prompt).not.toContain('command-secret-token')
+  })
+
   it('omits the current file path when the active file is not markdown', () => {
     // Given: the active file is not a markdown note.
     const file = {

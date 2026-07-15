@@ -1,5 +1,5 @@
 import { Settings, Trash2 } from 'lucide-react'
-import { App } from 'obsidian'
+import { App, Notice } from 'obsidian'
 
 import {
   DEFAULT_PROVIDERS,
@@ -7,7 +7,6 @@ import {
   PROVIDER_TYPES_INFO,
 } from '../../../constants'
 import { useSettings } from '../../../contexts/settings-context'
-import { getEmbeddingModelClient } from '../../../core/rag/embedding'
 import SmartComposerPlugin from '../../../main'
 import { LLMProvider } from '../../../types/provider.types'
 import { ConfirmModal } from '../../modals/ConfirmModal'
@@ -48,6 +47,22 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
+        const chatModels = settings.chatModels.filter(
+          (model) => model.providerId !== provider.id,
+        )
+        const enabledChatModels = chatModels.filter(
+          (model) => model.enable !== false,
+        )
+        const embeddingModels = settings.embeddingModels.filter(
+          (model) => model.providerId !== provider.id,
+        )
+        const fallbackChatModel = enabledChatModels[0]
+        const fallbackEmbeddingModel = embeddingModels[0]
+        if (!fallbackChatModel || !fallbackEmbeddingModel) {
+          new Notice('Cannot delete the last available model provider')
+          return
+        }
+
         const vectorManager = (await plugin.getDbManager()).getVectorManager()
         const embeddingStats = await vectorManager.getEmbeddingStats()
 
@@ -59,11 +74,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
 
           if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
             // only clear when there's data
-            const embeddingModelClient = getEmbeddingModelClient({
-              settings,
-              embeddingModelId: embeddingModel.id,
-            })
-            await vectorManager.clearAllVectors(embeddingModelClient)
+            await vectorManager.clearAllVectors(embeddingModel.id)
           }
         }
 
@@ -72,13 +83,25 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
           providers: [...settings.providers].filter(
             (v) => v.id !== provider.id,
           ),
-          chatModels: [...settings.chatModels].filter(
-            (v) => v.providerId !== provider.id,
-          ),
-          embeddingModels: [...settings.embeddingModels].filter(
-            (v) => v.providerId !== provider.id,
-          ),
+          chatModels,
+          embeddingModels,
+          chatModelId: enabledChatModels.some(
+            ({ id }) => id === settings.chatModelId,
+          )
+            ? settings.chatModelId
+            : fallbackChatModel.id,
+          applyModelId: enabledChatModels.some(
+            ({ id }) => id === settings.applyModelId,
+          )
+            ? settings.applyModelId
+            : fallbackChatModel.id,
+          embeddingModelId: embeddingModels.some(
+            ({ id }) => id === settings.embeddingModelId,
+          )
+            ? settings.embeddingModelId
+            : fallbackEmbeddingModel.id,
         })
+        await plugin.revokeProviderRouteTrust(provider)
       },
     }).open()
   }

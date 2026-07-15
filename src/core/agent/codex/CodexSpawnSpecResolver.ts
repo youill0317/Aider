@@ -1,7 +1,81 @@
+import { parse } from 'smol-toml'
+
 const WINDOWS_CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g
+
+const UNSAFE_PROVIDER_ENV_KEYS = new Set([
+  'BASH_ENV',
+  'ENV',
+  'GCONV_PATH',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'SHELLOPTS',
+])
+
+const SAFE_CODEX_ENV_KEYS = [
+  'ALL_PROXY',
+  'APPDATA',
+  'CODEX_ACCESS_TOKEN',
+  'CODEX_API_KEY',
+  'CODEX_HOME',
+  'COLORTERM',
+  'ComSpec',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'LANG',
+  'LANGUAGE',
+  'LC_ADDRESS',
+  'LC_ALL',
+  'LC_COLLATE',
+  'LC_CTYPE',
+  'LC_IDENTIFICATION',
+  'LC_MEASUREMENT',
+  'LC_MESSAGES',
+  'LC_MONETARY',
+  'LC_NAME',
+  'LC_NUMERIC',
+  'LC_PAPER',
+  'LC_TELEPHONE',
+  'LC_TIME',
+  'LOCALAPPDATA',
+  'LOGNAME',
+  'NO_COLOR',
+  'NO_PROXY',
+  'PATH',
+  'PATHEXT',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'SHELL',
+  'SystemDrive',
+  'SystemRoot',
+  'TEMP',
+  'TERM',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'USER',
+  'USERNAME',
+  'USERPROFILE',
+  'WINDIR',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_RUNTIME_DIR',
+  'XDG_STATE_HOME',
+  'all_proxy',
+  'comspec',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+] as const
 
 type CodexFileSystem = {
   readonly existsFile: (filePath: string) => boolean
+  readonly readTextFile?: (filePath: string) => string
 }
 
 type CodexPathTools = {
@@ -50,6 +124,13 @@ export class CodexSpawnSpecResolver {
       }) ?? requestedCommand
 
     if (platform === 'win32' && command.toLowerCase().endsWith('.cmd')) {
+      for (const value of [command, ...args]) {
+        if (/[\r\n]/.test(value)) {
+          throw new Error(
+            'Windows command arguments cannot contain line breaks.',
+          )
+        }
+      }
       const shellCommand = [
         escapeWindowsShellCommand(command),
         ...args.map(escapeWindowsCmdShimArgument),
@@ -92,9 +173,77 @@ function buildCodexEnvironment(
   )
 
   return {
-    ...baseEnv,
+    ...pickSafeEnvironment(
+      baseEnv,
+      configuredProviderEnvironmentKeys(baseEnv, options.fileSystem, pathTools),
+    ),
     PATH: pathValue,
   }
+}
+
+function pickSafeEnvironment(
+  env: NodeJS.ProcessEnv,
+  additionalKeys: readonly string[],
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    [...SAFE_CODEX_ENV_KEYS, ...additionalKeys].flatMap((key) => {
+      const value = env[key]
+      return typeof value === 'string' ? [[key, value]] : []
+    }),
+  )
+}
+
+function configuredProviderEnvironmentKeys(
+  env: NodeJS.ProcessEnv,
+  fileSystem: CodexFileSystem | undefined,
+  pathTools: CodexPathTools,
+): readonly string[] {
+  const home =
+    env.CODEX_HOME ??
+    ((env.HOME ?? env.USERPROFILE)
+      ? pathTools.join(env.HOME ?? env.USERPROFILE ?? '', '.codex')
+      : '')
+
+  if (!home || !fileSystem?.readTextFile) {
+    return []
+  }
+
+  let config: Record<string, unknown>
+  try {
+    config = parse(
+      fileSystem.readTextFile(pathTools.join(home, 'config.toml')),
+      {
+        integersAsBigInt: 'asNeeded',
+      },
+    )
+  } catch {
+    return []
+  }
+
+  const providers = config.model_providers
+  return isRecord(providers)
+    ? Object.values(providers).flatMap((provider) => {
+        if (!isRecord(provider) || typeof provider.env_key !== 'string') {
+          return []
+        }
+        const key = provider.env_key
+        return isSafeProviderEnvironmentKey(key) ? [key] : []
+      })
+    : []
+}
+
+function isSafeProviderEnvironmentKey(key: string): boolean {
+  const normalizedKey = key.toUpperCase()
+  return (
+    /^[A-Z_][A-Z0-9_]*$/.test(normalizedKey) &&
+    !UNSAFE_PROVIDER_ENV_KEYS.has(normalizedKey) &&
+    !normalizedKey.startsWith('LD_') &&
+    !normalizedKey.startsWith('DYLD_')
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function resolveCommandPath(

@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 
 import { Annotation } from '../../types/llm/response'
+import { isPublicHttpUrl } from '../../utils/fetch-utils'
 
 const AssistantMessageAnnotations = memo(function AssistantMessageAnnotations({
   annotations,
@@ -18,37 +19,40 @@ const AssistantMessageAnnotations = memo(function AssistantMessageAnnotations({
 
   return (
     <div className="smtcmp-assistant-message-metadata">
-      <div
+      <button
+        type="button"
         className="smtcmp-assistant-message-metadata-toggle"
         onClick={handleToggle}
+        aria-expanded={isExpanded}
       >
-        <span>View Sources ({annotations.length})</span>
+        <span>Sources ({annotations.length})</span>
         {isExpanded ? (
           <ChevronUp className="smtcmp-assistant-message-metadata-toggle-icon" />
         ) : (
           <ChevronDown className="smtcmp-assistant-message-metadata-toggle-icon" />
         )}
-      </div>
+      </button>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
           <div className="smtcmp-assistant-message-metadata-annotations">
             {annotations.map((annotation, index) => {
+              const { title, url } = annotation.url_citation
+              const label = title ?? url
               return (
-                <div key={annotation.url_citation.url}>
+                <div key={url}>
                   <span
                     style={{
                       wordBreak: 'break-all',
                     }}
                   >
                     [{index + 1}]{' '}
-                    <a
-                      href={annotation.url_citation.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {annotation.url_citation.title ??
-                        annotation.url_citation.url}
-                    </a>
+                    {isPublicHttpUrl(url) ? (
+                      <a href={url} target="_blank" rel="noopener noreferrer">
+                        {label}
+                      </a>
+                    ) : (
+                      label
+                    )}
                   </span>
                 </div>
               )

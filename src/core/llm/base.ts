@@ -32,6 +32,6 @@ export abstract class BaseLLMProvider<P extends LLMProvider> {
   abstract getEmbedding(
     model: string,
     text: string,
-    options?: { dimensions?: number },
+    options?: { dimensions?: number; signal?: AbortSignal },
   ): Promise<number[]>
 }

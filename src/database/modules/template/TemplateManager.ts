@@ -49,9 +49,13 @@ export class LegacyTemplateManager {
     return results.map((result) => result.obj)
   }
 
-  async deleteTemplate(id: string): Promise<boolean> {
+  async deleteTemplate(id: string, save = true): Promise<boolean> {
     const deleted = await this.repository.delete(id)
-    await this.requestSave()
+    if (save) await this.requestSave()
     return deleted
+  }
+
+  async saveChanges(): Promise<void> {
+    await this.requestSave()
   }
 }

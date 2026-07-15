@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 
 describe('settings UX contract', () => {
-  it('settings section order is unchanged', () => {
+  it('keeps primary setup first and support last', () => {
     // Given: the settings root declares the visible section order.
     const source = readProjectFile(
       'src/components/settings/SettingsTabRoot.tsx',
@@ -12,15 +12,17 @@ describe('settings UX contract', () => {
     const order = [
       '<PlanConnectionsSection',
       '<ChatSection',
+      '<CodexToolSection',
       '<ProvidersSection',
       '<ModelsSection',
       '<RAGSection',
       '<McpSection',
       '<TemplateSection',
       '<EtcSection',
+      'name="Support Aider"',
     ].map((token) => source.indexOf(token))
 
-    // Then: the existing section order remains stable.
+    // Then: setup flows stay together and the optional support action is last.
     expect(order.every((index) => index >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((left, right) => left - right))
   })
@@ -47,7 +49,7 @@ describe('settings UX contract', () => {
     expect(source).toContain("'••••••••' : 'Set API key'")
   })
 
-  it('subscription connection copy is unchanged', () => {
+  it('keeps subscription connection copy available', () => {
     // Given: subscription cards own the connect/disconnect copy.
     const source = readProjectFile(
       'src/components/settings/sections/PlanConnectionsSection.tsx',

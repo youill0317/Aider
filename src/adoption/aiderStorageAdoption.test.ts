@@ -1,7 +1,11 @@
-import { PGLITE_DB_PATH } from '../constants'
+import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
 import { ROOT_DIR } from '../database/json/constants'
 import { CHAT_HISTORY_DIR } from '../utils/chat/chatHistoryManager'
 
+import {
+  MAX_ADOPTION_DIRECTORY_DEPTH,
+  MAX_ADOPTION_JSON_FILE_BYTES,
+} from './aiderAdoptionUtils'
 import { adoptAiderStorage } from './aiderStorageAdoption'
 import {
   createTestApp,
@@ -33,6 +37,97 @@ describe('Aider storage adoption', () => {
     expect(marker.resources.pluginData?.status).toBe('completed')
   })
 
+  it('rejects non-object legacy plugin settings', async () => {
+    const app = createTestApp()
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    await app.vault.adapter.mkdir('.obsidian/plugins/smart-composer')
+    await app.vault.adapter.write(legacyPath, '[]')
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.pluginData?.status).toBe('failed')
+    expect(
+      await app.vault.adapter.exists('.obsidian/plugins/aider/data.json'),
+    ).toBe(false)
+  })
+
+  it('rejects oversized plugin settings before reading them', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.write(legacyPath, '{}')
+    const read = jest.spyOn(adapter, 'read')
+    const stat: typeof adapter.stat = adapter.stat.bind(adapter)
+    jest
+      .spyOn(adapter, 'stat')
+      .mockImplementation(async (path: string) =>
+        path === legacyPath
+          ? { type: 'file', size: MAX_ADOPTION_JSON_FILE_BYTES + 1 }
+          : stat(path),
+      )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.pluginData?.status).toBe('failed')
+    expect(read).not.toHaveBeenCalledWith(legacyPath)
+    expect(await adapter.exists('.obsidian/plugins/aider/data.json')).toBe(
+      false,
+    )
+  })
+
+  it('bounds recursive legacy JSON directory traversal', async () => {
+    const app = createTestApp()
+    const nestedPath = Array.from(
+      { length: MAX_ADOPTION_DIRECTORY_DEPTH + 2 },
+      (_, index) => `level-${index}`,
+    ).join('/')
+    await app.vault.adapter.mkdir(`.smtcmp_json_db/${nestedPath}`)
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.jsonDb?.status).toBe('failed')
+  })
+
+  it('fails legacy chat adoption when a list entry is incomplete', async () => {
+    const app = createTestApp()
+    await app.vault.adapter.mkdir('.smtcmp_chat_histories')
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/chat_list.json',
+      jsonFile([{ id: 'missing-metadata' }]),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.legacyChatHistories?.status).toBe('failed')
+    expect(
+      await app.vault.adapter.exists('.aider_chat_histories/chat_list.json'),
+    ).toBe(false)
+  })
+
+  it('retries adoption after a partial temporary write', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    const targetPath = '.obsidian/plugins/aider/data.json'
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.write(legacyPath, jsonFile({ version: 20, providers: [] }))
+    const write = adapter.write.bind(adapter)
+    jest.spyOn(adapter, 'write').mockImplementationOnce(async (path) => {
+      await write(path, '{')
+      throw new Error('disk full')
+    })
+
+    const first = await adoptAiderStorage(app)
+
+    expect(first.resources.pluginData?.status).toBe('failed')
+    expect(await adapter.exists(targetPath)).toBe(false)
+
+    const second = await adoptAiderStorage(app)
+    expect(second.resources.pluginData?.status).toBe('completed')
+    expect(await adapter.read(targetPath)).toBe(await adapter.read(legacyPath))
+  })
+
   it('keeps existing Aider plugin data when legacy plugin data also exists', async () => {
     const app = createTestApp()
 
@@ -56,6 +151,29 @@ describe('Aider storage adoption', () => {
     ).toContain('"id": "aider"')
     expect(marker.resources.pluginData?.status).toBe(
       'skipped-existing-aider-data',
+    )
+  })
+
+  it('retries a missing legacy resource when it appears later', async () => {
+    const app = createTestApp()
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    const targetPath = '.obsidian/plugins/aider/data.json'
+
+    expect((await adoptAiderStorage(app)).resources.pluginData?.status).toBe(
+      'skipped-missing-legacy-data',
+    )
+
+    await app.vault.adapter.mkdir('.obsidian/plugins/smart-composer')
+    await app.vault.adapter.write(
+      legacyPath,
+      jsonFile({ version: 20, providers: [] }),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.pluginData?.status).toBe('completed')
+    expect(await app.vault.adapter.read(targetPath)).toBe(
+      await app.vault.adapter.read(legacyPath),
     )
   })
 
@@ -109,6 +227,47 @@ describe('Aider storage adoption', () => {
     expect(
       decodeText(await app.vault.adapter.readBinary('.aider_vector_db.tar.gz')),
     ).toBe('aider-vector')
+  })
+
+  it('rejects an oversized legacy vector archive before reading it', async () => {
+    const app = createTestApp()
+    const readBinary = jest.spyOn(app.vault.adapter, 'readBinary')
+    jest.spyOn(app.vault.adapter, 'stat').mockResolvedValue({
+      type: 'file',
+      size: MAX_PGLITE_DATABASE_BYTES + 1,
+    })
+    await app.vault.adapter.writeBinary(
+      '.smtcmp_vector_db.tar.gz',
+      encodeText('oversized'),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.vectorDb?.status).toBe('failed')
+    expect(readBinary).not.toHaveBeenCalled()
+    expect(await app.vault.adapter.exists(PGLITE_DB_PATH)).toBe(false)
+  })
+
+  it('rechecks the legacy vector size after reading it', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    await adapter.writeBinary(
+      '.smtcmp_vector_db.tar.gz',
+      encodeText('small-before-read'),
+    )
+    jest
+      .spyOn(adapter, 'stat')
+      .mockImplementation(async (path) =>
+        path === '.smtcmp_vector_db.tar.gz' ? { type: 'file', size: 1 } : null,
+      )
+    jest.spyOn(adapter, 'readBinary').mockResolvedValueOnce({
+      byteLength: MAX_PGLITE_DATABASE_BYTES + 1,
+    } as ArrayBuffer)
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.vectorDb?.status).toBe('failed')
+    expect(await adapter.exists(PGLITE_DB_PATH)).toBe(false)
   })
 
   it('keeps legacy chat histories after adopting missing Aider chat histories', async () => {
@@ -192,6 +351,109 @@ describe('Aider storage adoption', () => {
       sourcePath: '.smtcmp_chat_histories',
       targetPath: '.aider_chat_histories',
     })
+  })
+
+  it('repairs a listed canonical chat whose conversation is malformed', async () => {
+    const app = createTestApp()
+    const chatMeta = {
+      schemaVersion: 3,
+      id: 'legacy-chat',
+      title: 'Legacy chat',
+      createdAt: 10,
+      updatedAt: 20,
+    }
+    const legacyChat = { ...chatMeta, messages: [] }
+
+    await app.vault.adapter.mkdir('.smtcmp_chat_histories')
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/chat_list.json',
+      jsonFile([chatMeta]),
+    )
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/legacy-chat.json',
+      jsonFile(legacyChat),
+    )
+    await app.vault.adapter.mkdir('.aider_chat_histories')
+    await app.vault.adapter.write(
+      '.aider_chat_histories/chat_list.json',
+      jsonFile([chatMeta]),
+    )
+    await app.vault.adapter.write(
+      '.aider_chat_histories/legacy-chat.json',
+      jsonFile(chatMeta),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.legacyChatHistories?.status).toBe('completed')
+    expect(
+      await app.vault.adapter.read('.aider_chat_histories/legacy-chat.json'),
+    ).toBe(jsonFile(legacyChat))
+  })
+
+  it('preserves a malformed canonical chat list instead of overwriting it', async () => {
+    const app = createTestApp()
+    const chatMeta = {
+      schemaVersion: 3,
+      id: 'legacy-chat',
+      title: 'Legacy chat',
+      createdAt: 10,
+      updatedAt: 20,
+    }
+    await app.vault.adapter.mkdir('.smtcmp_chat_histories')
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/chat_list.json',
+      jsonFile([chatMeta]),
+    )
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/legacy-chat.json',
+      jsonFile({ ...chatMeta, messages: [] }),
+    )
+    await app.vault.adapter.mkdir('.aider_chat_histories')
+    await app.vault.adapter.write(
+      '.aider_chat_histories/chat_list.json',
+      '{malformed',
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.legacyChatHistories?.status).toBe('failed')
+    expect(
+      await app.vault.adapter.read('.aider_chat_histories/chat_list.json'),
+    ).toBe('{malformed')
+    expect(
+      await app.vault.adapter.exists('.aider_chat_histories/legacy-chat.json'),
+    ).toBe(false)
+  })
+
+  it('does not adopt a legacy chat with only valid metadata', async () => {
+    const app = createTestApp()
+    const chatMeta = {
+      schemaVersion: 3,
+      id: 'metadata-only-chat',
+      title: 'Metadata only',
+      createdAt: 10,
+      updatedAt: 20,
+    }
+
+    await app.vault.adapter.mkdir('.smtcmp_chat_histories')
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/chat_list.json',
+      jsonFile([chatMeta]),
+    )
+    await app.vault.adapter.write(
+      '.smtcmp_chat_histories/metadata-only-chat.json',
+      jsonFile(chatMeta),
+    )
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.legacyChatHistories?.status).toBe('failed')
+    expect(
+      await app.vault.adapter.exists(
+        '.aider_chat_histories/metadata-only-chat.json',
+      ),
+    ).toBe(false)
   })
 
   it('skips legacy chat histories with unsafe ids before reading paths', async () => {

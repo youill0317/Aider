@@ -67,8 +67,27 @@ export default function TemplatePlugin() {
   const [searchResults, setSearchResults] = useState<Template[]>([])
 
   useEffect(() => {
-    if (queryString == null) return
-    templateManager.searchTemplates(queryString).then(setSearchResults)
+    if (queryString == null) {
+      setSearchResults([])
+      return
+    }
+
+    let active = true
+    const timeout = setTimeout(() => {
+      void templateManager
+        .searchTemplates(queryString)
+        .then((results) => {
+          if (active) setSearchResults(results)
+        })
+        .catch(() => {
+          if (active) setSearchResults([])
+        })
+    }, 150)
+
+    return () => {
+      active = false
+      clearTimeout(timeout)
+    }
   }, [queryString, templateManager])
 
   const options = useMemo(
@@ -97,7 +116,7 @@ export default function TemplatePlugin() {
           const parent = nodeToRemove.getParentOrThrow()
           parent.splice(nodeToRemove.getIndexWithinParent(), 1, parsedNodes)
           const lastNode = parsedNodes[parsedNodes.length - 1]
-          lastNode.selectEnd()
+          lastNode?.selectEnd()
         }
         closeMenu()
       })

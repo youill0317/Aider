@@ -8,6 +8,7 @@ import {
   CODEX_ISSUER,
   CODEX_REDIRECT_URI,
 } from '../../constants'
+import { postFormUrlEncoded } from '../../utils/llm/httpTransport'
 
 import { decideOAuthCallback } from './oauthCallback'
 
@@ -42,7 +43,7 @@ type CodexCallbackConfig = {
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000
 
 let codexCallbackServer: Server | undefined
-let isCodexCallbackStopping = false
+let stopActiveCodexCallback: (() => Promise<void>) | undefined
 
 export function buildCodexAuthorizeUrl(params: {
   redirectUri?: string
@@ -83,21 +84,21 @@ export async function exchangeCodexCodeForTokens(params: {
   redirectUri?: string
   pkceVerifier: string
 }): Promise<CodexTokenResponse> {
-  const response = await fetch(`${CODEX_ISSUER}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code: params.code,
-      redirect_uri: params.redirectUri ?? CODEX_REDIRECT_URI,
-      client_id: CODEX_CLIENT_ID,
-      code_verifier: params.pkceVerifier,
-    }).toString(),
-  })
-  if (!response.ok) {
-    throw new Error(`Codex token exchange failed: ${response.status}`)
+  try {
+    return await postFormUrlEncoded<CodexTokenResponse>(
+      `${CODEX_ISSUER}/oauth/token`,
+      {
+        grant_type: 'authorization_code',
+        code: params.code,
+        redirect_uri: params.redirectUri ?? CODEX_REDIRECT_URI,
+        client_id: CODEX_CLIENT_ID,
+        code_verifier: params.pkceVerifier,
+      },
+      { fetchFn: fetch },
+    )
+  } catch (error) {
+    throw mapCodexTokenError(error, 'exchange')
   }
-  return (await response.json()) as CodexTokenResponse
 }
 
 export async function startCodexCallbackServer(params: {
@@ -119,7 +120,7 @@ export async function startCodexCallbackServer(params: {
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      finalize(
+      void finalize(
         new Error('OAuth callback timeout - authorization took too long'),
       )
     }, timeoutMs ?? CALLBACK_TIMEOUT_MS)
@@ -143,7 +144,7 @@ export async function startCodexCallbackServer(params: {
         res.statusCode = decision.statusCode
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.end(decision.responseBody)
-        finalize(decision.error)
+        if (decision.terminal) void finalize(decision.error)
         return
       }
 
@@ -152,30 +153,37 @@ export async function startCodexCallbackServer(params: {
       res.end(
         '<!doctype html><html><head><title>Authorization Successful</title></head><body><p>You can close this window.</p><script>setTimeout(() => window.close(), 2000)</script></body></html>',
       )
-      finalize(undefined, decision.code)
+      void finalize(undefined, decision.code)
     })
 
-    const finalize = (error?: Error, code?: string) => {
-      if (isCodexCallbackStopping) return
-      isCodexCallbackStopping = true
+    let finalizePromise: Promise<void> | undefined
+    const finalize = (error?: Error, code?: string): Promise<void> => {
+      if (finalizePromise) return finalizePromise
       clearTimeout(timeout)
-      server.close(() => {
-        codexCallbackServer = undefined
-        isCodexCallbackStopping = false
-        if (error) {
-          reject(error)
-          return
-        }
-        if (code) {
-          resolve(code)
-          return
-        }
-        reject(new Error('OAuth callback failed'))
+      finalizePromise = new Promise<void>((resolveClose) => {
+        server.close(() => {
+          codexCallbackServer = undefined
+          if (stopActiveCodexCallback === stopCurrent) {
+            stopActiveCodexCallback = undefined
+          }
+          if (error) {
+            reject(error)
+          } else if (code) {
+            resolve(code)
+          } else {
+            reject(new Error('OAuth callback failed'))
+          }
+          resolveClose()
+        })
       })
+      return finalizePromise
     }
+    const stopCurrent = () =>
+      finalize(new Error('OAuth callback was cancelled'))
+    stopActiveCodexCallback = stopCurrent
 
     server.on('error', (error) => {
-      finalize(
+      void finalize(
         error instanceof Error
           ? error
           : new Error('OAuth callback server error'),
@@ -189,6 +197,10 @@ export async function startCodexCallbackServer(params: {
 }
 
 export async function stopCodexCallbackServer(): Promise<void> {
+  if (stopActiveCodexCallback) {
+    await stopActiveCodexCallback()
+    return
+  }
   if (!codexCallbackServer) return
   await new Promise<void>((resolve) => {
     codexCallbackServer?.close(() => resolve())
@@ -199,19 +211,32 @@ export async function stopCodexCallbackServer(): Promise<void> {
 export async function refreshCodexAccessToken(
   refreshToken: string,
 ): Promise<CodexTokenResponse> {
-  const response = await fetch(`${CODEX_ISSUER}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: CODEX_CLIENT_ID,
-    }).toString(),
-  })
-  if (!response.ok) {
-    throw new Error(`Codex token refresh failed: ${response.status}`)
+  try {
+    return await postFormUrlEncoded<CodexTokenResponse>(
+      `${CODEX_ISSUER}/oauth/token`,
+      {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: CODEX_CLIENT_ID,
+      },
+      { fetchFn: fetch },
+    )
+  } catch (error) {
+    throw mapCodexTokenError(error, 'refresh')
   }
-  return (await response.json()) as CodexTokenResponse
+}
+
+function mapCodexTokenError(
+  error: unknown,
+  operation: 'exchange' | 'refresh',
+): unknown {
+  if (error instanceof Error) {
+    const status = error.message.match(/^Request failed: (\d+)$/)?.[1]
+    if (status) {
+      return new Error(`Codex token ${operation} failed: ${status}`)
+    }
+  }
+  return error
 }
 
 export function parseCodexJwtClaims(

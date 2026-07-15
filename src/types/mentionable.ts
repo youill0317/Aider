@@ -1,5 +1,10 @@
 import { TFile, TFolder } from 'obsidian'
 
+export const MAX_MENTIONABLE_IMAGES = 8
+export const MAX_MENTIONABLE_IMAGE_BYTES = 8 * 1024 * 1024
+export const MAX_MENTIONABLE_IMAGE_DATA_CHARS = 12 * 1024 * 1024
+export const MAX_MENTIONABLE_IMAGE_TOTAL_DATA_CHARS = 32 * 1024 * 1024
+
 export type MentionableFile = {
   type: 'file'
   file: TFile

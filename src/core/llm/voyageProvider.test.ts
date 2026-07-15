@@ -7,6 +7,7 @@ import { VoyageProvider } from './voyageProvider'
 
 describe('VoyageProvider', () => {
   afterEach(() => {
+    jest.useRealTimers()
     jest.restoreAllMocks()
   })
 
@@ -24,9 +25,11 @@ describe('VoyageProvider', () => {
       id: 'voyage',
       apiKey: 'voyage-secret',
     })
+    const controller = new AbortController()
 
     const embedding = await provider.getEmbedding('voyage-4', 'hello', {
       dimensions: 512,
+      signal: controller.signal,
     })
 
     expect(embedding).toEqual([0.1, 0.2, 0.3])
@@ -43,6 +46,7 @@ describe('VoyageProvider', () => {
           model: 'voyage-4',
           output_dimension: 512,
         }),
+        signal: expect.any(AbortSignal),
       },
     )
   })
@@ -69,11 +73,12 @@ describe('VoyageProvider', () => {
       id: 'voyage',
       apiKey: 'voyage-secret',
     })
+    const controller = new AbortController()
 
     const result = await provider.getContextualEmbeddings(
       'voyage-context-4',
       'Full markdown document',
-      { inputType: 'document' },
+      { inputType: 'document', signal: controller.signal },
     )
 
     expect(result).toEqual({
@@ -97,6 +102,7 @@ describe('VoyageProvider', () => {
           input_type: 'document',
           enable_auto_chunking: true,
         }),
+        signal: expect.any(AbortSignal),
       },
     )
     const requestInit = fetchMock.mock.calls[0]?.[1]
@@ -146,6 +152,30 @@ describe('VoyageProvider', () => {
     )
   })
 
+  it('rejects contextual document chunks without returned text', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ data: [{ embedding: [0.1, 0.2] }] }],
+        }),
+        { status: 200 },
+      ),
+    )
+    const provider = new VoyageProvider({
+      type: 'voyage',
+      id: 'voyage',
+      apiKey: 'voyage-secret',
+    })
+
+    await expect(
+      provider.getContextualEmbeddings('voyage-context-4', 'document', {
+        inputType: 'document',
+      }),
+    ).rejects.toThrow(
+      'Voyage AI contextual document response did not include chunk text.',
+    )
+  })
+
   it('requires an API key before requesting embeddings', async () => {
     const fetchMock = jest.spyOn(globalThis, 'fetch')
     const provider = new VoyageProvider({
@@ -187,5 +217,118 @@ describe('VoyageProvider', () => {
     await expect(
       provider.getEmbedding('voyage-4', 'hello'),
     ).rejects.toBeInstanceOf(LLMRateLimitExceededException)
+  })
+
+  it('preserves caller cancellation', async () => {
+    let requestSignal: AbortSignal | undefined
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined
+          return new Promise<Response>((_resolve, reject) => {
+            if (requestSignal?.aborted) {
+              reject(requestSignal.reason)
+              return
+            }
+            requestSignal?.addEventListener(
+              'abort',
+              () => reject(requestSignal?.reason),
+              { once: true },
+            )
+          })
+        },
+      )
+    const provider = new VoyageProvider({
+      type: 'voyage',
+      id: 'voyage',
+      apiKey: 'voyage-secret',
+    })
+    const controller = new AbortController()
+    const reason = new Error('caller cancelled')
+
+    const request = provider.getEmbedding('voyage-4', 'hello', {
+      signal: controller.signal,
+    })
+    controller.abort(reason)
+
+    await expect(request).rejects.toBe(reason)
+    expect(requestSignal?.aborted).toBe(true)
+  })
+
+  it('aborts contextual embedding requests after 60 seconds', async () => {
+    jest.useFakeTimers()
+    let requestSignal: AbortSignal | undefined
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined
+          return new Promise<Response>((_resolve, reject) => {
+            requestSignal?.addEventListener(
+              'abort',
+              () => reject(requestSignal?.reason),
+              { once: true },
+            )
+          })
+        },
+      )
+    const provider = new VoyageProvider({
+      type: 'voyage',
+      id: 'voyage',
+      apiKey: 'voyage-secret',
+    })
+
+    const rejection = expect(
+      provider.getContextualEmbeddings('voyage-context-4', 'document', {
+        inputType: 'document',
+      }),
+    ).rejects.toThrow('Voyage AI request timed out.')
+    await jest.advanceTimersByTimeAsync(60_000)
+
+    await rejection
+    expect(requestSignal?.aborted).toBe(true)
+  })
+
+  it('rejects responses with a declared size over 8 MiB', async () => {
+    const cancel = jest.fn()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-length': String(8 * 1024 * 1024 + 1) },
+      }),
+    )
+    const provider = new VoyageProvider({
+      type: 'voyage',
+      id: 'voyage',
+      apiKey: 'voyage-secret',
+    })
+
+    await expect(provider.getEmbedding('voyage-4', 'hello')).rejects.toThrow(
+      'Voyage AI response exceeded the 8 MiB size limit.',
+    )
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops reading streamed responses that exceed 8 MiB', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8 * 1024 * 1024 + 1))
+        controller.close()
+      },
+    })
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(body, { status: 200 }))
+    const provider = new VoyageProvider({
+      type: 'voyage',
+      id: 'voyage',
+      apiKey: 'voyage-secret',
+    })
+
+    await expect(provider.getEmbedding('voyage-4', 'hello')).rejects.toThrow(
+      'Voyage AI response exceeded the 8 MiB size limit.',
+    )
   })
 })

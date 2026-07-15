@@ -15,6 +15,7 @@ type ContextualEmbeddingProvider = {
     options: {
       inputType: ContextualEmbeddingInputType
       dimensions?: number
+      signal?: AbortSignal
     },
   ) => Promise<ContextualEmbeddingsResult>
 }
@@ -37,15 +38,31 @@ export const getEmbeddingModelClient = ({
     settings,
     providerId: embeddingModel.providerId,
   })
+  const provider = settings.providers.find(
+    ({ id }) => id === embeddingModel.providerId,
+  )
+  if (!provider) {
+    throw new Error(`Provider ${embeddingModel.providerId} not found`)
+  }
 
   const embeddingModelClient: EmbeddingModelClient = {
     id: embeddingModel.id,
     providerType: embeddingModel.providerType,
     model: embeddingModel.model,
     dimension: embeddingModel.dimension,
-    getEmbedding: (text: string) =>
+    indexProfile: JSON.stringify([
+      'embedding-source-v1',
+      provider.type,
+      provider.id,
+      embeddingModel.model,
+      embeddingModel.dimension,
+      embeddingModel.outputDimension ?? null,
+      getPublicBaseUrl(provider.baseUrl),
+    ]),
+    getEmbedding: (text: string, signal?: AbortSignal) =>
       providerClient.getEmbedding(embeddingModel.model, text, {
         dimensions: embeddingModel.outputDimension,
+        ...(signal && { signal }),
       }),
   }
 
@@ -65,7 +82,22 @@ export const getEmbeddingModelClient = ({
       providerClient.getContextualEmbeddings(embeddingModel.model, text, {
         dimensions: embeddingModel.outputDimension,
         inputType: options.inputType,
+        ...(options.signal && { signal: options.signal }),
       }),
+  }
+}
+
+function getPublicBaseUrl(baseUrl?: string): string | null {
+  if (!baseUrl) return null
+  try {
+    const url = new URL(baseUrl)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return baseUrl.split(/[?#]/, 1)[0].replace(/\/\/[^/@]*@/, '//')
   }
 }
 

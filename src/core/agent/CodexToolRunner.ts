@@ -13,6 +13,7 @@ import { extractAgentText, statusMessage } from './agent-output'
 import { createCodexExecRuntime } from './codex/createCodexExecRuntime'
 import type {
   CodexAgentEvent,
+  CodexApprovalPolicy,
   CodexExecRequest,
   CodexRunHandle,
   CodexRuntime,
@@ -22,11 +23,18 @@ import type {
 export const CODEX_TOOL_NAME = 'run_codex'
 
 const MAX_CODEX_TOOL_OUTPUT_CHARS = 24_000
+const MAX_CODEX_TOOL_ARGUMENT_CHARS = 1024 * 1024
+const MAX_ALLOWED_CONVERSATIONS = 1_000
+const MAX_ALLOWED_EXECUTIONS_PER_CONVERSATION = 100
 
 const codexToolArgsSchema = z.object({
-  prompt: z.string().trim().min(1),
-  model: z.string().optional(),
-  summary: z.string().optional(),
+  prompt: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256 * 1024),
+  model: z.string().max(512).optional(),
+  summary: z.string().max(512).optional(),
 })
 
 type CodexToolArgs = z.infer<typeof codexToolArgsSchema>
@@ -41,6 +49,7 @@ type CodexToolRunnerOptions = {
 }
 
 type CodexExecutionKeyParams = {
+  readonly approvalPolicy: CodexApprovalPolicy
   readonly command: string
   readonly cwd: string
   readonly model?: string
@@ -60,6 +69,8 @@ export class CodexToolRunner {
     Set<string>
   >()
   private readonly activeRuns = new Map<string, CodexRunHandle>()
+  private startingRun = false
+  private disposed = false
 
   constructor({
     app,
@@ -76,6 +87,7 @@ export class CodexToolRunner {
   }
 
   cleanup(): void {
+    this.disposed = true
     this.activeRuns.forEach((run) => run.abort())
     this.activeRuns.clear()
     this.allowedExecutionsByConversation.clear()
@@ -83,7 +95,7 @@ export class CodexToolRunner {
   }
 
   isAvailable(): boolean {
-    return !this.disabled && this.settings.agent.codex.enabled
+    return !this.disposed && !this.disabled && this.settings.agent.codex.enabled
   }
 
   getToolDefinition(): RequestTool {
@@ -123,11 +135,30 @@ export class CodexToolRunner {
     let allowedExecutions =
       this.allowedExecutionsByConversation.get(conversationId)
     if (!allowedExecutions) {
+      if (
+        this.allowedExecutionsByConversation.size >= MAX_ALLOWED_CONVERSATIONS
+      ) {
+        const oldestConversation = this.allowedExecutionsByConversation
+          .keys()
+          .next()
+        if (!oldestConversation.done) {
+          this.allowedExecutionsByConversation.delete(oldestConversation.value)
+        }
+      }
       allowedExecutions = new Set<string>()
       this.allowedExecutionsByConversation.set(
         conversationId,
         allowedExecutions,
       )
+    }
+    if (
+      !allowedExecutions.has(executionKey) &&
+      allowedExecutions.size >= MAX_ALLOWED_EXECUTIONS_PER_CONVERSATION
+    ) {
+      const oldestExecution = allowedExecutions.values().next()
+      if (!oldestExecution.done) {
+        allowedExecutions.delete(oldestExecution.value)
+      }
     }
     allowedExecutions.add(executionKey)
   }
@@ -167,7 +198,7 @@ export class CodexToolRunner {
         error: 'Codex tool is only available in Obsidian desktop when enabled.',
       }
     }
-    if (this.activeRuns.size > 0) {
+    if (this.startingRun || this.activeRuns.size > 0) {
       return {
         status: ToolCallResponseStatus.Error,
         error: 'Another Codex run is already active.',
@@ -181,24 +212,43 @@ export class CodexToolRunner {
         error: parsedArgs.error,
       }
     }
+    if (signal?.aborted) {
+      return { status: ToolCallResponseStatus.Aborted }
+    }
 
-    const runtime = await this.getRuntime()
     const request = this.buildExecRequest(parsedArgs.data)
     let lastAgentText = ''
-    const run = runtime.execute(request, {
-      onError: () => undefined,
-      onEvent: (event) => {
-        onEvent?.(event)
-        const text = extractAgentText(event)
-        if (text.length > 0) {
-          lastAgentText = text
-        }
-      },
-    })
-    this.activeRuns.set(id, run)
+    let run: CodexRunHandle
+    this.startingRun = true
+    try {
+      const runtime = await this.getRuntime()
+      if (!this.isAvailable() || signal?.aborted) {
+        return { status: ToolCallResponseStatus.Aborted }
+      }
+      run = runtime.execute(request, {
+        onError: () => undefined,
+        onEvent: (event) => {
+          onEvent?.(event)
+          const text = extractAgentText(event)
+          if (text.length > 0) {
+            lastAgentText = text
+          }
+        },
+      })
+      this.activeRuns.set(id, run)
+    } catch (error) {
+      return {
+        status: ToolCallResponseStatus.Error,
+        error: boundAndRedact(
+          error instanceof Error ? error.message : String(error),
+        ),
+      }
+    } finally {
+      this.startingRun = false
+    }
 
     const abortListener = () => run.abort()
-    signal?.addEventListener('abort', abortListener)
+    signal?.addEventListener('abort', abortListener, { once: true })
 
     try {
       const result = await run.done
@@ -232,7 +282,6 @@ export class CodexToolRunner {
       return false
     }
     run.abort()
-    this.activeRuns.delete(id)
     return true
   }
 
@@ -255,6 +304,7 @@ export class CodexToolRunner {
           prompt: '',
         }
     return buildExecutionKey({
+      approvalPolicy: this.settings.agent.codex.approvalPolicy,
       command: this.settings.agent.codex.command,
       cwd: this.resolveDefaultCwd(),
       model: normalizeOptionalString(codexArgs.model),
@@ -270,6 +320,9 @@ export class CodexToolRunner {
         readonly error: string
       } {
     try {
+      if (args && args.length > MAX_CODEX_TOOL_ARGUMENT_CHARS) {
+        throw new Error('arguments exceed the 1 MiB limit')
+      }
       const raw = args ? JSON.parse(args) : {}
       return {
         success: true,
@@ -306,6 +359,7 @@ export class CodexToolRunner {
 }
 
 function buildExecutionKey({
+  approvalPolicy,
   command,
   cwd,
   model,
@@ -313,6 +367,7 @@ function buildExecutionKey({
   sandbox,
 }: CodexExecutionKeyParams): string {
   return JSON.stringify({
+    approvalPolicy,
     command,
     cwd,
     model,

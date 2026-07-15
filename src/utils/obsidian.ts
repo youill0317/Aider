@@ -9,15 +9,6 @@ export async function readTFileContent(
   return await vault.cachedRead(file)
 }
 
-export async function readMultipleTFiles(
-  files: TFile[],
-  vault: Vault,
-): Promise<string[]> {
-  // Read files in parallel
-  const readPromises = files.map((file) => readTFileContent(file, vault))
-  return await Promise.all(readPromises)
-}
-
 export function getNestedFiles(folder: TFolder, vault: Vault): TFile[] {
   const files: TFile[] = []
   for (const child of folder.children) {

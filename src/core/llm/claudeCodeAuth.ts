@@ -55,7 +55,7 @@ export async function exchangeClaudeCodeForTokens(params: {
   code: string
   pkceVerifier: string
   redirectUri?: string
-  state?: string
+  state: string
 }): Promise<ClaudeCodeTokenResponse> {
   const parsed = parseAuthorizationCode(params.code, params.state)
   return postTokenRequest({
@@ -80,16 +80,15 @@ export async function refreshClaudeCodeAccessToken(
 
 function parseAuthorizationCode(
   code: string,
-  state?: string,
-): { code: string; state?: string } {
-  if (code.includes('#')) {
-    const [actualCode, actualState] = code.split('#')
-    return {
-      code: actualCode,
-      state: actualState || state,
-    }
+  expectedState: string,
+): { code: string; state: string } {
+  const separatorIndex = code.indexOf('#')
+  const actualCode = code.slice(0, separatorIndex)
+  const actualState = code.slice(separatorIndex + 1)
+  if (!expectedState || separatorIndex <= 0 || actualState !== expectedState) {
+    throw new Error('Invalid OAuth state')
   }
-  return { code, state }
+  return { code: actualCode, state: expectedState }
 }
 
 async function postTokenRequest(

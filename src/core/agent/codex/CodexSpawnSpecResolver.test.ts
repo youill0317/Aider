@@ -1,6 +1,86 @@
 import { CodexSpawnSpecResolver } from './CodexSpawnSpecResolver'
 
 describe('CodexSpawnSpecResolver', () => {
+  it('passes only the environment needed by Codex', () => {
+    const resolver = new CodexSpawnSpecResolver()
+
+    const spawnSpec = resolver.resolve(['codex', 'exec'], {
+      env: {
+        ALL_PROXY: 'socks5://proxy.example:1080',
+        CODEX_ACCESS_TOKEN: 'access-token',
+        CODEX_API_KEY: 'codex-api-secret',
+        CODEX_HOME: '/home/me/.codex',
+        DATABASE_URL: 'database-secret',
+        HOME: '/home/me',
+        HTTP_PROXY: 'http://proxy.example:8080',
+        HTTPS_PROXY: 'http://proxy.example:8080',
+        LANG: 'en_US.UTF-8',
+        NO_PROXY: 'localhost,127.0.0.1',
+        NODE_OPTIONS: '--require=/tmp/injected.js',
+        OPENAI_API_KEY: 'api-secret',
+        PATH: '/usr/bin',
+        TMPDIR: '/tmp',
+      },
+      platform: 'linux',
+    })
+
+    expect(spawnSpec.env).toEqual(
+      expect.objectContaining({
+        ALL_PROXY: 'socks5://proxy.example:1080',
+        CODEX_ACCESS_TOKEN: 'access-token',
+        CODEX_API_KEY: 'codex-api-secret',
+        CODEX_HOME: '/home/me/.codex',
+        HOME: '/home/me',
+        HTTP_PROXY: 'http://proxy.example:8080',
+        HTTPS_PROXY: 'http://proxy.example:8080',
+        LANG: 'en_US.UTF-8',
+        NO_PROXY: 'localhost,127.0.0.1',
+        PATH: expect.stringContaining('/usr/bin'),
+        TMPDIR: '/tmp',
+      }),
+    )
+    expect(spawnSpec.env).not.toHaveProperty('DATABASE_URL')
+    expect(spawnSpec.env).not.toHaveProperty('NODE_OPTIONS')
+    expect(spawnSpec.env).not.toHaveProperty('OPENAI_API_KEY')
+  })
+
+  it('passes custom provider keys declared in the Codex config', () => {
+    const resolver = new CodexSpawnSpecResolver()
+
+    const spawnSpec = resolver.resolve(['codex', 'exec'], {
+      env: {
+        CUSTOM_PROVIDER_KEY: 'provider-secret',
+        DATABASE_URL: 'database-secret',
+        HOME: '/home/me',
+        INLINE_PROVIDER_KEY: 'inline-secret',
+        NODE_OPTIONS: '--require=/tmp/injected.js',
+        PATH: '/usr/bin',
+      },
+      fileSystem: {
+        existsFile: () => false,
+        readTextFile: (filePath) => {
+          expect(filePath).toBe('/home/me/.codex/config.toml')
+          return [
+            'large_integer = 9223372036854775807',
+            '[model_providers]',
+            'inline = { "env_key" = "INLINE_PROVIDER_KEY" }',
+            'unsafe = { env_key = "NODE_OPTIONS" }',
+            '[model_providers.custom]',
+            'env_key = "CUSTOM_PROVIDER_KEY"',
+            '[mcp_servers.database]',
+            'env_key = "DATABASE_URL"',
+          ].join('\n')
+        },
+      },
+      platform: 'linux',
+    })
+
+    expect(spawnSpec.env.CUSTOM_PROVIDER_KEY).toBe('provider-secret')
+    expect(spawnSpec.env.INLINE_PROVIDER_KEY).toBe('inline-secret')
+    expect(spawnSpec.env).not.toHaveProperty('DATABASE_URL')
+    expect(spawnSpec.env).not.toHaveProperty('NODE_OPTIONS')
+  })
+
   it('resolves codex from an enhanced Windows npm PATH location', () => {
     // Given: Obsidian starts with a minimal PATH but APPDATA points to npm.
     const resolver = new CodexSpawnSpecResolver()
@@ -13,6 +93,8 @@ describe('CodexSpawnSpecResolver', () => {
       env: {
         APPDATA: 'C:\\Users\\me\\AppData\\Roaming',
         PATH: 'C:\\Windows\\System32',
+        SystemRoot: 'C:\\Windows',
+        TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp',
       },
       fileSystem: {
         existsFile: (filePath) => existingFiles.has(filePath),
@@ -27,6 +109,11 @@ describe('CodexSpawnSpecResolver', () => {
     )
     expect(spawnSpec.args).toEqual(['exec', '--json'])
     expect(spawnSpec.env.PATH).toContain('C:\\Users\\me\\AppData\\Roaming\\npm')
+    expect(spawnSpec.env).toMatchObject({
+      APPDATA: 'C:\\Users\\me\\AppData\\Roaming',
+      SystemRoot: 'C:\\Windows',
+      TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp',
+    })
   })
 
   it('wraps Windows cmd shims through cmd.exe', () => {
@@ -96,6 +183,23 @@ describe('CodexSpawnSpecResolver', () => {
       expect(spawnSpec.args[3]).toBe(
         `"${command} ^^^"exec^^^" ^^^"--model^^^" ${escaped}"`,
       )
+    },
+  )
+
+  it.each(['gpt\rwhoami', 'gpt\nwhoami', 'gpt\r\nwhoami'])(
+    'rejects line breaks in Windows cmd shim arguments',
+    (model) => {
+      const resolver = new CodexSpawnSpecResolver()
+      const command = 'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd'
+
+      expect(() =>
+        resolver.resolve(['codex', 'exec', '--model', model], {
+          env: { APPDATA: 'C:\\Users\\me\\AppData\\Roaming', PATH: '' },
+          fileSystem: { existsFile: (filePath) => filePath === command },
+          pathTools: windowsPathTools,
+          platform: 'win32',
+        }),
+      ).toThrow('cannot contain line breaks')
     },
   )
 })

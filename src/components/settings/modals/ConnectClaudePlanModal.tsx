@@ -45,7 +45,8 @@ function ConnectClaudePlanModalComponent({
   const [state, setState] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
 
-  const hasAuthData = authorizeUrl.length > 0 && pkceVerifier.length > 0
+  const hasAuthData =
+    authorizeUrl.length > 0 && pkceVerifier.length > 0 && state.length > 0
 
   useEffect(() => {
     ;(async () => {

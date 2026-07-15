@@ -172,9 +172,11 @@ function ToolCallItem({
 
   return (
     <div className="smtcmp-toolcall">
-      <div
+      <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="smtcmp-toolcall-header"
+        aria-expanded={isOpen}
       >
         <div className="smtcmp-toolcall-header-icon">
           {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -193,7 +195,7 @@ function ToolCallItem({
         <div className="smtcmp-toolcall-header-icon smtcmp-toolcall-header-icon--status">
           <StatusIcon status={response.status} />
         </div>
-      </div>
+      </button>
       {isOpen && (
         <div className="smtcmp-toolcall-content">
           <div className="smtcmp-toolcall-content-section">
@@ -258,6 +260,7 @@ function ToolCallItem({
                 }
               />
               <button
+                type="button"
                 onClick={() => {
                   handleReject()
                   setIsOpen(false)
@@ -269,7 +272,9 @@ function ToolCallItem({
           )}
           {response.status === ToolCallResponseStatus.Running && (
             <div className="smtcmp-toolcall-footer-actions">
-              <button onClick={handleAbort}>Abort</button>
+              <button type="button" onClick={handleAbort}>
+                Abort
+              </button>
             </div>
           )}
         </div>

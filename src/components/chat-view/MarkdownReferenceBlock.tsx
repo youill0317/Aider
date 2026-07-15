@@ -6,8 +6,8 @@ import { useApp } from '../../contexts/app-context'
 import { useDarkModeContext } from '../../contexts/dark-mode-context'
 import { openMarkdownFile, readTFileContent } from '../../utils/obsidian'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
 import { MemoizedSyntaxHighlighterWrapper } from './SyntaxHighlighterWrapper'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 export default function MarkdownReferenceBlock({
   filename,
@@ -57,15 +57,17 @@ export default function MarkdownReferenceBlock({
       <div className={clsx('smtcmp-code-block', filename && 'has-filename')}>
         <div className="smtcmp-code-block-header">
           {filename && (
-            <div
+            <button
+              type="button"
               className="smtcmp-code-block-header-filename"
               onClick={handleOpenFile}
             >
               {filename}
-            </div>
+            </button>
           )}
           <div className="smtcmp-code-block-header-button-container">
             <button
+              type="button"
               className="clickable-icon smtcmp-code-block-header-button"
               onClick={() => {
                 setIsPreviewMode(!isPreviewMode)
@@ -78,7 +80,7 @@ export default function MarkdownReferenceBlock({
         </div>
         {isPreviewMode ? (
           <div className="smtcmp-code-block-obsidian-markdown">
-            <ObsidianMarkdown content={blockContent} scale="sm" />
+            <UntrustedMarkdown content={blockContent} scale="sm" />
           </div>
         ) : (
           <MemoizedSyntaxHighlighterWrapper

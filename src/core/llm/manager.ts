@@ -1,3 +1,4 @@
+import { assertProviderRouteTrusted } from '../../security/config-trust'
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import { ChatModel } from '../../types/chat-model.types'
 import { LLMProvider } from '../../types/provider.types'
@@ -41,6 +42,7 @@ export function getProviderClient({
   if (!provider) {
     throw new Error(`Provider ${providerId} not found`)
   }
+  assertProviderRouteTrusted(provider)
 
   const onProviderUpdate = setSettings
     ? createProviderUpdateHandler({

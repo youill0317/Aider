@@ -17,11 +17,20 @@ import { DatabaseManager } from './database/DatabaseManager'
 import { PGLiteAbortedException } from './database/exception'
 import { migrateToJsonDatabase } from './database/json/migrateToJsonDatabase'
 import {
+  isMcpServerTrusted,
+  providerRoutesMatch,
+  revokeMcpServerTrust,
+  revokeProviderRouteTrust,
+  trustMcpServer,
+  trustProviderRoute,
+} from './security/config-trust'
+import {
   SecretStore,
   createSecretStore,
 } from './security/secret-store/secret-store'
 import {
   hydrateSettingsSecrets,
+  persistRecognizedRawSettingsSecrets,
   persistSettingsUpdate,
   sanitizeSettingsForPersistence,
 } from './security/secret-store/settings-secrets'
@@ -50,7 +59,7 @@ export default class SmartComposerPlugin extends Plugin {
   private ragEngineInitPromise: Promise<RAGEngine> | null = null
   private mcpManagerInitPromise: Promise<McpManager> | null = null
   private secretStore: SecretStore | null = null
-  private settingsSaveQueue: Promise<void> = Promise.resolve()
+  private settingsSaveQueue: Promise<void> | null = null
   private timeoutIds: ReturnType<typeof setTimeout>[] = [] // Use ReturnType instead of number
   private unloading = false
 
@@ -197,14 +206,21 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   async loadSettings() {
+    const rawData = await this.loadData()
     const { settings: parsedSettings, safeToPersist } =
-      parseSmartComposerSettingsResult(await this.loadData())
+      parseSmartComposerSettingsResult(rawData)
     const secretStore = this.getSecretStore()
     this.settings = await hydrateSettingsSecrets(parsedSettings, secretStore)
     if (safeToPersist) {
       await this.saveData(
         await sanitizeSettingsForPersistence(this.settings, secretStore),
       ) // Save updated settings
+    } else {
+      await persistRecognizedRawSettingsSecrets({
+        rawData,
+        secretStore,
+        saveData: (settings) => this.saveData(settings),
+      })
     }
   }
 
@@ -216,25 +232,37 @@ export default class SmartComposerPlugin extends Plugin {
 ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       return
     }
-
-    this.settingsSaveQueue = this.settingsSaveQueue
+    const validatedSettings = validationResult.data
+    const previousSave = this.settingsSaveQueue
+    const save = (previousSave ?? Promise.resolve())
       .catch(() => undefined)
-      .then(async () => {
-        const previousSettings = this.settings
-        const secretStore = this.getSecretStore()
-        await persistSettingsUpdate({
-          previousSettings,
-          nextSettings: newSettings,
-          secretStore,
-          publishRuntimeSettings: (settings) => {
-            this.settings = settings
-          },
-          saveData: (settings) => this.saveData(settings),
-        })
-      })
-    await this.settingsSaveQueue
-    this.ragEngine?.setSettings(newSettings)
-    this.settingsChangeListeners.forEach((listener) => listener(newSettings))
+      .then(() => this.persistSettingsUpdate(validatedSettings))
+    this.settingsSaveQueue = save
+    try {
+      await save
+    } finally {
+      if (this.settingsSaveQueue === save) {
+        this.settingsSaveQueue = null
+      }
+    }
+  }
+
+  private async persistSettingsUpdate(
+    nextSettings: SmartComposerSettings,
+  ): Promise<void> {
+    const previousSettings = this.settings
+    const secretStore = this.getSecretStore()
+    await persistSettingsUpdate({
+      previousSettings,
+      nextSettings,
+      secretStore,
+      publishRuntimeSettings: (settings) => {
+        this.settings = settings
+      },
+      saveData: (settings) => this.saveData(settings),
+    })
+    this.ragEngine?.setSettings(nextSettings)
+    this.settingsChangeListeners.forEach((listener) => listener(nextSettings))
   }
 
   private getSecretStore(): SecretStore {
@@ -385,6 +413,8 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
           registerSettingsListener: (
             listener: (settings: SmartComposerSettings) => void,
           ) => this.addSettingsChangeListener(listener),
+          isServerTrusted: (config) =>
+            isMcpServerTrusted(config, this.getSecretStore()),
         })
         try {
           await manager.initialize()
@@ -402,6 +432,57 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     }
 
     return this.mcpManagerInitPromise
+  }
+
+  async trustMcpServer(serverId: string): Promise<void> {
+    const config = this.settings.mcp.servers.find(
+      (server) => server.id === serverId,
+    )
+    if (!config) throw new Error(`MCP server ${serverId} not found`)
+    await trustMcpServer(config, this.getSecretStore())
+    if (this.mcpManager) {
+      await this.mcpManager.handleSettingsUpdate(this.settings)
+    }
+  }
+
+  async revokeMcpServerTrust(serverId: string): Promise<void> {
+    await revokeMcpServerTrust(serverId, this.getSecretStore())
+  }
+
+  async trustProviderRoute(
+    provider: SmartComposerSettings['providers'][number],
+  ): Promise<void> {
+    await trustProviderRoute(provider, this.getSecretStore())
+  }
+
+  async setTrustedProviderSettings(
+    provider: SmartComposerSettings['providers'][number],
+    newSettings: SmartComposerSettings,
+    previousProvider?: SmartComposerSettings['providers'][number],
+  ): Promise<void> {
+    await this.trustProviderRoute(provider)
+    try {
+      await this.setSettings(newSettings)
+    } catch (error) {
+      const activeProvider = this.settings.providers.find(
+        (candidate) =>
+          candidate.id === provider.id && candidate.type === provider.type,
+      )
+      if (!activeProvider || !providerRoutesMatch(activeProvider, provider)) {
+        if (previousProvider) {
+          await this.trustProviderRoute(previousProvider)
+        } else {
+          await this.revokeProviderRouteTrust(provider)
+        }
+      }
+      throw error
+    }
+  }
+
+  async revokeProviderRouteTrust(
+    provider: SmartComposerSettings['providers'][number],
+  ): Promise<void> {
+    await revokeProviderRouteTrust(provider, this.getSecretStore())
   }
 
   getCodexToolRunner(): CodexToolRunner {
@@ -446,15 +527,22 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
 
   private async adoptSmartComposerData() {
     try {
-      await adoptAiderStorage(this.app)
+      const marker = await adoptAiderStorage(this.app)
+      if (
+        Object.entries(marker.resources).some(
+          ([resource, status]) =>
+            resource !== 'secrets' && status?.status === 'failed',
+        )
+      ) {
+        throw new Error('Aider storage adoption is incomplete')
+      }
     } catch (error) {
-      console.error(
-        'Failed to adopt Smart Composer data into Aider:',
-        summarizeAdoptionError(error),
-      )
+      const summary = summarizeAdoptionError(error)
+      console.error('Failed to adopt Smart Composer data into Aider:', summary)
       new Notice(
         'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
       )
+      throw new Error(summary)
     }
   }
 

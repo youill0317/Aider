@@ -12,6 +12,17 @@ class TestRepository extends AbstractJsonRepository<Row, { value: string }> {
   protected parseFileName(fileName: string): { value: string } | null {
     return { value: fileName }
   }
+
+  protected isValidRow(row: unknown): row is Row {
+    return (
+      typeof row === 'object' &&
+      row !== null &&
+      'fileName' in row &&
+      typeof row.fileName === 'string' &&
+      'value' in row &&
+      typeof row.value === 'string'
+    )
+  }
 }
 
 function createAdapter() {
@@ -22,6 +33,7 @@ function createAdapter() {
     read: jest.fn(),
     remove: jest.fn<Promise<void>, [string]>(),
     rename: jest.fn<Promise<void>, [string, string]>(),
+    stat: jest.fn().mockResolvedValue({ type: 'file', size: 1 }),
     write: jest.fn<Promise<void>, [string, string]>(),
   }
 }
@@ -47,9 +59,7 @@ describe('AbstractJsonRepository', () => {
 
     finishMkdir?.()
     await creating
-    expect(adapter.write.mock.calls[0]?.[0]).toMatch(
-      /^data\/row\.json\..+\.tmp$/,
-    )
+    expect(adapter.write.mock.calls[0]?.[0]).toMatch(/^data\/\.aider-.+\.tmp$/)
     expect(adapter.rename).toHaveBeenCalledWith(
       adapter.write.mock.calls[0]?.[0],
       'data/row.json',
@@ -67,6 +77,20 @@ describe('AbstractJsonRepository', () => {
     await expect(
       repository.create({ fileName: '../outside.json', value: 'no' }),
     ).rejects.toThrow('Invalid database file name')
+    expect(adapter.write).not.toHaveBeenCalled()
+  })
+
+  it('validates records again at the persistence boundary', async () => {
+    const adapter = createAdapter()
+    adapter.exists.mockResolvedValue(true)
+    const repository = new TestRepository(
+      { vault: { adapter } } as unknown as App,
+      'data',
+    )
+
+    await expect(
+      repository.create({ fileName: 'row.json' } as Row),
+    ).rejects.toThrow('Invalid JSON database record')
     expect(adapter.write).not.toHaveBeenCalled()
   })
 
@@ -89,5 +113,36 @@ describe('AbstractJsonRepository', () => {
     ).rejects.toThrow('rename failed')
     expect(adapter.remove).toHaveBeenCalledTimes(1)
     expect(adapter.remove.mock.calls[0]?.[0]).not.toBe('data/row.json')
+  })
+
+  it.each([
+    ['malformed', '{'],
+    ['structurally invalid', JSON.stringify({ fileName: 'row.json' })],
+  ])('ignores %s JSON files', async (_case, content) => {
+    const adapter = createAdapter()
+    adapter.exists.mockResolvedValue(true)
+    adapter.read.mockResolvedValue(content)
+    const repository = new TestRepository(
+      { vault: { adapter } } as unknown as App,
+      'data',
+    )
+
+    await expect(repository.read('row.json')).resolves.toBeNull()
+  })
+
+  it('rejects oversized JSON from metadata before reading it', async () => {
+    const adapter = createAdapter()
+    adapter.exists.mockResolvedValue(true)
+    adapter.stat.mockResolvedValue({
+      type: 'file',
+      size: 128 * 1024 * 1024 + 1,
+    })
+    const repository = new TestRepository(
+      { vault: { adapter } } as unknown as App,
+      'data',
+    )
+
+    await expect(repository.read('row.json')).resolves.toBeNull()
+    expect(adapter.read).not.toHaveBeenCalled()
   })
 })

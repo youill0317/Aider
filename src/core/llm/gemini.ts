@@ -546,7 +546,7 @@ export class GeminiProvider extends BaseLLMProvider<
   async getEmbedding(
     model: string,
     text: string,
-    options?: { dimensions?: number },
+    options?: { dimensions?: number; signal?: AbortSignal },
   ): Promise<number[]> {
     if (!this.apiKey) {
       throw new LLMAPIKeyNotSetException(
@@ -558,9 +558,12 @@ export class GeminiProvider extends BaseLLMProvider<
       const response = await this.client.models.embedContent({
         model: model,
         contents: text,
-        ...(options?.dimensions && {
-          config: { outputDimensionality: options.dimensions },
-        }),
+        config: {
+          ...(options?.dimensions && {
+            outputDimensionality: options.dimensions,
+          }),
+          abortSignal: options?.signal,
+        },
       })
       return response.embeddings?.[0]?.values ?? []
     } catch (error) {

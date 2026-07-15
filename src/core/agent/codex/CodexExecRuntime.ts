@@ -93,6 +93,7 @@ export class CodexExecRuntime implements CodexRuntime {
       argv,
       this.spawnSpecResolverOptions,
     )
+    const redactionEnv = this.spawnSpecResolverOptions.env ?? process.env
     const parser = new CodexJsonlParser()
     let stderr = ''
     let threadId: string | null = null
@@ -111,12 +112,12 @@ export class CodexExecRuntime implements CodexRuntime {
     childProcess.stdin?.end(request.prompt)
 
     const done = new Promise<CodexRunResult>((resolve, reject) => {
-      const fail = (error: Error) => {
+      const fail = (error: Error, preserveKillTimer = false) => {
         if (settled) {
           return
         }
         settled = true
-        clearKillTimer(killTimer)
+        if (!preserveKillTimer) clearKillTimer(killTimer)
         handlers.onError?.(error)
         reject(error)
       }
@@ -130,11 +131,16 @@ export class CodexExecRuntime implements CodexRuntime {
             if (event.kind === 'turn.failed') {
               failedTurnLine = event.line
             }
-            handlers.onEvent(sanitizeEvent(event, spawnSpec.env))
+            handlers.onEvent(sanitizeEvent(event, redactionEnv))
           }
         } catch (error) {
-          childProcess.kill('SIGTERM')
-          fail(normalizeParserError(error))
+          const shouldEscalate = childProcess.kill('SIGTERM')
+          if (shouldEscalate) {
+            killTimer = setTimeout(() => {
+              childProcess.kill('SIGKILL')
+            }, this.killTimeoutMs)
+          }
+          fail(normalizeParserError(error), shouldEscalate)
         }
       })
 
@@ -147,11 +153,11 @@ export class CodexExecRuntime implements CodexRuntime {
       })
 
       childProcess.on('close', (exitCode, signal) => {
+        clearKillTimer(killTimer)
         if (settled) {
           return
         }
         settled = true
-        clearKillTimer(killTimer)
 
         try {
           for (const event of parser.flush()) {
@@ -161,7 +167,7 @@ export class CodexExecRuntime implements CodexRuntime {
             if (event.kind === 'turn.failed') {
               failedTurnLine = event.line
             }
-            handlers.onEvent(sanitizeEvent(event, spawnSpec.env))
+            handlers.onEvent(sanitizeEvent(event, redactionEnv))
           }
         } catch (error) {
           const parserError = normalizeParserError(error)
@@ -170,7 +176,7 @@ export class CodexExecRuntime implements CodexRuntime {
           return
         }
 
-        const safeStderr = redactEnvironmentSecrets(stderr, spawnSpec.env)
+        const safeStderr = redactEnvironmentSecrets(stderr, redactionEnv)
 
         if (failedTurnLine !== null) {
           const error = new Error(
@@ -181,12 +187,16 @@ export class CodexExecRuntime implements CodexRuntime {
           return
         }
 
-        if (
-          !aborted &&
-          signal === null &&
-          exitCode !== null &&
-          exitCode !== 0
-        ) {
+        if (!aborted && signal !== null) {
+          const error = new Error(
+            `Codex process was terminated by ${signal}${safeStderr ? `: ${safeStderr}` : ''}`,
+          )
+          handlers.onError?.(error)
+          reject(error)
+          return
+        }
+
+        if (!aborted && exitCode !== null && exitCode !== 0) {
           const error = new Error(
             `Codex process exited with code ${exitCode}${safeStderr ? `: ${safeStderr}` : ''}`,
           )
@@ -195,12 +205,11 @@ export class CodexExecRuntime implements CodexRuntime {
           return
         }
 
-        const status =
-          aborted || signal !== null
-            ? 'cancelled'
-            : exitCode === 0
-              ? 'completed'
-              : 'failed'
+        const status = aborted
+          ? 'cancelled'
+          : exitCode === 0
+            ? 'completed'
+            : 'failed'
         resolve({
           exitCode,
           signal,

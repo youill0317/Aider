@@ -143,6 +143,7 @@ export function useChatStreamManager({
           messages: chatMessages,
           conversationId,
           enableTools: settings.chatOptions.enableTools,
+          isToolsEnabled: () => getSettings().chatOptions.enableTools,
           maxAutoIterations: settings.chatOptions.maxAutoIterations,
           promptGenerator,
           toolDispatcher,

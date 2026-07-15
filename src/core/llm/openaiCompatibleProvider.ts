@@ -83,14 +83,17 @@ export class OpenAICompatibleProvider extends BaseLLMProvider<
   async getEmbedding(
     model: string,
     text: string,
-    options?: { dimensions?: number },
+    options?: { dimensions?: number; signal?: AbortSignal },
   ): Promise<number[]> {
-    const embedding = await this.client.embeddings.create({
-      model: model,
-      input: text,
-      encoding_format: 'float',
-      ...(options?.dimensions && { dimensions: options.dimensions }),
-    })
+    const embedding = await this.client.embeddings.create(
+      {
+        model: model,
+        input: text,
+        encoding_format: 'float',
+        ...(options?.dimensions && { dimensions: options.dimensions }),
+      },
+      { signal: options?.signal },
+    )
     return embedding.data[0].embedding
   }
 }

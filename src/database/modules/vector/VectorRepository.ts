@@ -1,14 +1,14 @@
 import {
   SQL,
   and,
+  asc,
   cosineDistance,
   count,
   desc,
   eq,
   getTableColumns,
-  gt,
   inArray,
-  like,
+  lt,
   or,
   sql,
   sum,
@@ -20,7 +20,12 @@ import {
   EmbeddingModelClient,
 } from '../../../types/embedding'
 import { DatabaseNotInitializedException } from '../../exception'
-import { InsertEmbedding, SelectEmbedding, embeddingTable } from '../../schema'
+import {
+  InsertEmbedding,
+  SelectEmbedding,
+  embeddingTable,
+  supportedDimensionsForIndex,
+} from '../../schema'
 
 export type IndexedVectorFile = Pick<
   SelectEmbedding,
@@ -41,7 +46,7 @@ export class VectorRepository {
       throw new DatabaseNotInitializedException()
     }
     return this.db
-      .select({
+      .selectDistinctOn([embeddingTable.path, embeddingTable.dimension], {
         path: embeddingTable.path,
         mtime: embeddingTable.mtime,
         metadata: embeddingTable.metadata,
@@ -49,22 +54,11 @@ export class VectorRepository {
       })
       .from(embeddingTable)
       .where(eq(embeddingTable.model, embeddingModel.id))
-  }
-
-  async deleteVectorsForSingleFile(
-    filePath: string,
-    embeddingModel: EmbeddingModelClient,
-  ): Promise<void> {
-    if (!this.db) {
-      throw new DatabaseNotInitializedException()
-    }
-    await this.db
-      .delete(embeddingTable)
-      .where(
-        and(
-          eq(embeddingTable.path, filePath),
-          eq(embeddingTable.model, embeddingModel.id),
-        ),
+      .orderBy(
+        embeddingTable.path,
+        embeddingTable.dimension,
+        desc(embeddingTable.mtime),
+        desc(embeddingTable.id),
       )
   }
 
@@ -85,20 +79,36 @@ export class VectorRepository {
       )
   }
 
-  async clearAllVectors(embeddingModel: EmbeddingModelClient): Promise<void> {
+  async clearAllVectors(modelId: string): Promise<void> {
     if (!this.db) {
       throw new DatabaseNotInitializedException()
     }
     await this.db
       .delete(embeddingTable)
-      .where(eq(embeddingTable.model, embeddingModel.id))
+      .where(eq(embeddingTable.model, modelId))
   }
 
-  async insertVectors(data: InsertEmbedding[]): Promise<void> {
+  async replaceVectorsForFile(
+    filePath: string,
+    embeddingModel: EmbeddingModelClient,
+    data: InsertEmbedding[],
+  ): Promise<void> {
     if (!this.db) {
       throw new DatabaseNotInitializedException()
     }
-    await this.db.insert(embeddingTable).values(data)
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(embeddingTable)
+        .where(
+          and(
+            eq(embeddingTable.path, filePath),
+            eq(embeddingTable.model, embeddingModel.id),
+          ),
+        )
+      if (data.length > 0) {
+        await tx.insert(embeddingTable).values(data)
+      }
+    })
   }
 
   async performSimilaritySearch(
@@ -120,8 +130,16 @@ export class VectorRepository {
     if (!this.db) {
       throw new DatabaseNotInitializedException()
     }
-    const similarity = sql<number>`1 - (${cosineDistance(embeddingTable.embedding, queryVector)})`
-    const similarityCondition = gt(similarity, options.minSimilarity)
+    const indexedDimension = supportedDimensionsForIndex.find(
+      (dimension) => dimension === embeddingModel.dimension,
+    )
+    const embeddingExpression =
+      indexedDimension === undefined
+        ? embeddingTable.embedding
+        : sql`(${embeddingTable.embedding}::vector(${sql.raw(String(indexedDimension))}))`
+    const distance = cosineDistance(embeddingExpression, queryVector)
+    const similarity = sql<number>`1 - (${distance})`
+    const similarityCondition = lt(distance, 1 - options.minSimilarity)
 
     const getScopeCondition = (): SQL | undefined => {
       if (!options.scope) {
@@ -134,8 +152,9 @@ export class VectorRepository {
       if (options.scope.folders.length > 0) {
         conditions.push(
           or(
-            ...options.scope.folders.map((folder) =>
-              like(embeddingTable.path, `${folder}/%`),
+            ...options.scope.folders.map(
+              (folder) =>
+                sql<boolean>`starts_with(${embeddingTable.path}, ${`${folder}/`})`,
             ),
           ),
         )
@@ -165,7 +184,7 @@ export class VectorRepository {
           eq(embeddingTable.dimension, embeddingModel.dimension), // include this to fully utilize partial index
         ),
       )
-      .orderBy((t) => desc(t.similarity))
+      .orderBy(asc(distance))
       .limit(options.limit)
 
     return similaritySearchResults

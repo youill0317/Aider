@@ -130,6 +130,10 @@ function McpServerFormComponent({
       }
 
       await plugin.setSettings(newSettings)
+      if (existingServer && existingServer.id !== serverName) {
+        await plugin.revokeMcpServerTrust(existingServer.id)
+      }
+      await plugin.trustMcpServer(serverName)
 
       onClose()
     } catch (error) {

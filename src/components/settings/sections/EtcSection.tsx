@@ -31,7 +31,7 @@ export function EtcSection({ app }: EtcSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Etc</div>
+      <div className="smtcmp-settings-header">Maintenance</div>
 
       <ObsidianSetting
         name="Reset settings"

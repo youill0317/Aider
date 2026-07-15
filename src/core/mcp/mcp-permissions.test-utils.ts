@@ -27,6 +27,7 @@ export function createMcpManagerTestHarness({
   const manager = new McpManager({
     settings: createSettings(servers),
     registerSettingsListener: () => () => undefined,
+    isServerTrusted: async () => true,
   })
   const mutableManager = manager as unknown as {
     servers: ReturnType<typeof createConnectedServer>[]

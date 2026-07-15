@@ -21,8 +21,7 @@ describe('vector metadata helpers', () => {
   it('treats Voyage contextual metadata as file-only metadata', () => {
     const metadata = createVoyageContextualMetadata({
       chunkerVersion: 'ctx-v1',
-      dimension: 1024,
-      modelId: 'voyage/voyage-context-4',
+      embeddingProfile: 'voyage-profile',
     })
 
     expect(metadata).toMatchObject({

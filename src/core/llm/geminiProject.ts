@@ -4,6 +4,7 @@ import {
   GEMINI_CODE_ASSIST_ENDPOINT,
   GEMINI_CODE_ASSIST_HEADERS,
 } from '../../constants'
+import { withRequestTimeout } from '../../utils/llm/httpTransport'
 import { redactSecrets } from '../../utils/security/redact-secrets'
 
 type GeminiOAuthState = {
@@ -23,6 +24,7 @@ const projectContextPendingCache = new Map<
   string,
   Promise<ProjectContextResult>
 >()
+const MAX_PROJECT_CONTEXT_CACHE_ENTRIES = 32
 
 const CODE_ASSIST_METADATA = {
   ideType: 'IDE_UNSPECIFIED',
@@ -138,16 +140,18 @@ export async function loadManagedProject(
       requestBody.cloudaicompanionProject = projectId
     }
 
-    const response = await requestUrl({
-      url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        ...GEMINI_CODE_ASSIST_HEADERS,
-      },
-      body: JSON.stringify(requestBody),
-    })
+    const response = await withRequestTimeout(
+      requestUrl({
+        url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          ...GEMINI_CODE_ASSIST_HEADERS,
+        },
+        body: JSON.stringify(requestBody),
+      }),
+    )
 
     if (response.status < 200 || response.status >= 300) {
       return null
@@ -185,16 +189,18 @@ export async function onboardManagedProject(
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await requestUrl({
-        url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          ...GEMINI_CODE_ASSIST_HEADERS,
-        },
-        body: JSON.stringify(requestBody),
-      })
+      const response = await withRequestTimeout(
+        requestUrl({
+          url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            ...GEMINI_CODE_ASSIST_HEADERS,
+          },
+          body: JSON.stringify(requestBody),
+        }),
+      )
 
       if (response.status < 200 || response.status >= 300) {
         return undefined
@@ -317,7 +323,7 @@ export async function ensureProjectContext(params: {
     .then((result) => {
       const nextKey = getCacheKey(result.auth) ?? cacheKey
       projectContextPendingCache.delete(cacheKey)
-      projectContextResultCache.set(nextKey, result)
+      setBoundedCache(projectContextResultCache, nextKey, result)
       if (nextKey !== cacheKey) {
         projectContextResultCache.delete(cacheKey)
       }
@@ -328,6 +334,18 @@ export async function ensureProjectContext(params: {
       throw error
     })
 
-  projectContextPendingCache.set(cacheKey, promise)
+  setBoundedCache(projectContextPendingCache, cacheKey, promise)
   return promise
+}
+
+function setBoundedCache<T>(
+  cache: Map<string, T>,
+  key: string,
+  value: T,
+): void {
+  cache.delete(key)
+  cache.set(key, value)
+  if (cache.size <= MAX_PROJECT_CONTEXT_CACHE_ENTRIES) return
+  const oldest = cache.keys().next()
+  if (!oldest.done) cache.delete(oldest.value)
 }

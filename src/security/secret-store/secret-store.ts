@@ -33,8 +33,11 @@ type SecretStoreIdentifier =
   | 'provider-id-legacy-encoded'
   | 'provider-id-plain'
 
-const CHUNKED_SECRET_PREFIX = '__aider_secret_chunked_v1__:'
+const LEGACY_CHUNKED_SECRET_PREFIX = '__aider_secret_chunked_v1__:'
+const CHUNKED_SECRET_PREFIX = '__aider_secret_chunked_v2__:'
 const SECRET_CHUNK_SIZE = 1000
+const MAX_SECRET_CHUNKS = 10_000
+const MAX_SECRET_LENGTH = SECRET_CHUNK_SIZE * MAX_SECRET_CHUNKS
 const CAMEL_CASE_BOUNDARY_PATTERN = /([a-z0-9])([A-Z])/g
 const KEY_PART_SEPARATOR_PATTERN = /[\s_-]/
 const NON_ALNUM_KEY_PART_PATTERN = /[^a-z0-9]+/g
@@ -42,6 +45,7 @@ const EDGE_DASHES_PATTERN = /^-+|-+$/g
 
 type ChunkedSecretMetadata = {
   readonly count: number
+  readonly generation?: string
 }
 
 function normalizeSecretStoreKeyPart(value: string): string {
@@ -160,13 +164,15 @@ function createObsidianSecretStore(
   const cleanupChunks = async (
     key: string,
     startIndex: number,
-    count: number,
+    metadata: ChunkedSecretMetadata,
   ) => {
     let firstError: unknown
     let failed = false
-    for (let index = startIndex; index < count; index += 1) {
+    for (let index = startIndex; index < metadata.count; index += 1) {
       try {
-        await deleteStoredSecret(createChunkKey(key, index))
+        await deleteStoredSecret(
+          createChunkKey(key, index, metadata.generation),
+        )
       } catch (error) {
         if (!failed) firstError = error
         failed = true
@@ -180,13 +186,9 @@ function createObsidianSecretStore(
   const readMetadata = async (
     key: string,
   ): Promise<ChunkedSecretMetadata | null> => {
-    try {
-      const value = await secretStorage.getSecret(key)
-      if (!value) return null
-      return parseChunkedSecretMetadata(value)
-    } catch {
-      return null
-    }
+    const value = await secretStorage.getSecret(key)
+    if (!value) return null
+    return parseChunkedSecretMetadata(value)
   }
 
   return {
@@ -202,52 +204,58 @@ function createObsidianSecretStore(
         return value
       }
 
-      const chunks = await Promise.all(
-        Array.from({ length: metadata.count }, (_, index) =>
-          secretStorage.getSecret(createChunkKey(key, index)),
-        ),
-      )
-
-      if (chunks.some((chunk) => chunk === null || chunk === '')) {
-        return null
+      const chunks: string[] = []
+      for (let index = 0; index < metadata.count; index += 1) {
+        const chunk = await secretStorage.getSecret(
+          createChunkKey(key, index, metadata.generation),
+        )
+        if (chunk === null || chunk === '') return null
+        chunks.push(chunk)
       }
 
       return chunks.join('')
     },
     setSecret: async (key, value) => {
+      if (value.length > MAX_SECRET_LENGTH) {
+        throw new Error('Secret is too large')
+      }
       const previousMetadata = await readMetadata(key)
 
       if (
         value.length <= SECRET_CHUNK_SIZE &&
-        !value.startsWith(CHUNKED_SECRET_PREFIX)
+        !value.startsWith(CHUNKED_SECRET_PREFIX) &&
+        !value.startsWith(LEGACY_CHUNKED_SECRET_PREFIX)
       ) {
         await secretStorage.setSecret(key, value)
         if (previousMetadata) {
-          await cleanupChunks(key, 0, previousMetadata.count).catch(
-            () => undefined,
-          )
+          await cleanupChunks(key, 0, previousMetadata).catch(() => undefined)
         }
         return
       }
 
       const chunks = splitSecretIntoChunks(value)
+      const metadata = {
+        count: chunks.length,
+        generation: createChunkGeneration(),
+      }
       try {
         for (const [index, chunk] of chunks.entries()) {
-          await secretStorage.setSecret(createChunkKey(key, index), chunk)
+          await secretStorage.setSecret(
+            createChunkKey(key, index, metadata.generation),
+            chunk,
+          )
         }
         await secretStorage.setSecret(
           key,
-          serializeChunkedSecretMetadata(chunks.length),
+          serializeChunkedSecretMetadata(metadata),
         )
       } catch (error) {
-        await cleanupChunks(key, 0, chunks.length).catch(() => undefined)
+        await cleanupChunks(key, 0, metadata).catch(() => undefined)
         throw error
       }
 
-      if (previousMetadata && previousMetadata.count > chunks.length) {
-        await cleanupChunks(key, chunks.length, previousMetadata.count).catch(
-          () => undefined,
-        )
+      if (previousMetadata) {
+        await cleanupChunks(key, 0, previousMetadata).catch(() => undefined)
       }
     },
     deleteSecret: async (key) => {
@@ -255,14 +263,23 @@ function createObsidianSecretStore(
       await deleteStoredSecret(key)
 
       if (metadata) {
-        await cleanupChunks(key, 0, metadata.count)
+        await cleanupChunks(key, 0, metadata)
       }
     },
   }
 }
 
-function createChunkKey(key: string, index: number): string {
-  return `${key}-chunk-${String(index).padStart(4, '0')}`
+function createChunkKey(
+  key: string,
+  index: number,
+  generation?: string,
+): string {
+  const generationPart = generation ? `${generation}-` : ''
+  return `${key}-chunk-${generationPart}${String(index).padStart(4, '0')}`
+}
+
+function createChunkGeneration(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 }
 
 function splitSecretIntoChunks(value: string): string[] {
@@ -275,22 +292,39 @@ function splitSecretIntoChunks(value: string): string[] {
   return chunks.length > 0 ? chunks : ['']
 }
 
-function serializeChunkedSecretMetadata(count: number): string {
-  return `${CHUNKED_SECRET_PREFIX}${count}`
+function serializeChunkedSecretMetadata(
+  metadata: ChunkedSecretMetadata & { generation: string },
+): string {
+  return `${CHUNKED_SECRET_PREFIX}${metadata.generation}:${metadata.count}`
 }
 
 function parseChunkedSecretMetadata(
   value: string,
 ): ChunkedSecretMetadata | null {
-  if (!value.startsWith(CHUNKED_SECRET_PREFIX)) {
+  if (value.startsWith(CHUNKED_SECRET_PREFIX)) {
+    const serialized = value.slice(CHUNKED_SECRET_PREFIX.length)
+    const separatorIndex = serialized.lastIndexOf(':')
+    const generation = serialized.slice(0, separatorIndex)
+    const count = Number(serialized.slice(separatorIndex + 1))
+    if (
+      !/^[a-z0-9]+$/.test(generation) ||
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      count > MAX_SECRET_CHUNKS
+    ) {
+      return null
+    }
+    return { count, generation }
+  }
+
+  if (!value.startsWith(LEGACY_CHUNKED_SECRET_PREFIX)) {
     return null
   }
 
-  const count = Number(value.slice(CHUNKED_SECRET_PREFIX.length))
-  if (!Number.isSafeInteger(count) || count < 1) {
+  const count = Number(value.slice(LEGACY_CHUNKED_SECRET_PREFIX.length))
+  if (!Number.isSafeInteger(count) || count < 1 || count > MAX_SECRET_CHUNKS) {
     return null
   }
-
   return { count }
 }
 
@@ -315,6 +349,17 @@ export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
 
 export function createMcpEnvSecretStoreKey(serverId: string): string {
   return `aider-mcp-server-${encodeProviderId(serverId)}-env`
+}
+
+export function createMcpExecutionTrustKey(serverId: string): string {
+  return `aider-mcp-server-${encodeProviderId(serverId)}-execution-trust`
+}
+
+export function createProviderRouteTrustKey(
+  providerId: string,
+  providerType: string,
+): string {
+  return `aider-provider-${encodeProviderId(providerId)}-${normalizeSecretStoreKeyPart(providerType)}-route-trust`
 }
 
 function createProviderIdParts(

@@ -21,7 +21,14 @@ function SimiliartySearchItem({
     openMarkdownFile(app, chunk.path, lineRange?.startLine)
   }
   return (
-    <div onClick={handleClick} className="smtcmp-similarity-search-item">
+    <button
+      type="button"
+      onClick={handleClick}
+      className="smtcmp-similarity-search-item"
+      aria-label={`Open ${path.basename(chunk.path)}${
+        lineRange ? ` at line ${lineRange.startLine}` : ''
+      }`}
+    >
       <div className="smtcmp-similarity-search-item__similarity">
         {chunk.similarity.toFixed(3)}
       </div>
@@ -33,7 +40,7 @@ function SimiliartySearchItem({
           ? `${lineRange.startLine} - ${lineRange.endLine}`
           : 'File only'}
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -48,15 +55,17 @@ export default function SimilaritySearchResults({
 
   return (
     <div className="smtcmp-similarity-search-results">
-      <div
+      <button
+        type="button"
         onClick={() => {
           setIsOpen(!isOpen)
         }}
         className="smtcmp-similarity-search-results__trigger"
+        aria-expanded={isOpen}
       >
         {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         <div>Show Referenced Documents ({similaritySearchResults.length})</div>
-      </div>
+      </button>
       {isOpen && (
         <div
           style={{

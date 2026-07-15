@@ -5,8 +5,8 @@ import { useApp } from '../../contexts/app-context'
 import { useDarkModeContext } from '../../contexts/dark-mode-context'
 import { openMarkdownFile } from '../../utils/obsidian'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
 import { MemoizedSyntaxHighlighterWrapper } from './SyntaxHighlighterWrapper'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 export default function MarkdownCodeComponent({
   onApply,
@@ -23,7 +23,7 @@ export default function MarkdownCodeComponent({
   const app = useApp()
   const { isDarkMode } = useDarkModeContext()
 
-  const [isPreviewMode, setIsPreviewMode] = useState(true)
+  const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const wrapLines = useMemo(() => {
@@ -50,15 +50,17 @@ export default function MarkdownCodeComponent({
     <div className="smtcmp-code-block">
       <div className="smtcmp-code-block-header">
         {filename && (
-          <div
+          <button
+            type="button"
             className="smtcmp-code-block-header-filename"
             onClick={handleOpenFile}
           >
             {filename}
-          </div>
+          </button>
         )}
         <div className="smtcmp-code-block-header-button-container">
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
             onClick={() => {
               setIsPreviewMode(!isPreviewMode)
@@ -68,6 +70,7 @@ export default function MarkdownCodeComponent({
             {isPreviewMode ? 'View Raw Text' : 'View Formatted'}
           </button>
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
             onClick={() => {
               handleCopy()
@@ -86,15 +89,10 @@ export default function MarkdownCodeComponent({
             )}
           </button>
           <button
+            type="button"
             className="clickable-icon smtcmp-code-block-header-button"
-            onClick={
-              isApplying
-                ? undefined
-                : () => {
-                    onApply(String(children))
-                  }
-            }
-            aria-disabled={isApplying}
+            onClick={() => onApply(String(children))}
+            disabled={isApplying}
           >
             {isApplying ? (
               <>
@@ -112,7 +110,7 @@ export default function MarkdownCodeComponent({
       </div>
       {isPreviewMode ? (
         <div className="smtcmp-code-block-obsidian-markdown">
-          <ObsidianMarkdown content={String(children)} scale="sm" />
+          <UntrustedMarkdown content={String(children)} scale="sm" />
         </div>
       ) : (
         <MemoizedSyntaxHighlighterWrapper
@@ -124,51 +122,6 @@ export default function MarkdownCodeComponent({
           {String(children)}
         </MemoizedSyntaxHighlighterWrapper>
       )}
-      <div className="smtcmp-code-block-footer">
-        <div className="smtcmp-code-block-header-button-container">
-          <button
-            className="clickable-icon smtcmp-code-block-header-button"
-            onClick={() => {
-              handleCopy()
-            }}
-          >
-            {copied ? (
-              <>
-                <Check size={10} />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <CopyIcon size={10} />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-          <button
-            className="clickable-icon smtcmp-code-block-header-button"
-            onClick={
-              isApplying
-                ? undefined
-                : () => {
-                    onApply(String(children))
-                  }
-            }
-            aria-disabled={isApplying}
-          >
-            {isApplying ? (
-              <>
-                <Loader2 className="spinner" size={14} />
-                <span>Applying...</span>
-              </>
-            ) : (
-              <>
-                <Play size={10} />
-                <span>Apply</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

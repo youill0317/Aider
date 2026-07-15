@@ -5,10 +5,11 @@ import {
   CircleMinus,
   Edit,
   Loader2,
+  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react'
-import { App } from 'obsidian'
+import { App, Notice } from 'obsidian'
 import { useCallback, useEffect, useState } from 'react'
 
 import { useSettings } from '../../../contexts/settings-context'
@@ -58,14 +59,15 @@ export function McpSection({ app, plugin }: McpSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">MCP (Model Context Pool)</div>
+      <div className="smtcmp-settings-header">MCP (Model Context Protocol)</div>
 
       <div className="smtcmp-settings-desc smtcmp-settings-callout">
-        <strong>Warning:</strong> When using tools, the tool response is passed
-        to the language model (LLM). If the tool result contains a large amount
-        of content, this can significantly increase LLM usage and associated
-        costs. Please be mindful when enabling or using tools that may return
-        long outputs.
+        <strong>Security:</strong> A new or changed server must be reviewed on
+        this device before Aider starts its command. When using tools, the tool
+        response is passed to the language model (LLM). If the tool result
+        contains a large amount of content, this can significantly increase LLM
+        usage and associated costs. Please be mindful when enabling or using
+        tools that may return long outputs.
       </div>
 
       {mcpManager?.disabled ? (
@@ -123,6 +125,7 @@ function McpServerComponent({
 }) {
   const { settings, setSettings } = useSettings()
   const [isOpen, setIsOpen] = useState(false)
+  const [isTrusting, setIsTrusting] = useState(false)
 
   const handleEdit = useCallback(() => {
     new EditMcpServerModal(app, plugin, server.name).open()
@@ -142,9 +145,10 @@ function McpServerComponent({
             servers: settings.mcp.servers.filter((s) => s.id !== server.name),
           },
         })
+        await plugin.revokeMcpServerTrust(server.name)
       },
     }).open()
-  }, [server.name, settings, setSettings, app])
+  }, [server.name, settings, setSettings, app, plugin])
 
   const handleToggleEnabled = useCallback(
     (enabled: boolean) => {
@@ -161,6 +165,18 @@ function McpServerComponent({
     [settings, setSettings, server.name],
   )
 
+  const handleTrust = useCallback(async () => {
+    setIsTrusting(true)
+    try {
+      await plugin.trustMcpServer(server.name)
+      new Notice(`Trusted MCP server "${server.name}" on this device`)
+    } catch {
+      new Notice('Unable to save MCP server trust')
+    } finally {
+      setIsTrusting(false)
+    }
+  }, [plugin, server.name])
+
   return (
     <div className="smtcmp-mcp-server">
       <div className="smtcmp-mcp-server-row">
@@ -175,7 +191,24 @@ function McpServerComponent({
           />
         </div>
         <div className="smtcmp-mcp-server-actions">
+          {server.status === McpServerStatus.ApprovalRequired && (
+            <button
+              type="button"
+              onClick={handleTrust}
+              className="clickable-icon"
+              aria-label="Review and trust server command"
+              title="Trust this exact command, arguments, and environment"
+              disabled={isTrusting}
+            >
+              {isTrusting ? (
+                <Loader2 size={16} className="spinner" />
+              ) : (
+                <ShieldCheck size={16} />
+              )}
+            </button>
+          )}
           <button
+            type="button"
             onClick={handleEdit}
             className="clickable-icon"
             aria-label="Edit"
@@ -183,6 +216,7 @@ function McpServerComponent({
             <Edit size={16} />
           </button>
           <button
+            type="button"
             onClick={handleDelete}
             className="clickable-icon"
             aria-label="Delete"
@@ -190,9 +224,11 @@ function McpServerComponent({
             <Trash2 size={16} />
           </button>
           <button
+            type="button"
             onClick={() => setIsOpen(!isOpen)}
             className="clickable-icon"
             aria-label={isOpen ? 'Collapse' : 'Expand'}
+            aria-expanded={isOpen}
           >
             {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
@@ -213,6 +249,24 @@ function ExpandedServerInfo({ server }: { server: McpServerState }) {
 
   return (
     <div className="smtcmp-server-expanded-info">
+      {server.status === McpServerStatus.ApprovalRequired && (
+        <div>
+          <div className="smtcmp-server-expanded-info-header">
+            Review required
+          </div>
+          <div className="smtcmp-server-error-message">
+            Command: {server.config.parameters.command}
+            {server.config.parameters.args?.length
+              ? ` ${server.config.parameters.args.join(' ')}`
+              : ''}
+            {Object.keys(server.config.parameters.env ?? {}).length > 0
+              ? ` · Environment names: ${Object.keys(
+                  server.config.parameters.env ?? {},
+                ).join(', ')}`
+              : ''}
+          </div>
+        </div>
+      )}
       {server.status === McpServerStatus.Connected && (
         <div>
           <div className="smtcmp-server-expanded-info-header">Tools</div>
@@ -237,6 +291,11 @@ function ExpandedServerInfo({ server }: { server: McpServerState }) {
 
 function McpServerStatusBadge({ status }: { status: McpServerStatus }) {
   const statusConfig = {
+    [McpServerStatus.ApprovalRequired]: {
+      icon: <ShieldCheck size={16} />,
+      label: 'Review required',
+      statusClass: 'smtcmp-mcp-server-status-badge--error',
+    },
     [McpServerStatus.Connected]: {
       icon: <Check size={16} />,
       label: 'Connected',
@@ -340,7 +399,12 @@ function McpToolComponent({
         />
       </div>
       <div className="smtcmp-mcp-tool-toggle">
-        <span className="smtcmp-mcp-tool-toggle-label">Auto-execute</span>
+        <span
+          className="smtcmp-mcp-tool-toggle-label"
+          title="Run this tool without asking for approval each time"
+        >
+          Auto-run (no approval)
+        </span>
         <ObsidianToggle
           value={allowAutoExecution}
           onChange={(value) => handleToggleAutoExecution(value)}

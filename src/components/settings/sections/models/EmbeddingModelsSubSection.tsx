@@ -3,7 +3,6 @@ import { App, Notice } from 'obsidian'
 
 import { DEFAULT_EMBEDDING_MODELS } from '../../../../constants'
 import { useSettings } from '../../../../contexts/settings-context'
-import { getEmbeddingModelClient } from '../../../../core/rag/embedding'
 import SmartComposerPlugin from '../../../../main'
 import { ConfirmModal } from '../../../modals/ConfirmModal'
 import { AddEmbeddingModelModal } from '../../modals/AddEmbeddingModelModal'
@@ -42,11 +41,7 @@ export function EmbeddingModelsSubSection({
 
         if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
           // only clear when there's data
-          const embeddingModelClient = getEmbeddingModelClient({
-            settings,
-            embeddingModelId: modelId,
-          })
-          await vectorManager.clearAllVectors(embeddingModelClient)
+          await vectorManager.clearAllVectors(modelId)
         }
 
         await setSettings({

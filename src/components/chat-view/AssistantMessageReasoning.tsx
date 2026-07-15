@@ -3,7 +3,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 
 import DotLoader from '../common/DotLoader'
 
-import { ObsidianMarkdown } from './ObsidianMarkdown'
+import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
   reasoning,
@@ -39,9 +39,11 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
 
   return (
     <div className="smtcmp-assistant-message-metadata">
-      <div
+      <button
+        type="button"
         className="smtcmp-assistant-message-metadata-toggle"
         onClick={handleToggle}
+        aria-expanded={isExpanded}
       >
         <span>Reasoning {showLoader && <DotLoader />}</span>
         {isExpanded ? (
@@ -49,10 +51,10 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
         ) : (
           <ChevronDown className="smtcmp-assistant-message-metadata-toggle-icon" />
         )}
-      </div>
+      </button>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
-          <ObsidianMarkdown content={reasoning} scale="xs" />
+          <UntrustedMarkdown content={reasoning} scale="xs" />
         </div>
       )}
     </div>

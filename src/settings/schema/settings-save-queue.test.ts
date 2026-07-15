@@ -9,17 +9,30 @@ describe('settings save serialization contract', () => {
       'utf8',
     )
     const queueIndex = source.indexOf('private settingsSaveQueue')
-    const assignIndex = source.indexOf('this.settingsSaveQueue =')
+    const validationIndex = source.indexOf(
+      'smartComposerSettingsSchema.safeParse(newSettings)',
+    )
+    const enqueueIndex = source.indexOf('const previousSave =')
+    const persistMethodIndex = source.indexOf(
+      'private async persistSettingsUpdate',
+    )
     const persistIndex = source.indexOf('await persistSettingsUpdate')
-    const awaitIndex = source.indexOf('await this.settingsSaveQueue')
+    const awaitIndex = source.indexOf('await save')
     const notifyIndex = source.indexOf('this.settingsChangeListeners.forEach')
+    const validatedIndex = source.indexOf(
+      'const validatedSettings = validationResult.data',
+    )
 
-    // When/Then: each save is chained onto the previous save and listeners run after it.
+    // When/Then: each write is serialized independently, and a rejected write
+    // cannot discard the update queued behind it.
     expect(queueIndex).toBeGreaterThan(-1)
-    expect(assignIndex).toBeGreaterThan(queueIndex)
+    expect(validatedIndex).toBeGreaterThan(validationIndex)
+    expect(enqueueIndex).toBeGreaterThan(validatedIndex)
+    expect(awaitIndex).toBeGreaterThan(enqueueIndex)
+    expect(persistMethodIndex).toBeGreaterThan(awaitIndex)
     expect(source).toContain('.catch(() => undefined)')
-    expect(persistIndex).toBeGreaterThan(assignIndex)
-    expect(awaitIndex).toBeGreaterThan(persistIndex)
-    expect(notifyIndex).toBeGreaterThan(awaitIndex)
+    expect(source).toContain('nextSettings,')
+    expect(persistIndex).toBeGreaterThan(persistMethodIndex)
+    expect(notifyIndex).toBeGreaterThan(persistIndex)
   })
 })

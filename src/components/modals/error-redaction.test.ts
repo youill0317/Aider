@@ -171,6 +171,24 @@ describe('redaction integration boundaries', () => {
       "console.error('Failed to onboard Gemini managed project:', error)",
     )
   })
+
+  it('provider and prompt errors are redacted before logging', () => {
+    const providerSource = readProjectFile('src/core/llm/openai.ts')
+    const promptSource = readProjectFile('src/utils/chat/promptGenerator.ts')
+
+    expect(providerSource).toContain(
+      "const safeError = redactAuthError(error, [this.provider.apiKey ?? ''])",
+    )
+    expect(providerSource).toContain(
+      "console.error('Error in generateResponse:', safeError)",
+    )
+    expect(providerSource).toContain(
+      "console.error('Error in streamResponse:', safeError)",
+    )
+    expect(promptSource).toContain(
+      "console.error('Failed to compile user message', redactSecrets(error))",
+    )
+  })
 })
 
 function readProjectFile(relativePath: string): string {

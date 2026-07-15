@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Eye, EyeOff, X } from 'lucide-react'
-import { PropsWithChildren, useCallback } from 'react'
+import { PropsWithChildren, ReactNode, useCallback } from 'react'
 
 import { useSettings } from '../../../contexts/settings-context'
 import {
@@ -13,6 +13,7 @@ import {
   MentionableUrl,
   MentionableVault,
 } from '../../../types/mentionable'
+import { getMentionableName } from '../../../utils/chat/mentionable'
 
 import { getMentionableIcon } from './utils/get-metionable-icon'
 
@@ -21,26 +22,40 @@ function BadgeBase({
   onDelete,
   onClick,
   isFocused,
+  trailingAction,
+  label,
 }: PropsWithChildren<{
   onDelete: () => void
   onClick: () => void
   isFocused: boolean
+  trailingAction?: ReactNode
+  label: string
 }>) {
   return (
     <div
       className={`smtcmp-chat-user-input-file-badge ${isFocused ? 'smtcmp-chat-user-input-file-badge-focused' : ''}`}
-      onClick={onClick}
     >
-      {children}
-      <div
+      <button
+        type="button"
+        className="smtcmp-chat-user-input-file-badge-main"
+        aria-label={`Preview ${label}`}
+        aria-pressed={isFocused}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+      {trailingAction}
+      <button
+        type="button"
         className="smtcmp-chat-user-input-file-badge-delete"
+        aria-label={`Remove ${label}`}
         onClick={(evt) => {
           evt.stopPropagation()
           onDelete()
         }}
       >
         <X size={12} />
-      </div>
+      </button>
     </div>
   )
 }
@@ -58,7 +73,12 @@ function FileBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -85,7 +105,12 @@ function FolderBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -113,7 +138,12 @@ function VaultBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -141,7 +171,7 @@ function CurrentFileBadge({
   const { settings, setSettings } = useSettings()
 
   const handleCurrentFileToggle = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation()
       setSettings({
         ...settings,
@@ -157,7 +187,31 @@ function CurrentFileBadge({
 
   const Icon = getMentionableIcon(mentionable)
   return mentionable.file ? (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+      trailingAction={
+        <button
+          type="button"
+          className="smtcmp-chat-user-input-file-badge-eye"
+          aria-label={
+            settings.chatOptions.includeCurrentFileContent
+              ? 'Exclude current file content'
+              : 'Include current file content'
+          }
+          aria-pressed={settings.chatOptions.includeCurrentFileContent}
+          onClick={handleCurrentFileToggle}
+        >
+          {settings.chatOptions.includeCurrentFileContent ? (
+            <Eye size={12} />
+          ) : (
+            <EyeOff size={12} />
+          )}
+        </button>
+      }
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -183,16 +237,6 @@ function CurrentFileBadge({
       >
         {' (Current File)'}
       </div>
-      <div
-        className="smtcmp-chat-user-input-file-badge-eye"
-        onClick={handleCurrentFileToggle}
-      >
-        {settings.chatOptions.includeCurrentFileContent ? (
-          <Eye size={12} />
-        ) : (
-          <EyeOff size={12} />
-        )}
-      </div>
     </BadgeBase>
   ) : null
 }
@@ -210,7 +254,12 @@ function BlockBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -240,7 +289,12 @@ function UrlBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon
@@ -267,7 +321,12 @@ function ImageBadge({
 }) {
   const Icon = getMentionableIcon(mentionable)
   return (
-    <BadgeBase onDelete={onDelete} onClick={onClick} isFocused={isFocused}>
+    <BadgeBase
+      onDelete={onDelete}
+      onClick={onClick}
+      isFocused={isFocused}
+      label={getMentionableName(mentionable)}
+    >
       <div className="smtcmp-chat-user-input-file-badge-name">
         {Icon && (
           <Icon

@@ -25,7 +25,7 @@ export class ApplyView extends View {
   }
 
   getDisplayText() {
-    return `Applying: ${this.state?.file?.name ?? ''}`
+    return this.state ? `Review ${this.state.file.name}` : 'Review changes'
   }
 
   async setState(state: ApplyViewState) {

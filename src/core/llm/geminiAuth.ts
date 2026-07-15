@@ -8,7 +8,7 @@ import {
   GEMINI_OAUTH_REDIRECT_URI,
   GEMINI_OAUTH_SCOPES,
 } from '../../constants'
-import { postFormUrlEncoded } from '../../utils/llm/httpTransport'
+import { getJson, postFormUrlEncoded } from '../../utils/llm/httpTransport'
 
 import { decideOAuthCallback } from './oauthCallback'
 
@@ -37,7 +37,7 @@ type GeminiCallbackConfig = {
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000
 
 let geminiCallbackServer: Server | undefined
-let isGeminiCallbackStopping = false
+let stopActiveGeminiCallback: (() => Promise<void>) | undefined
 
 export function buildGeminiAuthorizeUrl(params: {
   pkce: GeminiPkceCodes
@@ -132,7 +132,7 @@ export async function startGeminiCallbackServer(params: {
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      finalize(
+      void finalize(
         new Error('OAuth callback timeout - authorization took too long'),
       )
     }, timeoutMs ?? CALLBACK_TIMEOUT_MS)
@@ -156,7 +156,7 @@ export async function startGeminiCallbackServer(params: {
         res.statusCode = decision.statusCode
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.end(decision.responseBody)
-        finalize(decision.error)
+        if (decision.terminal) void finalize(decision.error)
         return
       }
 
@@ -165,30 +165,37 @@ export async function startGeminiCallbackServer(params: {
       res.end(
         '<!doctype html><html><head><title>Authorization Successful</title></head><body><p>You can close this window.</p><script>setTimeout(() => window.close(), 2000)</script></body></html>',
       )
-      finalize(undefined, decision.code)
+      void finalize(undefined, decision.code)
     })
 
-    const finalize = (error?: Error, code?: string) => {
-      if (isGeminiCallbackStopping) return
-      isGeminiCallbackStopping = true
+    let finalizePromise: Promise<void> | undefined
+    const finalize = (error?: Error, code?: string): Promise<void> => {
+      if (finalizePromise) return finalizePromise
       clearTimeout(timeout)
-      server.close(() => {
-        geminiCallbackServer = undefined
-        isGeminiCallbackStopping = false
-        if (error) {
-          reject(error)
-          return
-        }
-        if (code) {
-          resolve(code)
-          return
-        }
-        reject(new Error('OAuth callback failed'))
+      finalizePromise = new Promise<void>((resolveClose) => {
+        server.close(() => {
+          geminiCallbackServer = undefined
+          if (stopActiveGeminiCallback === stopCurrent) {
+            stopActiveGeminiCallback = undefined
+          }
+          if (error) {
+            reject(error)
+          } else if (code) {
+            resolve(code)
+          } else {
+            reject(new Error('OAuth callback failed'))
+          }
+          resolveClose()
+        })
       })
+      return finalizePromise
     }
+    const stopCurrent = () =>
+      finalize(new Error('OAuth callback was cancelled'))
+    stopActiveGeminiCallback = stopCurrent
 
     server.on('error', (error) => {
-      finalize(
+      void finalize(
         error instanceof Error
           ? error
           : new Error('OAuth callback server error'),
@@ -202,6 +209,10 @@ export async function startGeminiCallbackServer(params: {
 }
 
 export async function stopGeminiCallbackServer(): Promise<void> {
+  if (stopActiveGeminiCallback) {
+    await stopActiveGeminiCallback()
+    return
+  }
   if (!geminiCallbackServer) return
   await new Promise<void>((resolve) => {
     geminiCallbackServer?.close(() => resolve())
@@ -213,18 +224,15 @@ async function fetchGeminiUserEmail(
   accessToken: string,
 ): Promise<string | null> {
   try {
-    const response = await fetch(
+    const payload = await getJson<GeminiUserInfo>(
       'https://www.googleapis.com/oauth2/v1/userinfo?alt=json',
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
+        fetchFn: fetch,
       },
     )
-    if (!response.ok) {
-      return null
-    }
-    const payload = (await response.json()) as GeminiUserInfo
     return payload.email ?? null
   } catch {
     return null

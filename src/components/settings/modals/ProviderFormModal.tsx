@@ -83,14 +83,18 @@ function ProviderFormComponent({
         return
       }
 
-      await plugin.setSettings({
-        ...plugin.settings,
-        providers: [
-          ...plugin.settings.providers.slice(0, currentProviderIndex),
-          formData,
-          ...plugin.settings.providers.slice(currentProviderIndex + 1),
-        ],
-      })
+      await plugin.setTrustedProviderSettings(
+        formData,
+        {
+          ...plugin.settings,
+          providers: [
+            ...plugin.settings.providers.slice(0, currentProviderIndex),
+            formData,
+            ...plugin.settings.providers.slice(currentProviderIndex + 1),
+          ],
+        },
+        provider,
+      )
     } else {
       if (
         plugin.settings.providers.some((p: LLMProvider) => p.id === formData.id)
@@ -107,7 +111,7 @@ function ProviderFormComponent({
         return
       }
 
-      await plugin.setSettings({
+      await plugin.setTrustedProviderSettings(formData, {
         ...plugin.settings,
         providers: [...plugin.settings.providers, formData],
       })
@@ -180,7 +184,7 @@ function ProviderFormComponent({
 
           <ObsidianSetting
             name="Base URL"
-            desc="(leave blank if using default)"
+            desc="Leave blank for the official default. Saving records trust for this exact custom endpoint on this device."
             required={providerTypeInfo.requireBaseUrl}
           >
             <ObsidianTextInput

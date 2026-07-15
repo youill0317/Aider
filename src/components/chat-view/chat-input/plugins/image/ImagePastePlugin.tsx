@@ -2,8 +2,11 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { COMMAND_PRIORITY_LOW, PASTE_COMMAND, PasteCommandType } from 'lexical'
 import { useEffect } from 'react'
 
-import { MentionableImage } from '../../../../../types/mentionable'
-import { fileToMentionableImage } from '../../../../../utils/llm/image'
+import {
+  MAX_MENTIONABLE_IMAGES,
+  MentionableImage,
+} from '../../../../../types/mentionable'
+import { filesToMentionableImages } from '../../../../../utils/llm/image'
 
 export default function ImagePastePlugin({
   onCreateImageMentionables,
@@ -18,16 +21,18 @@ export default function ImagePastePlugin({
         event instanceof ClipboardEvent ? event.clipboardData : null
       if (!clipboardData) return false
 
-      const images = Array.from(clipboardData.files).filter((file) =>
-        file.type.startsWith('image/'),
-      )
+      const images = Array.from(clipboardData.files)
+        .filter((file) => file.type.startsWith('image/'))
+        .slice(0, MAX_MENTIONABLE_IMAGES)
       if (images.length === 0) return false
 
-      Promise.all(images.map((image) => fileToMentionableImage(image))).then(
-        (mentionableImages) => {
+      filesToMentionableImages(images)
+        .then((mentionableImages) => {
           onCreateImageMentionables?.(mentionableImages)
-        },
-      )
+        })
+        .catch(() => {
+          console.warn('Unable to attach one or more images')
+        })
       return true
     }
 

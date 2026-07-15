@@ -29,7 +29,6 @@ export type IndexProgress = {
   waitingForRateLimit?: boolean
 }
 
-// TODO: Update style
 export default function QueryProgress({
   state,
 }: {
@@ -40,7 +39,7 @@ export default function QueryProgress({
       return null
     case 'reading-mentionables':
       return (
-        <div className="smtcmp-query-progress">
+        <div className="smtcmp-query-progress" role="status" aria-live="polite">
           <p>
             Reading mentioned files
             <DotLoader />
@@ -49,9 +48,11 @@ export default function QueryProgress({
       )
     case 'indexing':
       return (
-        <div className="smtcmp-query-progress">
+        <div className="smtcmp-query-progress" role="status" aria-live="polite">
           <p>
-            {`Indexing ${state.indexProgress.totalFiles} file`}
+            {`Indexing ${state.indexProgress.totalFiles} ${
+              state.indexProgress.totalFiles === 1 ? 'file' : 'files'
+            }`}
             <DotLoader />
           </p>
           <p className="smtcmp-query-progress-detail">{`${state.indexProgress.completedChunks}/${state.indexProgress.totalChunks} chunks indexed`}</p>
@@ -64,7 +65,7 @@ export default function QueryProgress({
       )
     case 'querying':
       return (
-        <div className="smtcmp-query-progress">
+        <div className="smtcmp-query-progress" role="status" aria-live="polite">
           <p>
             Querying the vault
             <DotLoader />
@@ -73,17 +74,11 @@ export default function QueryProgress({
       )
     case 'querying-done':
       return (
-        <div className="smtcmp-query-progress">
+        <div className="smtcmp-query-progress" role="status" aria-live="polite">
           <p>
             Reading related files
             <DotLoader />
           </p>
-          {state.queryResult.map((result) => (
-            <div key={result.path}>
-              <p>{result.path}</p>
-              <p>{result.similarity}</p>
-            </div>
-          ))}
         </div>
       )
   }

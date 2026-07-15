@@ -100,12 +100,23 @@ describe('CodexExecRuntime', () => {
 
   it('redacts environment secrets and bounds streamed event text', async () => {
     const childProcess = new FakeChildProcess()
+    let childEnv: NodeJS.ProcessEnv = {}
     const runtime = new CodexExecRuntime({
       spawnSpecResolverOptions: {
-        env: { PATH: '/usr/bin', SERVICE_TOKEN: 'bare-codex-secret' },
+        env: {
+          DATABASE_URL: 'database-url-secret',
+          MYSTERY_VALUE: 'arbitrary-long-secret',
+          NORMAL_FLAG: 'debug',
+          OPENAI_KEY: 'openai-key-secret',
+          PATH: '/usr/bin',
+          REDIS_URL: 'redis-url-secret',
+        },
         platform: 'linux',
       },
-      spawnProcess: () => childProcess,
+      spawnProcess: (_command, _args, options) => {
+        childEnv = options.env
+        return childProcess
+      },
     })
     const events: CodexAgentEvent[] = []
     const handle = runtime.execute(
@@ -124,8 +135,9 @@ describe('CodexExecRuntime', () => {
           id: 'command-1',
           type: 'command_execution',
           status: 'completed',
-          command: 'echo bare-codex-secret',
-          aggregated_output: `bare-codex-secret${'x'.repeat(30_000)}`,
+          command:
+            'echo database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug',
+          aggregated_output: `database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug${'x'.repeat(30_000)}`,
           result: { token: 'nested-secret' },
         },
       })}\n`,
@@ -133,10 +145,18 @@ describe('CodexExecRuntime', () => {
     childProcess.close(0)
 
     await handle.done
+    expect(childEnv).not.toHaveProperty('DATABASE_URL')
+    expect(childEnv).not.toHaveProperty('MYSTERY_VALUE')
+    expect(childEnv).not.toHaveProperty('OPENAI_KEY')
+    expect(childEnv).not.toHaveProperty('REDIS_URL')
     const event = events[0]
     const item = event?.kind === 'item.completed' ? event.item : {}
-    expect(JSON.stringify(item)).not.toContain('bare-codex-secret')
+    expect(JSON.stringify(item)).not.toContain('database-url-secret')
+    expect(JSON.stringify(item)).not.toContain('openai-key-secret')
+    expect(JSON.stringify(item)).not.toContain('redis-url-secret')
+    expect(JSON.stringify(item)).toContain('arbitrary-long-secret')
     expect(JSON.stringify(item)).not.toContain('nested-secret')
+    expect(JSON.stringify(item)).toContain('debug')
     expect(String(item.aggregated_output)).toHaveLength(24_000)
   })
 
@@ -203,6 +223,26 @@ describe('CodexExecRuntime', () => {
     }
   })
 
+  it('reports an unexpected process signal as a failure', async () => {
+    const childProcess = new FakeChildProcess()
+    const runtime = new CodexExecRuntime({
+      spawnProcess: () => childProcess,
+    })
+    const handle = runtime.execute(
+      {
+        cwd: '/vault',
+        prompt: 'Run',
+        sandboxMode: 'workspace-write',
+        approvalPolicy: 'default',
+      },
+      { onEvent: () => undefined },
+    )
+
+    childProcess.close(null, 'SIGTERM')
+
+    await expect(handle.done).rejects.toThrow('terminated by SIGTERM')
+  })
+
   it('rejects failed Codex turns with bounded stderr context', async () => {
     // Given: Codex reports a failed turn and emits a long stderr stream.
     const childProcess = new FakeChildProcess()
@@ -230,31 +270,41 @@ describe('CodexExecRuntime', () => {
   })
 
   it('rejects malformed JSONL and terminates the process', async () => {
-    // Given: a Codex process that emits invalid JSON.
-    const childProcess = new FakeChildProcess()
-    const errors: Error[] = []
-    const runtime = new CodexExecRuntime({
-      spawnProcess: () => childProcess,
-    })
+    jest.useFakeTimers()
+    try {
+      // Given: a Codex process that emits invalid JSON.
+      const childProcess = new FakeChildProcess()
+      const errors: Error[] = []
+      const runtime = new CodexExecRuntime({
+        killTimeoutMs: 100,
+        spawnProcess: () => childProcess,
+      })
 
-    // When: invalid JSONL arrives.
-    const handle = runtime.execute(
-      {
-        cwd: '/vault',
-        prompt: 'Bad output',
-        sandboxMode: 'workspace-write',
-        approvalPolicy: 'default',
-      },
-      {
-        onError: (error) => errors.push(error),
-        onEvent: () => undefined,
-      },
-    )
-    childProcess.stdout.write('{bad json}\n')
+      // When: invalid JSONL arrives.
+      const handle = runtime.execute(
+        {
+          cwd: '/vault',
+          prompt: 'Bad output',
+          sandboxMode: 'workspace-write',
+          approvalPolicy: 'default',
+        },
+        {
+          onError: (error) => errors.push(error),
+          onEvent: () => undefined,
+        },
+      )
+      childProcess.stdout.write('{bad json}\n')
 
-    // Then: the runtime rejects and asks the process to stop.
-    await expect(handle.done).rejects.toThrow('Malformed Codex JSONL at line 1')
-    expect(errors[0]?.message).toContain('Malformed Codex JSONL at line 1')
-    expect(childProcess.killedSignals).toEqual(['SIGTERM'])
+      // Then: the runtime rejects and asks the process to stop.
+      await expect(handle.done).rejects.toThrow(
+        'Malformed Codex JSONL at line 1',
+      )
+      expect(errors[0]?.message).toContain('Malformed Codex JSONL at line 1')
+      jest.advanceTimersByTime(100)
+      expect(childProcess.killedSignals).toEqual(['SIGTERM', 'SIGKILL'])
+      childProcess.close(null, 'SIGKILL')
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

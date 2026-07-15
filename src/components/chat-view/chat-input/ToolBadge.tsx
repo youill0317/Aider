@@ -16,14 +16,14 @@ export default function ToolBadge() {
   const { getMcpManager } = useMcp()
 
   const [mcpManager, setMcpManager] = useState<McpManager | null>(null)
-  const [toolCount, setToolCount] = useState(0)
+  const [toolCount, setToolCount] = useState<number | null>(null)
 
   const handleBadgeClick = useCallback(() => {
     new McpSectionModal(app, plugin).open()
   }, [plugin, app])
 
   const handleToolToggle = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation()
       setSettings({
         ...settings,
@@ -62,33 +62,46 @@ export default function ToolBadge() {
   }, [mcpManager])
 
   return (
-    <div
-      className="smtcmp-chat-user-input-file-badge"
-      onClick={handleBadgeClick}
-    >
-      <div className="smtcmp-chat-user-input-file-badge-name">
-        <Wrench
-          size={12}
-          className="smtcmp-chat-user-input-file-badge-name-icon"
-        />
-        <span
-          className={clsx(
-            !settings.chatOptions.enableTools && 'smtcmp-excluded-content',
-          )}
-        >
-          Tools ({toolCount})
-        </span>
-      </div>
-      <div
-        className="smtcmp-chat-user-input-file-badge-eye"
-        onClick={handleToolToggle}
+    <div className="smtcmp-chat-user-input-file-badge">
+      <button
+        type="button"
+        className="smtcmp-chat-user-input-file-badge-main"
+        aria-label={toolCount === 0 ? 'Set up tools' : 'Manage tools'}
+        aria-busy={toolCount === null}
+        onClick={handleBadgeClick}
       >
-        {settings.chatOptions.enableTools ? (
-          <Eye size={12} />
-        ) : (
-          <EyeOff size={12} />
-        )}
-      </div>
+        <span className="smtcmp-chat-user-input-file-badge-name">
+          <Wrench
+            size={12}
+            className="smtcmp-chat-user-input-file-badge-name-icon"
+          />
+          <span
+            className={clsx(
+              !settings.chatOptions.enableTools && 'smtcmp-excluded-content',
+            )}
+          >
+            {toolCount && toolCount > 0 ? `Tools (${toolCount})` : 'Tools'}
+          </span>
+        </span>
+      </button>
+      {(!settings.chatOptions.enableTools ||
+        (toolCount !== null && toolCount > 0)) && (
+        <button
+          type="button"
+          className="smtcmp-chat-user-input-file-badge-eye"
+          aria-label={
+            settings.chatOptions.enableTools ? 'Disable tools' : 'Enable tools'
+          }
+          aria-pressed={settings.chatOptions.enableTools}
+          onClick={handleToolToggle}
+        >
+          {settings.chatOptions.enableTools ? (
+            <Eye size={12} />
+          ) : (
+            <EyeOff size={12} />
+          )}
+        </button>
+      )}
     </div>
   )
 }

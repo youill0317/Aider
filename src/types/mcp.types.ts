@@ -6,23 +6,53 @@ export type McpTool = Tool
 export type McpToolCallResult = CallToolResult
 export type McpClient = Client
 
+const MAX_MCP_PARAMETER_CHARS = 16_384
+const MAX_MCP_ARGUMENTS = 256
+const MAX_MCP_ENVIRONMENT_ENTRIES = 256
+const MAX_MCP_TOOL_OPTIONS = 2_048
+
 export const mcpServerParametersSchema = z.object({
-  command: z.string(),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
+  command: z.string().min(1).max(MAX_MCP_PARAMETER_CHARS),
+  args: z
+    .array(z.string().max(MAX_MCP_PARAMETER_CHARS))
+    .max(MAX_MCP_ARGUMENTS)
+    .optional(),
+  env: z
+    .record(
+      z.string().max(MAX_MCP_PARAMETER_CHARS),
+      z.string().max(MAX_MCP_PARAMETER_CHARS),
+    )
+    .superRefine((environment, context) => {
+      if (Object.keys(environment).length > MAX_MCP_ENVIRONMENT_ENTRIES) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'MCP environment has too many entries',
+        })
+      }
+    })
+    .optional(),
 })
 export type McpServerParameters = z.infer<typeof mcpServerParametersSchema>
 
-export const mcpServerToolOptionsSchema = z.record(
-  z.string(),
-  z.object({
-    disabled: z.boolean().optional(),
-    allowAutoExecution: z.boolean().optional(),
-  }),
-)
+export const mcpServerToolOptionsSchema = z
+  .record(
+    z.string().max(MAX_MCP_PARAMETER_CHARS),
+    z.object({
+      disabled: z.boolean().optional(),
+      allowAutoExecution: z.boolean().optional(),
+    }),
+  )
+  .superRefine((toolOptions, context) => {
+    if (Object.keys(toolOptions).length > MAX_MCP_TOOL_OPTIONS) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'MCP server has too many tool options',
+      })
+    }
+  })
 
 export const mcpServerConfigSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1).max(128),
   parameters: mcpServerParametersSchema,
   enabled: z.boolean(),
   toolOptions: mcpServerToolOptionsSchema,
@@ -30,6 +60,7 @@ export const mcpServerConfigSchema = z.object({
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>
 
 export enum McpServerStatus {
+  ApprovalRequired = 'approval-required',
   Disconnected = 'disconnected',
   Connecting = 'connecting',
   Connected = 'connected',
@@ -41,7 +72,10 @@ export type McpServerState = {
   config: McpServerConfig
 } & (
   | {
-      status: McpServerStatus.Connecting | McpServerStatus.Disconnected
+      status:
+        | McpServerStatus.ApprovalRequired
+        | McpServerStatus.Connecting
+        | McpServerStatus.Disconnected
     }
   | {
       status: McpServerStatus.Connected

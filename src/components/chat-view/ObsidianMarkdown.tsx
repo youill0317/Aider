@@ -95,6 +95,7 @@ function setupMarkdownLinks(
   })
 }
 
+/** Renders untrusted tool and agent text without Markdown post-processors. */
 function ObsidianCodeBlock({
   content,
   language,
@@ -105,11 +106,12 @@ function ObsidianCodeBlock({
   scale?: 'xs' | 'sm' | 'base'
 }) {
   return (
-    <div className="smtcmp-obsidian-code-block">
-      <ObsidianMarkdown
-        content={`\`\`\`${language ?? ''}\n${content}\n\`\`\``}
-        scale={scale}
-      />
+    <div
+      className={`smtcmp-obsidian-code-block markdown-rendered smtcmp-markdown-rendered smtcmp-scale-${scale}`}
+    >
+      <pre>
+        <code data-language={language}>{content}</code>
+      </pre>
     </div>
   )
 }

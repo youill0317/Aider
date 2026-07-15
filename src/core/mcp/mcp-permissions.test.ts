@@ -1,6 +1,8 @@
 import { SmartComposerSettings } from '../../settings/schema/setting.types'
 import {
   McpClient,
+  McpServerConfig,
+  McpServerState,
   McpServerStatus,
   McpTool,
   McpToolCallResult,
@@ -233,6 +235,36 @@ describe('McpManager permission boundaries', () => {
     expect(callToolSpy).not.toHaveBeenCalled()
   })
 
+  it('global tool disable revokes listing, approval, and direct calls', async () => {
+    const client = createClient()
+    const callToolSpy = jest.spyOn(client, 'callTool')
+    const manager = createManager({
+      toolOptions: { search: {} },
+      client,
+    })
+    const disabledSettings = createSettings({ search: {} })
+    disabledSettings.chatOptions.enableTools = false
+
+    await manager.handleSettingsUpdate(disabledSettings)
+
+    const requestToolName = getToolName('github', 'search')
+    manager.allowToolForConversation(requestToolName, 'conversation-a')
+    await expect(manager.listAvailableTools()).resolves.toEqual([])
+    expect(manager.isToolExecutionAllowed({ requestToolName })).toBe(false)
+    await expect(
+      manager.callTool({ name: requestToolName, args: '{}' }),
+    ).resolves.toMatchObject({ status: ToolCallResponseStatus.Error })
+    expect(callToolSpy).not.toHaveBeenCalled()
+
+    await manager.handleSettingsUpdate(createSettings({ search: {} }))
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-a',
+      }),
+    ).toBe(false)
+  })
+
   it('conversation allow cannot bypass disabled tool', () => {
     // Given: a disabled tool has been allowed for one conversation.
     const manager = createManager({
@@ -279,6 +311,28 @@ describe('McpManager permission boundaries', () => {
         conversationId: 'conversation-b',
       }),
     ).toBe(false)
+  })
+
+  it('bounds conversation-scoped tool permissions', () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    const requestToolName = getToolName('github', 'search')
+
+    for (let index = 0; index <= 1_000; index += 1) {
+      manager.allowToolForConversation(requestToolName, `conversation-${index}`)
+    }
+
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-0',
+      }),
+    ).toBe(false)
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-1000',
+      }),
+    ).toBe(true)
   })
 
   it('enabled tool with per-chat allow is scoped to conversation', () => {
@@ -344,6 +398,58 @@ describe('McpManager permission boundaries', () => {
     await expect(manager.listAvailableTools()).resolves.toEqual([])
   })
 
+  it('reuses tools discovered while connecting instead of relisting', async () => {
+    const client = createClient()
+    const listTools = jest.fn()
+    client.listTools = listTools
+    const manager = createManager({ toolOptions: { search: {} }, client })
+
+    await expect(manager.listAvailableTools()).resolves.toHaveLength(1)
+    expect(listTools).not.toHaveBeenCalled()
+  })
+
+  it('does not let a stale connection overwrite newer settings', async () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    const resolvers = new Map<string, () => void>()
+    const closeSpies = new Map<string, jest.SpyInstance>()
+    const mutableManager = manager as unknown as {
+      connectServer: (config: McpServerConfig) => Promise<McpServerState>
+    }
+    mutableManager.connectServer = jest.fn(
+      (config: McpServerConfig) =>
+        new Promise<McpServerState>((resolve) => {
+          const client = createClient()
+          closeSpies.set(config.parameters.command, jest.spyOn(client, 'close'))
+          resolvers.set(config.parameters.command, () =>
+            resolve({
+              client,
+              config,
+              name: config.id,
+              status: McpServerStatus.Connected,
+              tools: [createTool('search')],
+            }),
+          )
+        }),
+    )
+
+    const staleUpdate = manager.handleSettingsUpdate(
+      createSettings({ search: {} }, { command: 'stale' }),
+    )
+    await waitFor(() => resolvers.has('stale'))
+    const latestUpdate = manager.handleSettingsUpdate(
+      createSettings({ search: {} }, { command: 'latest' }),
+    )
+    await waitFor(() => resolvers.has('latest'))
+    resolvers.get('latest')?.()
+    await latestUpdate
+    resolvers.get('stale')?.()
+    await staleUpdate
+
+    expect(manager.getServers()[0].config.parameters.command).toBe('latest')
+    expect(closeSpies.get('stale')).toHaveBeenCalledTimes(1)
+    expect(closeSpies.get('latest')).not.toHaveBeenCalled()
+  })
+
   it('mobile exposes no MCP execution path', async () => {
     // Given: a manager is forced into disabled mobile behavior.
     const manager = createManager({
@@ -362,6 +468,15 @@ describe('McpManager permission boundaries', () => {
         requestToolName: getToolName('github', 'search'),
       }),
     ).toBe(false)
+  })
+
+  it('exposes no cached tools after cleanup', async () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    await expect(manager.listAvailableTools()).resolves.toHaveLength(1)
+
+    manager.cleanup()
+
+    await expect(manager.listAvailableTools()).resolves.toEqual([])
   })
 
   it('MCP env secret is redacted from connection error', () => {
@@ -428,19 +543,10 @@ describe('McpManager permission boundaries', () => {
     })
     const mutableManager = manager as unknown as {
       defaultEnv: Record<string, string>
-      redactionEnvByServer: Map<string, Record<string, string>>
     }
     mutableManager.defaultEnv = {
       OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
     }
-    mutableManager.redactionEnvByServer = new Map([
-      [
-        'github',
-        {
-          OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
-        },
-      ],
-    ])
 
     // When: the tool call fails.
     const response = await manager.callTool({
@@ -473,16 +579,11 @@ describe('McpManager permission boundaries', () => {
       },
     })
     const mutableManager = manager as unknown as {
-      redactionEnvByServer: Map<string, Record<string, string>>
+      defaultEnv: Record<string, string>
     }
-    mutableManager.redactionEnvByServer = new Map([
-      [
-        'github',
-        {
-          OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
-        },
-      ],
-    ])
+    mutableManager.defaultEnv = {
+      OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
+    }
 
     // When: the tool returns an MCP error result.
     const response = await manager.callTool({
@@ -515,16 +616,11 @@ describe('McpManager permission boundaries', () => {
       },
     })
     const mutableManager = manager as unknown as {
-      redactionEnvByServer: Map<string, Record<string, string>>
+      defaultEnv: Record<string, string>
     }
-    mutableManager.redactionEnvByServer = new Map([
-      [
-        'github',
-        {
-          OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
-        },
-      ],
-    ])
+    mutableManager.defaultEnv = {
+      OPENAI_API_KEY: 'INHERITED_OPENAI_KEY',
+    }
 
     // When: the tool returns a successful MCP result.
     const response = await manager.callTool({
@@ -538,6 +634,117 @@ describe('McpManager permission boundaries', () => {
       expect(response.data.text).toContain('[REDACTED]')
       expect(response.data.text).not.toContain('INHERITED_OPENAI_KEY')
     }
+  })
+
+  it('bounds successful and error tool output', async () => {
+    const text = 'x'.repeat(30_000)
+    const success = await createManager({
+      toolOptions: { search: {} },
+      callToolResult: {
+        isError: false,
+        content: [{ type: 'text', text }],
+      },
+    }).callTool({ name: getToolName('github', 'search'), args: '{}' })
+    const error = await createManager({
+      toolOptions: { search: {} },
+      callToolResult: {
+        isError: true,
+        content: [{ type: 'text', text }],
+      },
+    }).callTool({ name: getToolName('github', 'search'), args: '{}' })
+
+    expect(success.status).toBe(ToolCallResponseStatus.Success)
+    expect(error.status).toBe(ToolCallResponseStatus.Error)
+    if (success.status === ToolCallResponseStatus.Success) {
+      expect(success.data.text).toHaveLength(24_000)
+    }
+    if (error.status === ToolCallResponseStatus.Error) {
+      expect(error.error).toHaveLength(24_000)
+    }
+  })
+
+  it('rejects oversized serialized tool arguments before calling a server', async () => {
+    const client = createClient()
+    const callTool = jest.spyOn(client, 'callTool')
+    const manager = createManager({
+      toolOptions: { search: {} },
+      client,
+    })
+
+    const response = await manager.callTool({
+      name: getToolName('github', 'search'),
+      args: 'x'.repeat(1024 * 1024 + 1),
+    })
+
+    expect(response.status).toBe(ToolCallResponseStatus.Error)
+    expect(callTool).not.toHaveBeenCalled()
+  })
+
+  it('preserves every text block returned by a tool', async () => {
+    const response = await createManager({
+      toolOptions: { search: {} },
+      callToolResult: {
+        isError: false,
+        content: [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ],
+      },
+    }).callTool({ name: getToolName('github', 'search'), args: '{}' })
+
+    expect(response.status).toBe(ToolCallResponseStatus.Success)
+    if (response.status === ToolCallResponseStatus.Success) {
+      expect(response.data.text).toBe('first\nsecond')
+    }
+  })
+
+  it('does not let an older duplicate call clear the newer call state', async () => {
+    const client = {
+      close: jest.fn(),
+      listTools: async () => ({ tools: [createTool('search')] }),
+      callTool: jest.fn(
+        (
+          _request: unknown,
+          _schema: unknown,
+          options: { signal: AbortSignal },
+        ) =>
+          new Promise((_resolve, reject) => {
+            const rejectAsAborted = () =>
+              reject(new DOMException('aborted', 'AbortError'))
+            if (options.signal.aborted) {
+              rejectAsAborted()
+            } else {
+              options.signal.addEventListener('abort', rejectAsAborted, {
+                once: true,
+              })
+            }
+          }),
+      ),
+    } as unknown as McpClient
+    const manager = createManager({
+      toolOptions: { search: {} },
+      client,
+    })
+
+    const first = manager.callTool({
+      name: getToolName('github', 'search'),
+      args: '{}',
+      id: 'same-id',
+    })
+    await Promise.resolve()
+    const second = manager.callTool({
+      name: getToolName('github', 'search'),
+      args: '{}',
+      id: 'same-id',
+    })
+
+    await expect(first).resolves.toEqual({
+      status: ToolCallResponseStatus.Aborted,
+    })
+    expect(manager.abortToolCall('same-id')).toBe(true)
+    await expect(second).resolves.toEqual({
+      status: ToolCallResponseStatus.Aborted,
+    })
   })
 
   it('password-style MCP env secret is redacted from tool errors', async () => {
@@ -557,16 +764,11 @@ describe('McpManager permission boundaries', () => {
       },
     })
     const mutableManager = manager as unknown as {
-      redactionEnvByServer: Map<string, Record<string, string>>
+      defaultEnv: Record<string, string>
     }
-    mutableManager.redactionEnvByServer = new Map([
-      [
-        'github',
-        {
-          MCP_PASSWORD: 'MCP_PASSWORD_VALUE',
-        },
-      ],
-    ])
+    mutableManager.defaultEnv = {
+      MCP_PASSWORD: 'MCP_PASSWORD_VALUE',
+    }
 
     // When: the tool returns an MCP error result.
     const response = await manager.callTool({
@@ -582,28 +784,28 @@ describe('McpManager permission boundaries', () => {
     }
   })
 
-  it('MCP env redaction preserves non-secret context', () => {
-    // Given: an MCP error includes both secret and non-secret env values.
+  it('MCP env redaction preserves non-secret inherited context', () => {
+    // Given: an MCP error includes configured secret and inherited diagnostic values.
     const serverConfig = createSettings(
       {},
       {
         command: 'node',
         env: {
           GITHUB_PERSONAL_ACCESS_TOKEN: 'GITHUB_PERSONAL_ACCESS_TOKEN_VALUE',
-          NORMAL_FLAG: 'debug',
         },
       },
     ).mcp.servers[0]
 
     // When: the error is redacted.
     const message = redactMcpError(
-      'failed with GITHUB_PERSONAL_ACCESS_TOKEN_VALUE while NORMAL_FLAG=debug',
+      'failed with GITHUB_PERSONAL_ACCESS_TOKEN_VALUE while NORMAL_FLAG=arbitrary-long-context',
       serverConfig,
+      { NORMAL_FLAG: 'arbitrary-long-context' },
     )
 
     // Then: only the secret env value is removed.
     expect(message).toContain('[REDACTED]')
-    expect(message).toContain('NORMAL_FLAG=debug')
+    expect(message).toContain('NORMAL_FLAG=arbitrary-long-context')
     expect(message).not.toContain('GITHUB_PERSONAL_ACCESS_TOKEN_VALUE')
   })
 
@@ -616,6 +818,10 @@ describe('McpManager permission boundaries', () => {
         env: {
           SSH_PRIVATE_KEY: 'SSH_PRIVATE_KEY_VALUE',
           AWS_ACCESS_KEY_ID: 'AWS_ACCESS_KEY_ID_VALUE',
+          DATABASE_URL: 'DATABASE_URL_VALUE',
+          NORMAL_LONG_FLAG: 'arbitrary-long-secret',
+          OPENAI_KEY: 'OPENAI_KEY_VALUE',
+          REDIS_URL: 'REDIS_URL_VALUE',
           NORMAL_FLAG: 'debug',
         },
       },
@@ -623,15 +829,19 @@ describe('McpManager permission boundaries', () => {
 
     // When: the error is redacted.
     const message = redactMcpError(
-      'failed with SSH_PRIVATE_KEY_VALUE and AWS_ACCESS_KEY_ID_VALUE while NORMAL_FLAG=debug',
+      'failed with SSH_PRIVATE_KEY_VALUE, AWS_ACCESS_KEY_ID_VALUE, DATABASE_URL_VALUE, arbitrary-long-secret, OPENAI_KEY_VALUE, and REDIS_URL_VALUE while NORMAL_FLAG=debug',
       serverConfig,
     )
 
-    // Then: configured env values are removed without dropping ordinary context.
+    // Then: every configured env value is removed, regardless of its key or length.
     expect(message).toContain('[REDACTED]')
-    expect(message).toContain('NORMAL_FLAG=debug')
+    expect(message).toContain('NORMAL_FLAG=[REDACTED]')
     expect(message).not.toContain('SSH_PRIVATE_KEY_VALUE')
     expect(message).not.toContain('AWS_ACCESS_KEY_ID_VALUE')
+    expect(message).not.toContain('DATABASE_URL_VALUE')
+    expect(message).not.toContain('arbitrary-long-secret')
+    expect(message).not.toContain('OPENAI_KEY_VALUE')
+    expect(message).not.toContain('REDIS_URL_VALUE')
   })
 })
 
@@ -647,6 +857,7 @@ function createManager(params: {
   const manager = new McpManager({
     settings: createSettings(params.toolOptions, params.parameters),
     registerSettingsListener: () => () => undefined,
+    isServerTrusted: async () => true,
   })
   const mutableManager = manager as unknown as {
     servers: ReturnType<typeof createConnectedServer>[]
@@ -775,6 +986,7 @@ function createClient({
   readonly callToolResult?: McpToolCallResult
 } = {}): McpClient {
   const client = {
+    close: jest.fn(),
     listTools: async () => ({
       tools: [createTool('search')],
     }),
@@ -807,4 +1019,12 @@ function createTool(name: string): McpTool {
       properties: {},
     },
   }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (predicate()) return
+    await Promise.resolve()
+  }
+  throw new Error('Condition was not reached')
 }

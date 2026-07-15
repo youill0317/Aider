@@ -4,10 +4,11 @@ import {
   McpServerState,
   McpServerStatus,
 } from '../../types/mcp.types'
-import { redactSecrets } from '../../utils/security/redact-secrets'
-
-const SECRET_ENV_KEY_PATTERN =
-  /(access[-_]?key|api[-_]?key|auth|bearer|credential|pat|password|private[-_]?key|secret|ssh|token)/i
+import {
+  redactAllEnvironmentValues,
+  redactEnvironmentSecrets,
+  redactSecrets,
+} from '../../utils/security/redact-secrets'
 
 function equalOptionalRecords(
   left?: Record<string, string>,
@@ -42,10 +43,6 @@ export function equalServerParameters(
   )
 }
 
-function isSecretEnvKey(key: string): boolean {
-  return SECRET_ENV_KEY_PATTERN.test(key)
-}
-
 export function hasAdvertisedTool(
   server: McpServerState,
   toolName: string,
@@ -56,46 +53,14 @@ export function hasAdvertisedTool(
   )
 }
 
-export function mergeMcpRedactionEnv(
-  defaultEnv: Record<string, string>,
-  serverConfig: McpServerConfig,
-): Record<string, string> {
-  return {
-    ...defaultEnv,
-    ...(serverConfig.parameters.env ?? {}),
-  }
-}
-
-export function withMcpRedactionEnv(
-  serverConfig: McpServerConfig,
-  env: Record<string, string>,
-): McpServerConfig {
-  return {
-    ...serverConfig,
-    parameters: {
-      ...serverConfig.parameters,
-      env,
-    },
-  }
-}
-
 export function redactMcpError(
   value: string,
   serverConfig?: McpServerConfig,
+  inheritedEnv: NodeJS.ProcessEnv = {},
 ): string {
-  const env = serverConfig?.parameters.env ?? {}
-  const redacted = redactSecrets({
-    message: value,
-    env,
-  })
-  const redactedMessage =
-    typeof redacted.message === 'string' ? redacted.message : value
-
-  let message = redactedMessage
-  for (const [envKey, envValue] of Object.entries(env)) {
-    if (isSecretEnvKey(envKey) && envValue.length > 0) {
-      message = message.split(envValue).join('[REDACTED]')
-    }
-  }
-  return message
+  const redacted = redactSecrets(value)
+  return redactEnvironmentSecrets(
+    redactAllEnvironmentValues(redacted, serverConfig?.parameters.env ?? {}),
+    inheritedEnv,
+  )
 }

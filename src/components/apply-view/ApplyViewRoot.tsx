@@ -1,5 +1,5 @@
 import { CheckIcon, ChevronDown, ChevronUp, X } from 'lucide-react'
-import { getIcon } from 'obsidian'
+import { Notice } from 'obsidian'
 import {
   forwardRef,
   useCallback,
@@ -13,6 +13,8 @@ import { ApplyViewState } from '../../ApplyView'
 import { useApp } from '../../contexts/app-context'
 import { DiffBlock, createDiffBlocks } from '../../utils/chat/diff'
 
+import { applyFileChangeIfCurrent } from './apply-file-change'
+
 export default function ApplyViewRoot({
   state,
   close,
@@ -20,15 +22,13 @@ export default function ApplyViewRoot({
   state: ApplyViewState
   close: () => void
 }) {
-  const acceptIcon = getIcon('check')
-  const rejectIcon = getIcon('x')
   const [currentDiffIndex, setCurrentDiffIndex] = useState(0)
   const diffBlockRefs = useRef<(HTMLDivElement | null)[]>([])
   const scrollerRef = useRef<HTMLDivElement>(null)
 
   const app = useApp()
 
-  const [diff, setDiff] = useState<DiffBlock[]>(
+  const [diff, setDiff] = useState<DiffBlock[]>(() =>
     createDiffBlocks(state.originalContent, state.newContent),
   )
   const modifiedBlockIndices = useMemo(
@@ -73,7 +73,18 @@ export default function ApplyViewRoot({
         }
       })
       .join('\n')
-    await app.vault.modify(state.file, newContent)
+    const applied = await applyFileChangeIfCurrent(
+      app.vault,
+      state.file,
+      state.originalContent,
+      newContent,
+    )
+    if (!applied) {
+      new Notice(
+        'The note changed during review. Generate the suggestion again to avoid overwriting newer edits.',
+      )
+      return
+    }
     close()
   }
 
@@ -169,23 +180,29 @@ export default function ApplyViewRoot({
 
     const scrollerRect = scroller.getBoundingClientRect()
     const scrollerTop = scrollerRect.top
-    const visibleThreshold = 10 // pixels from top to consider element "visible"
+    let closestIndex = -1
+    let closestDistance = Number.POSITIVE_INFINITY
 
-    // Find the first visible diff block
     for (let i = 0; i < modifiedBlockIndices.length; i++) {
       const element = diffBlockRefs.current[modifiedBlockIndices[i]]
       if (!element) continue
 
       const rect = element.getBoundingClientRect()
-      const relativeTop = rect.top - scrollerTop
-
-      // If element is visible (slightly below the top of the viewport)
-      if (relativeTop >= -visibleThreshold) {
-        setCurrentDiffIndex(i)
-        break
+      const distance = Math.abs(rect.top - scrollerTop)
+      if (distance < closestDistance) {
+        closestDistance = distance
+        closestIndex = i
       }
     }
+
+    if (closestIndex >= 0) setCurrentDiffIndex(closestIndex)
   }, [modifiedBlockIndices])
+
+  useEffect(() => {
+    setCurrentDiffIndex((index) =>
+      Math.min(index, Math.max(modifiedBlockIndices.length - 1, 0)),
+    )
+  }, [modifiedBlockIndices.length])
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -210,47 +227,59 @@ export default function ApplyViewRoot({
     <div id="smtcmp-apply-view">
       <div className="view-header">
         <div className="view-header-title-container mod-at-start">
-          <div className="view-header-title">
-            Applying: {state?.file?.name ?? ''}
+          <div className="view-header-title" role="heading" aria-level={1}>
+            Review changes
           </div>
-          <div className="view-actions">
-            <div className="smtcmp-diff-navigation">
+          <div
+            className="view-actions"
+            role="group"
+            aria-label="Review actions"
+          >
+            <div
+              className="smtcmp-diff-navigation"
+              role="group"
+              aria-label="Change navigation"
+            >
               <button
+                type="button"
                 className="clickable-icon"
                 onClick={handlePrevDiff}
                 disabled={currentDiffIndex <= 0}
-                aria-label="Previous diff"
+                aria-label="Previous change"
               >
                 <ChevronUp size={14} />
               </button>
-              <span>
+              <span aria-live="polite" aria-atomic="true">
                 {modifiedBlockIndices.length > 0
                   ? `${currentDiffIndex + 1} of ${modifiedBlockIndices.length}`
                   : '0 of 0'}
               </span>
               <button
+                type="button"
                 className="clickable-icon"
                 onClick={handleNextDiff}
                 disabled={currentDiffIndex >= modifiedBlockIndices.length - 1}
-                aria-label="Next diff"
+                aria-label="Next change"
               >
                 <ChevronDown size={14} />
               </button>
             </div>
             <button
+              type="button"
               className="clickable-icon view-action"
-              aria-label="Accept changes"
+              aria-label="Apply changes"
               onClick={handleAccept}
             >
-              {acceptIcon && <CheckIcon size={14} />}
-              Accept
+              <CheckIcon size={14} />
+              Apply changes
             </button>
             <button
+              type="button"
               className="clickable-icon view-action"
-              aria-label="Cancel apply"
+              aria-label="Cancel review"
               onClick={handleReject}
             >
-              {rejectIcon && <X size={14} />}
+              <X size={14} />
               Cancel
             </button>
           </div>
@@ -262,11 +291,7 @@ export default function ApplyViewRoot({
           <div className="cm-editor">
             <div className="cm-scroller" ref={scrollerRef}>
               <div className="cm-sizer">
-                <div className="smtcmp-inline-title">
-                  {state?.file?.name
-                    ? state.file.name.replace(/\.[^/.]+$/, '')
-                    : ''}
-                </div>
+                <div className="smtcmp-inline-title">{state.file.basename}</div>
 
                 {diff.map((block, index) => (
                   <DiffBlockView
@@ -317,14 +342,28 @@ const DiffBlockView = forwardRef<
             <div style={{ width: '100%' }}>{part.modifiedValue}</div>
           </div>
         )}
-        <div className="smtcmp-diff-block-actions">
-          <button onClick={onAcceptIncoming} className="smtcmp-accept">
-            Accept Incoming
+        <div
+          className="smtcmp-diff-block-actions"
+          role="group"
+          aria-label="Choose this change"
+        >
+          <button
+            type="button"
+            onClick={onAcceptIncoming}
+            className="smtcmp-accept"
+          >
+            Use suggestion
           </button>
-          <button onClick={onAcceptCurrent} className="smtcmp-exclude">
-            Accept Current
+          <button
+            type="button"
+            onClick={onAcceptCurrent}
+            className="smtcmp-exclude"
+          >
+            Keep original
           </button>
-          <button onClick={onAcceptBoth}>Accept Both</button>
+          <button type="button" onClick={onAcceptBoth}>
+            Keep both
+          </button>
         </div>
       </div>
     )

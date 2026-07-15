@@ -38,7 +38,13 @@ export type AiderAdoptionAdapter = {
   readonly write: (path: string, content: string) => Promise<void>
   readonly readBinary: (path: string) => Promise<ArrayBuffer>
   readonly writeBinary: (path: string, content: ArrayBuffer) => Promise<void>
+  readonly rename: (oldPath: string, newPath: string) => Promise<void>
+  readonly remove: (path: string) => Promise<void>
   readonly list: (path: string) => Promise<AdapterList>
+  readonly stat: (path: string) => Promise<{
+    readonly type: 'file' | 'folder'
+    readonly size: number
+  } | null>
 }
 
 export type AiderAdoptionApp = {
@@ -79,11 +85,7 @@ export type AdoptionOutcome =
 export function isTerminalAdoptionStatus(
   status: AdoptionStatusKind | undefined,
 ): boolean {
-  return (
-    status === 'completed' ||
-    status === 'skipped-existing-aider-data' ||
-    status === 'skipped-missing-legacy-data'
-  )
+  return status === 'completed' || status === 'skipped-existing-aider-data'
 }
 
 export function isAdoptionStatusKind(

@@ -14,6 +14,7 @@ export class RAGEngine {
   private embeddingModel: EmbeddingModelClient | null = null
   private indexQueue: Promise<void> = Promise.resolve()
   private activeQueries = new Set<Promise<unknown>>()
+  private activeAbortControllers = new Set<AbortController>()
   private closed = false
 
   constructor(settings: SmartComposerSettings, vectorManager: VectorManager) {
@@ -27,6 +28,7 @@ export class RAGEngine {
 
   async cleanup() {
     this.closed = true
+    this.activeAbortControllers.forEach((controller) => controller.abort())
     await Promise.all([
       this.indexQueue.catch(() => undefined),
       ...[...this.activeQueries].map((query) => query.catch(() => undefined)),
@@ -53,6 +55,7 @@ export class RAGEngine {
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void,
   ): Promise<void> {
     const { embeddingModel, vectorManager } = this.getResources()
+    const operation = this.beginOperation()
     const indexOptions = {
       chunkSize: this.settings.ragOptions.chunkSize,
       excludePatterns: [...this.settings.ragOptions.excludePatterns],
@@ -60,12 +63,16 @@ export class RAGEngine {
       reindexAll: options.reindexAll,
     }
 
-    return this.enqueueIndexUpdate(
-      embeddingModel,
-      vectorManager,
-      indexOptions,
-      onQueryProgressChange,
-    )
+    try {
+      return await this.enqueueIndexUpdate(
+        embeddingModel,
+        vectorManager,
+        { ...indexOptions, signal: operation.signal },
+        onQueryProgressChange,
+      )
+    } finally {
+      operation.release()
+    }
   }
 
   private enqueueIndexUpdate(
@@ -76,12 +83,15 @@ export class RAGEngine {
       excludePatterns: string[]
       includePatterns: string[]
       reindexAll: boolean
+      scope?: { files: string[]; folders: string[] }
+      signal?: AbortSignal
     },
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void,
   ): Promise<void> {
     const update = this.indexQueue
       .catch(() => undefined)
       .then(async () => {
+        throwIfAborted(indexOptions.signal)
         await vectorManager.updateVaultIndex(
           embeddingModel,
           indexOptions,
@@ -101,6 +111,7 @@ export class RAGEngine {
     query,
     scope,
     onQueryProgressChange,
+    signal,
   }: {
     query: string
     scope?: {
@@ -108,12 +119,14 @@ export class RAGEngine {
       folders: string[]
     }
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void
+    signal?: AbortSignal
   }): Promise<
     (Omit<SelectEmbedding, 'embedding'> & {
       similarity: number
     })[]
   > {
     const { embeddingModel, vectorManager } = this.getResources()
+    const operationController = this.beginOperation(signal)
     const ragOptions = this.settings.ragOptions
     const operation = this.processQueryWithSnapshot({
       embeddingModel,
@@ -121,6 +134,7 @@ export class RAGEngine {
       query,
       scope,
       onQueryProgressChange,
+      signal: operationController.signal,
       ragOptions: {
         chunkSize: ragOptions.chunkSize,
         excludePatterns: [...ragOptions.excludePatterns],
@@ -134,6 +148,7 @@ export class RAGEngine {
       return await operation
     } finally {
       this.activeQueries.delete(operation)
+      operationController.release()
     }
   }
 
@@ -144,12 +159,14 @@ export class RAGEngine {
     scope,
     onQueryProgressChange,
     ragOptions,
+    signal,
   }: {
     embeddingModel: EmbeddingModelClient
     vectorManager: VectorManager
     query: string
     scope?: { files: string[]; folders: string[] }
     onQueryProgressChange?: (queryProgress: QueryProgressState) => void
+    signal?: AbortSignal
     ragOptions: {
       chunkSize: number
       excludePatterns: string[]
@@ -163,10 +180,15 @@ export class RAGEngine {
     await this.enqueueIndexUpdate(
       embeddingModel,
       vectorManager,
-      { ...ragOptions, reindexAll: false },
+      { ...ragOptions, reindexAll: false, scope, signal },
       onQueryProgressChange,
     )
-    const queryEmbedding = await this.getQueryEmbedding(query, embeddingModel)
+    throwIfAborted(signal)
+    const queryEmbedding = await this.getQueryEmbedding(
+      query,
+      embeddingModel,
+      signal,
+    )
     onQueryProgressChange?.({
       type: 'querying',
     })
@@ -180,6 +202,7 @@ export class RAGEngine {
           scope,
         },
       )) ?? []
+    throwIfAborted(signal)
     onQueryProgressChange?.({
       type: 'querying-done',
       queryResult,
@@ -190,6 +213,7 @@ export class RAGEngine {
   private async getQueryEmbedding(
     query: string,
     embeddingModel: EmbeddingModelClient,
+    signal?: AbortSignal,
   ): Promise<number[]> {
     if (isVoyageContextualAutoChunkModel(embeddingModel)) {
       if (!embeddingModel.getContextualEmbeddings) {
@@ -199,6 +223,7 @@ export class RAGEngine {
       }
       const result = await embeddingModel.getContextualEmbeddings(query, {
         inputType: 'query',
+        signal,
       })
       const firstEmbedding = result.chunks[0]?.embedding
       if (!firstEmbedding || firstEmbedding.length === 0) {
@@ -206,7 +231,7 @@ export class RAGEngine {
       }
       return firstEmbedding
     }
-    return embeddingModel.getEmbedding(query)
+    return embeddingModel.getEmbedding(query, signal)
   }
 
   private getResources(): {
@@ -223,5 +248,32 @@ export class RAGEngine {
       embeddingModel: this.embeddingModel,
       vectorManager: this.vectorManager,
     }
+  }
+
+  private beginOperation(externalSignal?: AbortSignal): {
+    signal: AbortSignal
+    release: () => void
+  } {
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    if (externalSignal?.aborted) {
+      abort()
+    } else {
+      externalSignal?.addEventListener('abort', abort, { once: true })
+    }
+    this.activeAbortControllers.add(controller)
+    return {
+      signal: controller.signal,
+      release: () => {
+        externalSignal?.removeEventListener('abort', abort)
+        this.activeAbortControllers.delete(controller)
+      },
+    }
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException('Operation aborted', 'AbortError')
   }
 }

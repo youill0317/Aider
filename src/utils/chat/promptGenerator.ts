@@ -69,29 +69,27 @@ export class PromptGenerator {
 
     const compiledMessages = [...messages]
     let lastUserMessageIndex = -1
-    for (let i = compiledMessages.length - 1; i >= 0; --i) {
-      if (compiledMessages[i].role === 'user') {
-        lastUserMessageIndex = i
-        break
+    for (let i = 0; i < compiledMessages.length; ++i) {
+      const message = compiledMessages[i]
+      if (message.role !== 'user') continue
+      lastUserMessageIndex = i
+      if (message.promptContent) continue
+
+      const { promptContent, similaritySearchResults } =
+        await this.compileUserMessagePrompt({ message })
+      compiledMessages[i] = {
+        ...message,
+        promptContent,
+        similaritySearchResults,
       }
     }
     if (lastUserMessageIndex === -1) {
       throw new Error('No user messages found')
     }
 
-    let lastUserMessage = compiledMessages[
+    const lastUserMessage = compiledMessages[
       lastUserMessageIndex
     ] as ChatUserMessage
-    if (!lastUserMessage.promptContent) {
-      const { promptContent, similaritySearchResults } =
-        await this.compileUserMessagePrompt({ message: lastUserMessage })
-      lastUserMessage = {
-        ...lastUserMessage,
-        promptContent,
-        similaritySearchResults,
-      }
-      compiledMessages[lastUserMessageIndex] = lastUserMessage
-    }
     const shouldUseRAG = lastUserMessage.similaritySearchResults !== undefined
     const hasFileOnlyRag =
       lastUserMessage.similaritySearchResults?.some(

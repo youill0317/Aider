@@ -18,6 +18,7 @@ import { PGLiteAbortedException } from './database/exception'
 import { migrateToJsonDatabase } from './database/json/migrateToJsonDatabase'
 import {
   isMcpServerTrusted,
+  providerRoutesMatch,
   revokeMcpServerTrust,
   revokeProviderRouteTrust,
   trustMcpServer,
@@ -452,6 +453,30 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     provider: SmartComposerSettings['providers'][number],
   ): Promise<void> {
     await trustProviderRoute(provider, this.getSecretStore())
+  }
+
+  async setTrustedProviderSettings(
+    provider: SmartComposerSettings['providers'][number],
+    newSettings: SmartComposerSettings,
+    previousProvider?: SmartComposerSettings['providers'][number],
+  ): Promise<void> {
+    await this.trustProviderRoute(provider)
+    try {
+      await this.setSettings(newSettings)
+    } catch (error) {
+      const activeProvider = this.settings.providers.find(
+        (candidate) =>
+          candidate.id === provider.id && candidate.type === provider.type,
+      )
+      if (!activeProvider || !providerRoutesMatch(activeProvider, provider)) {
+        if (previousProvider) {
+          await this.trustProviderRoute(previousProvider)
+        } else {
+          await this.revokeProviderRouteTrust(provider)
+        }
+      }
+      throw error
+    }
   }
 
   async revokeProviderRouteTrust(

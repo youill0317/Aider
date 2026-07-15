@@ -7,7 +7,7 @@ import {
   MAX_MENTIONABLE_IMAGES,
   MentionableImage,
 } from '../../../../../types/mentionable'
-import { fileToMentionableImage } from '../../../../../utils/llm/image'
+import { filesToMentionableImages } from '../../../../../utils/llm/image'
 
 export default function DragDropPaste({
   onCreateImageMentionables,
@@ -24,9 +24,7 @@ export default function DragDropPaste({
           const images = files
             .filter((file) => file.type.startsWith('image/'))
             .slice(0, MAX_MENTIONABLE_IMAGES)
-          const mentionableImages = await Promise.all(
-            images.map(async (image) => await fileToMentionableImage(image)),
-          )
+          const mentionableImages = await filesToMentionableImages(images)
           onCreateImageMentionables?.(mentionableImages)
         })().catch(() => {
           console.warn('Unable to attach one or more images')

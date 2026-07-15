@@ -155,7 +155,7 @@ describe('PromptGenerator RAG metadata handling', () => {
     )
   })
 
-  it('compiles only the latest missing prompt and keeps older history plain', async () => {
+  it('preserves attachments from older uncompiled user turns', async () => {
     const processQuery = jest.fn().mockResolvedValue([])
     const promptGenerator = new PromptGenerator(
       async () => ({ processQuery }) as unknown as RAGEngine,
@@ -166,6 +166,14 @@ describe('PromptGenerator RAG metadata handling', () => {
       ...createVaultSearchUserMessage(),
       id: 'older-user',
       content: createEditorState('  Older question  '),
+      mentionables: [
+        {
+          type: 'image' as const,
+          name: 'older.png',
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,older',
+        },
+      ],
     }
     const latestMessage = {
       ...createVaultSearchUserMessage(),
@@ -182,13 +190,21 @@ describe('PromptGenerator RAG metadata handling', () => {
       messages: [olderMessage, latestMessage],
     })
 
-    expect(compilePrompt).toHaveBeenCalledTimes(1)
-    expect(compilePrompt).toHaveBeenCalledWith({ message: latestMessage })
+    expect(compilePrompt).toHaveBeenCalledTimes(2)
+    expect(compilePrompt).toHaveBeenNthCalledWith(1, { message: olderMessage })
+    expect(compilePrompt).toHaveBeenNthCalledWith(2, { message: latestMessage })
     expect(processQuery).not.toHaveBeenCalled()
     const userMessages = requestMessages.filter(
       (message) => message.role === 'user',
     )
-    expect(userMessages[0]?.content).toBe('Older question')
+    expect(userMessages[0]?.content).toEqual(
+      expect.arrayContaining([
+        {
+          type: 'image_url',
+          image_url: { url: 'data:image/png;base64,older' },
+        },
+      ]),
+    )
     expect(getTextContent(userMessages[1]?.content ?? null)).toContain(
       'Latest question',
     )

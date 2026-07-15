@@ -6,7 +6,7 @@ import {
   MAX_MENTIONABLE_IMAGES,
   MentionableImage,
 } from '../../../../../types/mentionable'
-import { fileToMentionableImage } from '../../../../../utils/llm/image'
+import { filesToMentionableImages } from '../../../../../utils/llm/image'
 
 export default function ImagePastePlugin({
   onCreateImageMentionables,
@@ -26,7 +26,7 @@ export default function ImagePastePlugin({
         .slice(0, MAX_MENTIONABLE_IMAGES)
       if (images.length === 0) return false
 
-      Promise.all(images.map((image) => fileToMentionableImage(image)))
+      filesToMentionableImages(images)
         .then((mentionableImages) => {
           onCreateImageMentionables?.(mentionableImages)
         })

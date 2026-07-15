@@ -33,6 +33,18 @@ export async function fileToMentionableImage(
   }
 }
 
+export async function filesToMentionableImages(
+  files: readonly File[],
+): Promise<MentionableImage[]> {
+  const results = await Promise.allSettled(files.map(fileToMentionableImage))
+  if (results.some((result) => result.status === 'rejected')) {
+    console.warn('Unable to attach one or more images')
+  }
+  return results.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
+  )
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

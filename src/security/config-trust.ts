@@ -85,6 +85,13 @@ export function assertProviderRouteTrusted(provider: LLMProvider): void {
   }
 }
 
+export function providerRoutesMatch(
+  left: LLMProvider,
+  right: LLMProvider,
+): boolean {
+  return canonicalProviderRoute(left) === canonicalProviderRoute(right)
+}
+
 async function hasMatchingFingerprint(
   secretStore: SecretStore,
   key: string,

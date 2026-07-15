@@ -25,7 +25,7 @@ import {
   getMentionableKey,
   serializeMentionable,
 } from '../../../utils/chat/mentionable'
-import { fileToMentionableImage } from '../../../utils/llm/image'
+import { filesToMentionableImages } from '../../../utils/llm/image'
 import { openMarkdownFile, readTFileContent } from '../../../utils/obsidian'
 import { ObsidianMarkdown } from '../ObsidianMarkdown'
 
@@ -262,16 +262,10 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
     }
 
     const handleUploadImages = async (images: File[]) => {
-      try {
-        const mentionableImages = await Promise.all(
-          images
-            .slice(0, MAX_MENTIONABLE_IMAGES)
-            .map((image) => fileToMentionableImage(image)),
-        )
-        handleCreateImageMentionables(mentionableImages)
-      } catch {
-        console.warn('Unable to attach one or more images')
-      }
+      const mentionableImages = await filesToMentionableImages(
+        images.slice(0, MAX_MENTIONABLE_IMAGES),
+      )
+      handleCreateImageMentionables(mentionableImages)
     }
 
     const handleSubmit = (mode: ChatSubmitMode = 'chat') => {

@@ -21,18 +21,15 @@ import type {
 } from './types'
 
 export const CODEX_TOOL_NAME = 'run_codex'
+export const MAX_CODEX_TOOL_PROMPT_CHARS = 2 * 1024 * 1024
 
 const MAX_CODEX_TOOL_OUTPUT_CHARS = 24_000
-const MAX_CODEX_TOOL_ARGUMENT_CHARS = 1024 * 1024
+const MAX_CODEX_TOOL_ARGUMENT_CHARS = 4 * 1024 * 1024
 const MAX_ALLOWED_CONVERSATIONS = 1_000
 const MAX_ALLOWED_EXECUTIONS_PER_CONVERSATION = 100
 
 const codexToolArgsSchema = z.object({
-  prompt: z
-    .string()
-    .trim()
-    .min(1)
-    .max(256 * 1024),
+  prompt: z.string().trim().min(1).max(MAX_CODEX_TOOL_PROMPT_CHARS),
   model: z.string().max(512).optional(),
   summary: z.string().max(512).optional(),
 })

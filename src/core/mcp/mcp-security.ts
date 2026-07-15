@@ -5,7 +5,7 @@ import {
   McpServerStatus,
 } from '../../types/mcp.types'
 import {
-  redactAllEnvironmentValues,
+  redactConfiguredEnvironmentValues,
   redactEnvironmentSecrets,
   redactSecrets,
 } from '../../utils/security/redact-secrets'
@@ -60,7 +60,10 @@ export function redactMcpError(
 ): string {
   const redacted = redactSecrets(value)
   return redactEnvironmentSecrets(
-    redactAllEnvironmentValues(redacted, serverConfig?.parameters.env ?? {}),
+    redactConfiguredEnvironmentValues(
+      redacted,
+      serverConfig?.parameters.env ?? {},
+    ),
     inheritedEnv,
   )
 }

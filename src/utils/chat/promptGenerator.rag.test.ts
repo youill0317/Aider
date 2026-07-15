@@ -155,6 +155,50 @@ describe('PromptGenerator RAG metadata handling', () => {
     )
   })
 
+  it('retrieves snippets for an oversized current file', async () => {
+    const processQuery = jest.fn().mockResolvedValue([
+      createSimilarityResult({
+        content: 'Relevant current-file snippet',
+        metadata: { startLine: 1, endLine: 1 },
+      }),
+    ])
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery }) as unknown as RAGEngine,
+      { vault: { cachedRead: jest.fn() } } as unknown as App,
+      createSettings({}),
+    )
+    const message: ChatUserMessage = {
+      role: 'user',
+      id: 'user-current-file',
+      content: createEditorState('Summarize the current note.'),
+      promptContent: null,
+      mentionables: [
+        {
+          type: 'current-file',
+          file: {
+            path: 'large.md',
+            stat: { size: 512 * 1024 + 1 },
+          } as TFile,
+        },
+      ],
+    }
+
+    const requestMessages = await promptGenerator.generateRequestMessages({
+      messages: [message],
+    })
+    const prompt = requestMessages
+      .map(({ content }) => getTextContent(content))
+      .join('\n')
+
+    expect(processQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { files: ['large.md'], folders: [] },
+      }),
+    )
+    expect(prompt).toContain('Relevant current-file snippet')
+    expect(prompt).not.toContain('too large to include directly')
+  })
+
   it('preserves attachments from older uncompiled user turns', async () => {
     const processQuery = jest.fn().mockResolvedValue([])
     const promptGenerator = new PromptGenerator(

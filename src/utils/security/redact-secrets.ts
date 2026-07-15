@@ -10,6 +10,8 @@ const QUOTED_SECRET_ASSIGNMENT_PATTERN =
   /((?:[A-Z0-9_]*?(?:API[_-]?KEY|ACCESS[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|ID[_-]?TOKEN|CLIENT[_-]?SECRET|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*?)=)(["'])(?:\\[\s\S]|(?!\2)[\s\S])*\2/gi
 const SECRET_ASSIGNMENT_PATTERN =
   /((?:[A-Z0-9_]*?(?:API[_-]?KEY|ACCESS[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|ID[_-]?TOKEN|CLIENT[_-]?SECRET|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*?)=)[^&\s'",}]+/gi
+const COMMON_ENV_VALUE_PATTERN =
+  /^(?:0|1|true|false|yes|no|on|off|debug|info|warn|error|trace|development|production|test|staging|local|localhost)$/i
 
 function redactSecretAssignments(value: string): string {
   if (!value.includes('=')) return value
@@ -95,21 +97,27 @@ export function redactEnvironmentSecrets(
   return redactEnvironmentValues(value, env, (key) => isSecretKey(key))
 }
 
-export function redactAllEnvironmentValues(
+export function redactConfiguredEnvironmentValues(
   value: string,
   env: NodeJS.ProcessEnv,
 ): string {
-  return redactEnvironmentValues(value, env, () => true)
+  // ponytail: common non-secret flags stay visible; add explicit secret metadata if they ever need protection.
+  return redactEnvironmentValues(
+    value,
+    env,
+    (key, secret) =>
+      isSecretKey(key) || !COMMON_ENV_VALUE_PATTERN.test(secret.trim()),
+  )
 }
 
 function redactEnvironmentValues(
   value: string,
   env: NodeJS.ProcessEnv,
-  shouldRedact: (key: string) => boolean,
+  shouldRedact: (key: string, secret: string) => boolean,
 ): string {
   let redacted = redactString(value)
   for (const [key, secret] of Object.entries(env)) {
-    if (secret && shouldRedact(key)) {
+    if (secret && shouldRedact(key, secret)) {
       redacted = redacted.split(secret).join(REDACTED)
     }
   }

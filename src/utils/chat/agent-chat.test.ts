@@ -1,6 +1,9 @@
 import type { TFile } from 'obsidian'
 
-import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
+import {
+  CODEX_TOOL_NAME,
+  MAX_CODEX_TOOL_PROMPT_CHARS,
+} from '../../core/agent/CodexToolRunner'
 import type { ChatUserMessage } from '../../types/chat'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
@@ -222,6 +225,34 @@ describe('buildAgentPrompt', () => {
     expect(prompt).toContain(AGENT_CHAT_CONTEXT_HEADING)
     expect(prompt).toContain('Path: Projects/Plan.md')
     expect(prompt).toContain('Summarize this note.')
+  })
+
+  it('bounds old conversation context while preserving the latest request', () => {
+    const latestMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Latest request.',
+      id: 'user-latest',
+      mentionables: [],
+    }
+    const prompt = buildAgentPrompt({
+      messages: [
+        {
+          role: 'user',
+          content: null,
+          promptContent: 'x'.repeat(MAX_CODEX_TOOL_PROMPT_CHARS),
+          id: 'user-old',
+          mentionables: [],
+        },
+        latestMessage,
+      ],
+      prompt: 'Latest request.',
+      userMessage: latestMessage,
+    })
+
+    expect(prompt).toHaveLength(MAX_CODEX_TOOL_PROMPT_CHARS)
+    expect(prompt).toContain('[Earlier agent context truncated]')
+    expect(prompt).toContain('Latest request.')
   })
 
   it('isolates, redacts, and bounds non-user history sent to Codex', () => {

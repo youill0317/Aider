@@ -1,7 +1,10 @@
 import type { TFile } from 'obsidian'
 import { v4 as uuidv4 } from 'uuid'
 
-import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
+import {
+  CODEX_TOOL_NAME,
+  MAX_CODEX_TOOL_PROMPT_CHARS,
+} from '../../core/agent/CodexToolRunner'
 import {
   ChatAssistantMessage,
   ChatMessage,
@@ -123,14 +126,29 @@ export function buildAgentPrompt({
     (mentionable): mentionable is MentionableCurrentFile =>
       mentionable.type === 'current-file',
   )?.file
-  if (!currentFile || currentFile.extension !== 'md') {
-    return conversationPrompt
-  }
-
-  return `${AGENT_CHAT_CONTEXT_HEADING}
+  const currentFileContext =
+    currentFile?.extension === 'md'
+      ? `${AGENT_CHAT_CONTEXT_HEADING}
 Path: ${currentFile.path}
 
-${conversationPrompt}`
+`
+      : ''
+  if (
+    currentFileContext.length + conversationPrompt.length <=
+    MAX_CODEX_TOOL_PROMPT_CHARS
+  ) {
+    return `${currentFileContext}${conversationPrompt}`
+  }
+
+  const truncationNotice = '[Earlier agent context truncated]\n'
+  const availableConversationChars =
+    MAX_CODEX_TOOL_PROMPT_CHARS -
+    currentFileContext.length -
+    truncationNotice.length
+  // ponytail: preserve the latest request; summarize history if tail truncation hurts answer quality.
+  return `${currentFileContext}${truncationNotice}${conversationPrompt.slice(
+    -availableConversationChars,
+  )}`
 }
 
 function buildAgentConversationPrompt({

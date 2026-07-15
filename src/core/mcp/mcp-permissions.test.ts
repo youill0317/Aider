@@ -809,8 +809,8 @@ describe('McpManager permission boundaries', () => {
     expect(message).not.toContain('GITHUB_PERSONAL_ACCESS_TOKEN_VALUE')
   })
 
-  it('configured MCP env values are redacted even with non-token key names', () => {
-    // Given: an MCP error includes configured env values under common non-token names.
+  it('redacts likely MCP secrets without corrupting common env values', () => {
+    // Given: an MCP error includes configured secrets and ordinary runtime flags.
     const serverConfig = createSettings(
       {},
       {
@@ -823,19 +823,23 @@ describe('McpManager permission boundaries', () => {
           OPENAI_KEY: 'OPENAI_KEY_VALUE',
           REDIS_URL: 'REDIS_URL_VALUE',
           NORMAL_FLAG: 'debug',
+          DEBUG: '1',
+          NODE_ENV: 'production',
         },
       },
     ).mcp.servers[0]
 
     // When: the error is redacted.
     const message = redactMcpError(
-      'failed with SSH_PRIVATE_KEY_VALUE, AWS_ACCESS_KEY_ID_VALUE, DATABASE_URL_VALUE, arbitrary-long-secret, OPENAI_KEY_VALUE, and REDIS_URL_VALUE while NORMAL_FLAG=debug',
+      'failed with SSH_PRIVATE_KEY_VALUE, AWS_ACCESS_KEY_ID_VALUE, DATABASE_URL_VALUE, arbitrary-long-secret, OPENAI_KEY_VALUE, and REDIS_URL_VALUE while NORMAL_FLAG=debug, DEBUG=1, NODE_ENV=production, version 1',
       serverConfig,
     )
 
-    // Then: every configured env value is removed, regardless of its key or length.
+    // Then: likely secrets are removed without replacing common substrings.
     expect(message).toContain('[REDACTED]')
-    expect(message).toContain('NORMAL_FLAG=[REDACTED]')
+    expect(message).toContain(
+      'NORMAL_FLAG=debug, DEBUG=1, NODE_ENV=production, version 1',
+    )
     expect(message).not.toContain('SSH_PRIVATE_KEY_VALUE')
     expect(message).not.toContain('AWS_ACCESS_KEY_ID_VALUE')
     expect(message).not.toContain('DATABASE_URL_VALUE')

@@ -1,7 +1,7 @@
 import { smartComposerSettingsSchema } from '../../settings/schema/setting.types'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
-import { CodexToolRunner } from './CodexToolRunner'
+import { CodexToolRunner, MAX_CODEX_TOOL_PROMPT_CHARS } from './CodexToolRunner'
 import {
   CodexApprovalPolicy,
   CodexExecRequest,
@@ -62,6 +62,31 @@ describe('CodexToolRunner', () => {
 
     expect(requests).toHaveLength(1)
     expect(requests[0].approvalPolicy).toBe('on-request')
+  })
+
+  it('accepts prompts as large as compiled block context', async () => {
+    const requests: CodexExecRequest[] = []
+    const runner = createRunner({
+      runtime: {
+        execute: (request) => {
+          requests.push(request)
+          return {
+            abort: jest.fn(),
+            done: Promise.resolve(createRunResult('completed')),
+          }
+        },
+      },
+    })
+    const prompt = 'x'.repeat(512 * 1024)
+
+    const response = await runner.callTool({
+      args: JSON.stringify({ prompt }),
+      id: 'tool-call-large-prompt',
+    })
+
+    expect(prompt.length).toBeLessThan(MAX_CODEX_TOOL_PROMPT_CHARS)
+    expect(response.status).toBe(ToolCallResponseStatus.Success)
+    expect(requests[0].prompt).toBe(prompt)
   })
 
   it('rejects a second Codex run while one run is active', async () => {

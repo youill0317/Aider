@@ -319,9 +319,19 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
       onQueryProgressChange?.({
         type: 'reading-mentionables',
       })
-      const files = message.mentionables
-        .filter((m): m is MentionableFile => m.type === 'file')
-        .map((m) => m.file)
+      const currentFile = message.mentionables.find(
+        (mentionable) => mentionable.type === 'current-file',
+      )?.file
+      const files = [
+        ...message.mentionables
+          .filter((m): m is MentionableFile => m.type === 'file')
+          .map((m) => m.file),
+        ...(this.settings.chatOptions.includeCurrentFileContent &&
+        currentFile &&
+        currentFile.stat.size > MAX_DIRECT_PROMPT_FILE_BYTES
+          ? [currentFile]
+          : []),
+      ]
       const folders = message.mentionables
         .filter((m): m is MentionableFolder => m.type === 'folder')
         .map((m) => m.folder)
@@ -593,12 +603,9 @@ ${customInstruction}
 
   private async getCurrentFileMessage(
     currentFile: TFile,
-  ): Promise<RequestMessage> {
+  ): Promise<RequestMessage | null> {
     if (currentFile.stat.size > MAX_DIRECT_PROMPT_FILE_BYTES) {
-      return {
-        role: 'user',
-        content: `The current file (${currentFile.path}) is too large to include directly. Use vault search to retrieve only relevant snippets.`,
-      }
+      return null
     }
     const fileContent = await readTFileContent(currentFile, this.app.vault)
     return {

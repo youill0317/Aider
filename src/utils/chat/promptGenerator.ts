@@ -342,7 +342,9 @@ ${wrapUntrustedToolOutput(toolCall.response.error)}`,
               [
                 ...files,
                 ...folders.flatMap((folder) =>
-                  getNestedFiles(folder, this.app.vault),
+                  getNestedFiles(folder, this.app.vault).filter(
+                    (file) => file.extension === 'md',
+                  ),
                 ),
               ].map((file) => [file.path, file]),
             ).values(),

@@ -6,7 +6,7 @@ import { ChatMessage, ChatToolMessage, ChatUserMessage } from '../../types/chat'
 import { RequestMessage } from '../../types/llm/request'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
-import { buildAgentChatMessages } from './agent-chat'
+import { buildAgentChatMessages } from './agent-chat.test-utils'
 import { PromptGenerator } from './promptGenerator'
 
 describe('prompt security boundaries', () => {

@@ -36,6 +36,34 @@ describe('HTTP transport resource bounds', () => {
     }
   })
 
+  it('aborts cancellable operations when their request timeout expires', async () => {
+    jest.useFakeTimers()
+    const aborted = jest.fn()
+    const request = expect(
+      withRequestTimeout(
+        (signal) =>
+          new Promise<void>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                aborted()
+                reject(signal.reason)
+              },
+              { once: true },
+            )
+          }),
+        10,
+      ),
+    ).rejects.toThrow('Request timed out')
+    try {
+      await jest.advanceTimersByTimeAsync(10)
+      await request
+      expect(aborted).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('rejects an oversized fetch response before reading it', async () => {
     const cancel = jest.fn().mockResolvedValue(undefined)
     const response = {

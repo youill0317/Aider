@@ -37,6 +37,31 @@ const MAX_MCP_RAW_TOOL_OUTPUT_CHARS = 256_000
 const MAX_MCP_TOOL_ARGUMENT_CHARS = 1024 * 1024
 const MCP_CONNECTION_CONCURRENCY = 4
 const MAX_CONVERSATION_TOOL_ALLOWLISTS = 1_000
+const MCP_CONNECTION_TIMEOUT_MS = 20_000
+const MCP_CLIENT_CLOSE_TIMEOUT_MS = 2_000
+const MAX_MCP_SERVER_TOOLS = 256
+const MAX_MCP_SERVER_TOOL_CATALOG_CHARS = 1024 * 1024
+const MAX_MCP_AVAILABLE_TOOLS = 512
+const MAX_MCP_AVAILABLE_TOOL_CATALOG_CHARS = 1024 * 1024
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage))
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([operation, timeout])
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
+}
 
 export class McpManager {
   static readonly TOOL_NAME_DELIMITER = DEFAULT_TOOL_NAME_DELIMITER // Delimiter for tool name construction (serverName__toolName)
@@ -55,6 +80,7 @@ export class McpManager {
 
   private servers: McpServerState[] = [] // IMPORTANT: Always use this.updateServers() to update this array
   private pendingClients = new Set<McpClient>()
+  private pendingCloseTasks = new Set<Promise<void>>()
   private activeToolCalls: Map<string, AbortController> = new Map()
   private allowedToolsByConversation: Map<string, Set<string>> = new Map()
   private subscribers = new Set<(servers: McpServerState[]) => void>()
@@ -85,6 +111,16 @@ export class McpManager {
     if (this.disabled || this.disposed) {
       return
     }
+    if (!this.settings.chatOptions.enableTools) {
+      this.updateServers(
+        this.settings.mcp.servers.map((config) => ({
+          name: config.id,
+          config,
+          status: McpServerStatus.Disconnected,
+        })),
+      )
+      return
+    }
 
     const revision = this.settingsRevision
 
@@ -101,7 +137,7 @@ export class McpManager {
     this.updateServers(servers)
   }
 
-  public cleanup() {
+  public async cleanup(): Promise<void> {
     this.disposed = true
     this.settingsRevision += 1
     for (const controller of this.activeToolCalls.values()) {
@@ -113,7 +149,6 @@ export class McpManager {
         .filter((s) => s.status === McpServerStatus.Connected)
         .map((s) => s.client),
     ])
-    void this.closeClients([...clients])
 
     if (this.unsubscribeFromSettings) {
       this.unsubscribeFromSettings()
@@ -124,6 +159,11 @@ export class McpManager {
     this.subscribers.clear()
     this.activeToolCalls.clear()
     this.allowedToolsByConversation.clear()
+    await Promise.allSettled([
+      this.closeClients([...clients]),
+      ...this.pendingCloseTasks,
+    ])
+    this.pendingCloseTasks.clear()
   }
 
   public getServers() {
@@ -140,6 +180,16 @@ export class McpManager {
     this.settings = settings
     await this.closeClients([...this.pendingClients])
     if (this.disabled || !this.isConnectionCurrent(revision)) return
+    if (!settings.chatOptions.enableTools) {
+      this.updateServers(
+        settings.mcp.servers.map((config) => ({
+          name: config.id,
+          config,
+          status: McpServerStatus.Disconnected,
+        })),
+      )
+      return
+    }
 
     const updatedServers = settings.mcp.servers.map(
       (serverConfig: McpServerConfig): McpServerState => {
@@ -226,7 +276,21 @@ export class McpManager {
   private async closeClients(clients: McpClient[]) {
     const uniqueClients = [...new Set(clients)]
     uniqueClients.forEach((client) => this.pendingClients.delete(client))
-    await Promise.allSettled(uniqueClients.map((client) => client.close()))
+    await Promise.allSettled(
+      uniqueClients.map((client) =>
+        withTimeout(
+          Promise.resolve().then(() => client.close()),
+          MCP_CLIENT_CLOSE_TIMEOUT_MS,
+          'Timed out while closing MCP client',
+        ),
+      ),
+    )
+  }
+
+  private closeClientsInBackground(clients: McpClient[]): void {
+    const closeTask = this.closeClients(clients)
+    this.pendingCloseTasks.add(closeTask)
+    void closeTask.then(() => this.pendingCloseTasks.delete(closeTask))
   }
 
   private releaseConnectedClients(servers: McpServerState[]) {
@@ -298,7 +362,7 @@ export class McpManager {
 
     // Disconnect clients in the background
     if (clientsToDisconnect.length > 0) {
-      void this.closeClients(clientsToDisconnect)
+      this.closeClientsInBackground(clientsToDisconnect)
     }
 
     this.servers = nextServers
@@ -316,7 +380,11 @@ export class McpManager {
 
     const { id: name, parameters: serverParams, enabled } = serverConfig
 
-    if (!enabled || !this.isConnectionCurrent(revision)) {
+    if (
+      !enabled ||
+      !this.settings.chatOptions.enableTools ||
+      !this.isConnectionCurrent(revision)
+    ) {
       return {
         name,
         config: serverConfig,
@@ -389,15 +457,19 @@ export class McpManager {
     this.pendingClients.add(client)
 
     try {
-      await client.connect(
-        new StdioClientTransport({
-          ...serverParams,
-          stderr: 'ignore',
-          env: {
-            ...this.defaultEnv,
-            ...(serverParams.env ?? {}),
-          },
-        }),
+      await withTimeout(
+        client.connect(
+          new StdioClientTransport({
+            ...serverParams,
+            stderr: 'ignore',
+            env: {
+              ...this.defaultEnv,
+              ...(serverParams.env ?? {}),
+            },
+          }),
+        ),
+        MCP_CONNECTION_TIMEOUT_MS,
+        `MCP server ${name} connection timed out`,
       )
     } catch (error) {
       await this.closeClients([client])
@@ -425,7 +497,12 @@ export class McpManager {
     }
 
     try {
-      const toolList = await client.listTools()
+      const toolList = await withTimeout(
+        client.listTools(),
+        MCP_CONNECTION_TIMEOUT_MS,
+        `MCP server ${name} tool discovery timed out`,
+      )
+      this.assertToolCatalogWithinBounds(toolList.tools)
       if (!this.isConnectionCurrent(revision)) {
         await this.closeClients([client])
         return {
@@ -472,17 +549,29 @@ export class McpManager {
     }
 
     const revision = this.settingsRevision
-    const availableTools = this.servers.flatMap((server): McpTool[] => {
+    const availableTools: McpTool[] = []
+    let catalogChars = 0
+    collectTools: for (const server of this.servers) {
       if (server.status !== McpServerStatus.Connected) {
-        return []
+        continue
       }
-      return server.tools
-        .filter((tool) => !server.config.toolOptions[tool.name]?.disabled)
-        .map((tool) => ({
+      for (const tool of server.tools) {
+        if (server.config.toolOptions[tool.name]?.disabled) continue
+        const availableTool = {
           ...tool,
           name: getToolName(server.name, tool.name),
-        }))
-    })
+        }
+        const serializedChars = JSON.stringify(availableTool)?.length ?? 0
+        if (
+          availableTools.length >= MAX_MCP_AVAILABLE_TOOLS ||
+          catalogChars + serializedChars > MAX_MCP_AVAILABLE_TOOL_CATALOG_CHARS
+        ) {
+          break collectTools
+        }
+        availableTools.push(availableTool)
+        catalogChars += serializedChars
+      }
+    }
 
     if (
       revision !== this.settingsRevision ||
@@ -750,5 +839,20 @@ export class McpManager {
       return true
     }
     return false
+  }
+
+  private assertToolCatalogWithinBounds(tools: McpTool[]): void {
+    if (tools.length > MAX_MCP_SERVER_TOOLS) {
+      throw new Error(
+        `MCP server advertised more than ${MAX_MCP_SERVER_TOOLS} tools`,
+      )
+    }
+    let serializedChars = 0
+    for (const tool of tools) {
+      serializedChars += JSON.stringify(tool)?.length ?? 0
+      if (serializedChars > MAX_MCP_SERVER_TOOL_CATALOG_CHARS) {
+        throw new Error('MCP server tool catalog is too large')
+      }
+    }
   }
 }

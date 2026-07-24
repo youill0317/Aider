@@ -23,7 +23,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '18.x'
+          node-version: '20.x'
 
       - name: Validate release tag
         run: |
@@ -32,12 +32,23 @@ jobs:
             exit 1
           fi
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type:check
+
+      - name: Lint check
+        run: npm run lint:check
+
+      - name: Test
+        run: npm test
+
       - name: Bump version
         run: npm run version -- "$TAG"
 
       - name: Build plugin
         run: |
-          npm ci
           npm run build
 
       - name: Upload release bundle

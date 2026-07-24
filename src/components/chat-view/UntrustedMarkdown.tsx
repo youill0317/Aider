@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { ComponentPropsWithoutRef, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 
 type UntrustedMarkdownProps = {
@@ -13,11 +13,28 @@ const UntrustedMarkdown = memo(function UntrustedMarkdown({
   return (
     <ReactMarkdown
       className={`markdown-rendered smtcmp-markdown-rendered smtcmp-scale-${scale}`}
+      components={{ img: BlockedImage }}
       skipHtml
     >
       {content}
     </ReactMarkdown>
   )
 })
+
+function BlockedImage({
+  alt,
+  src,
+}: Pick<ComponentPropsWithoutRef<'img'>, 'alt' | 'src'>) {
+  const trimmedAlt = alt?.trim()
+  const label = trimmedAlt ? trimmedAlt : 'image'
+  if (typeof src === 'string' && /^https?:\/\//i.test(src)) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer">
+        Remote image blocked: {label}
+      </a>
+    )
+  }
+  return <span>Image blocked: {label}</span>
+}
 
 export { UntrustedMarkdown }

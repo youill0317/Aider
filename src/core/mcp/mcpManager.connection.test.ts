@@ -124,6 +124,41 @@ describe('McpManager connection lifecycle', () => {
     manager.cleanup()
   })
 
+  it('does not initialize MCP clients while tools are disabled', async () => {
+    const settings = smartComposerSettingsSchema.parse({
+      chatOptions: {
+        includeCurrentFileContent: true,
+        enableTools: false,
+        maxAutoIterations: 1,
+      },
+      mcp: {
+        servers: [
+          {
+            enabled: true,
+            id: 'github',
+            parameters: { command: 'node' },
+            toolOptions: {},
+          },
+        ],
+      },
+    })
+    const manager = new McpManager({
+      registerSettingsListener: () => () => undefined,
+      settings,
+      isServerTrusted: async () => true,
+    })
+    Object.defineProperty(manager, 'disabled', { value: false })
+
+    await manager.initialize()
+
+    expect(Client).not.toHaveBeenCalled()
+    expect(StdioClientTransport).not.toHaveBeenCalled()
+    expect(manager.getServers()).toMatchObject([
+      { status: McpServerStatus.Disconnected },
+    ])
+    await manager.cleanup()
+  })
+
   it('limits concurrent MCP process connections', async () => {
     const settings = smartComposerSettingsSchema.parse({
       mcp: {
@@ -189,6 +224,151 @@ describe('McpManager connection lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('bounds a stalled MCP connection and closes its client', async () => {
+    jest.useFakeTimers()
+    try {
+      let markConnectStarted: (() => void) | undefined
+      const connectStarted = new Promise<void>((resolve) => {
+        markConnectStarted = resolve
+      })
+      const close = jest.fn().mockResolvedValue(undefined)
+      ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+        close,
+        connect: jest.fn(
+          () =>
+            new Promise<void>(() => {
+              markConnectStarted?.()
+            }),
+        ),
+        listTools: jest.fn(),
+      }))
+      const { manager, serverConfig } = createManager()
+      const connection = (
+        manager as unknown as {
+          connectServer: (config: McpServerConfig) => Promise<McpServerState>
+        }
+      ).connectServer(serverConfig)
+      await connectStarted
+
+      await jest.advanceTimersByTimeAsync(20_000)
+
+      await expect(connection).resolves.toMatchObject({
+        status: McpServerStatus.Error,
+        error: expect.objectContaining({
+          message: expect.stringContaining('connection timed out'),
+        }),
+      })
+      expect(close).toHaveBeenCalled()
+      await manager.cleanup()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('bounds stalled MCP tool discovery and closes its client', async () => {
+    jest.useFakeTimers()
+    try {
+      let markDiscoveryStarted: (() => void) | undefined
+      const discoveryStarted = new Promise<void>((resolve) => {
+        markDiscoveryStarted = resolve
+      })
+      const close = jest.fn().mockResolvedValue(undefined)
+      ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+        close,
+        connect: jest.fn().mockResolvedValue(undefined),
+        listTools: jest.fn(
+          () =>
+            new Promise<void>(() => {
+              markDiscoveryStarted?.()
+            }),
+        ),
+      }))
+      const { manager, serverConfig } = createManager()
+      const connection = (
+        manager as unknown as {
+          connectServer: (config: McpServerConfig) => Promise<McpServerState>
+        }
+      ).connectServer(serverConfig)
+      await discoveryStarted
+
+      await jest.advanceTimersByTimeAsync(20_000)
+
+      await expect(connection).resolves.toMatchObject({
+        status: McpServerStatus.Error,
+        error: expect.objectContaining({
+          message: expect.stringContaining('tool discovery timed out'),
+        }),
+      })
+      expect(close).toHaveBeenCalled()
+      await manager.cleanup()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('rejects an oversized MCP tool catalog and closes its client', async () => {
+    const close = jest.fn().mockResolvedValue(undefined)
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({
+        tools: Array.from({ length: 257 }, (_, index) => ({
+          name: `tool-${index}`,
+          inputSchema: { type: 'object' },
+        })),
+      }),
+    }))
+    const { manager, serverConfig } = createManager()
+
+    const state = await (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+
+    expect(state).toMatchObject({
+      status: McpServerStatus.Error,
+      error: expect.objectContaining({
+        message: expect.stringContaining('more than 256 tools'),
+      }),
+    })
+    expect(close).toHaveBeenCalled()
+    await manager.cleanup()
+  })
+
+  it('rejects an oversized MCP tool schema and closes its client', async () => {
+    const close = jest.fn().mockResolvedValue(undefined)
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({
+        tools: [
+          {
+            name: 'huge-tool',
+            description: 'x'.repeat(1024 * 1024),
+            inputSchema: { type: 'object' },
+          },
+        ],
+      }),
+    }))
+    const { manager, serverConfig } = createManager()
+
+    const state = await (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+
+    expect(state).toMatchObject({
+      status: McpServerStatus.Error,
+      error: expect.objectContaining({
+        message: expect.stringContaining('catalog is too large'),
+      }),
+    })
+    expect(close).toHaveBeenCalled()
+    await manager.cleanup()
+  })
+
   it('returns an error state when the default environment cannot be loaded', async () => {
     ;(shellEnv as jest.Mock).mockRejectedValueOnce(new Error('shell failed'))
     const { manager } = createManager()
@@ -223,6 +403,44 @@ describe('McpManager connection lifecycle', () => {
 
     expect(first.close).toHaveBeenCalledTimes(1)
     expect(second.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for background client closures during cleanup', async () => {
+    let finishClose: (() => void) | undefined
+    const close = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve
+        }),
+    )
+    const { manager, serverConfig } = createManager()
+    const mutableManager = manager as unknown as {
+      servers: McpServerState[]
+      updateServers: (servers: McpServerState[]) => void
+    }
+    mutableManager.servers = [
+      {
+        name: serverConfig.id,
+        config: serverConfig,
+        status: McpServerStatus.Connected,
+        client: { close } as unknown as McpClient,
+        tools: [],
+      },
+    ]
+
+    mutableManager.updateServers([])
+    let cleanupFinished = false
+    const cleanup = manager.cleanup().then(() => {
+      cleanupFinished = true
+    })
+    await Promise.resolve()
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(cleanupFinished).toBe(false)
+
+    finishClose?.()
+    await cleanup
+    expect(cleanupFinished).toBe(true)
   })
 
   it('aborts active tool calls during cleanup', () => {

@@ -1,5 +1,5 @@
 import { SerializedEditorState } from 'lexical'
-import { App, TFile } from 'obsidian'
+import { App, TFile, TFolder } from 'obsidian'
 
 import { RAGEngine } from '../../core/rag/ragEngine'
 import { SelectEmbedding } from '../../database/schema'
@@ -153,6 +153,50 @@ describe('PromptGenerator RAG metadata handling', () => {
         scope: { files: ['large.md'], folders: [] },
       }),
     )
+  })
+
+  it('includes only Markdown files from a mentioned folder', async () => {
+    const markdownFile = Object.assign(
+      new (TFile as unknown as new () => TFile)(),
+      {
+        path: 'project/note.md',
+        extension: 'md',
+        stat: { size: 16 },
+      },
+    )
+    const environmentFile = Object.assign(
+      new (TFile as unknown as new () => TFile)(),
+      {
+        path: 'project/.env',
+        extension: 'env',
+        stat: { size: 16 },
+      },
+    )
+    const folder = Object.assign(
+      new (TFolder as unknown as new () => TFolder)(),
+      {
+        path: 'project',
+        children: [markdownFile, environmentFile],
+      },
+    )
+    const cachedRead = jest.fn(async (file: TFile) =>
+      file === markdownFile ? 'Public note' : 'PRIVATE_TOKEN=secret',
+    )
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery: jest.fn() }) as unknown as RAGEngine,
+      { vault: { cachedRead } } as unknown as App,
+      createSettings({}),
+    )
+    const message = createVaultSearchUserMessage()
+    message.mentionables = [{ type: 'folder', folder }]
+
+    const compiled = await promptGenerator.compileUserMessagePrompt({ message })
+    const text = getTextContent(compiled.promptContent)
+
+    expect(cachedRead).toHaveBeenCalledTimes(1)
+    expect(cachedRead).toHaveBeenCalledWith(markdownFile)
+    expect(text).toContain('Public note')
+    expect(text).not.toContain('PRIVATE_TOKEN')
   })
 
   it('retrieves snippets for an oversized current file', async () => {

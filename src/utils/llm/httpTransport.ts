@@ -44,22 +44,35 @@ export async function getJson<T>(
 }
 
 export async function withRequestTimeout<T>(
-  operation: Promise<T>,
+  operation: Promise<T> | ((signal: AbortSignal) => Promise<T>),
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
+  let abortController: AbortController | undefined
+  let request: Promise<T>
+  if (typeof operation === 'function') {
+    const controller = new AbortController()
+    abortController = controller
+    request = operation(controller.signal)
+  } else {
+    request = operation
+  }
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      operation,
+      request,
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('Request timed out')),
-          timeoutMs,
-        )
+        timeout = setTimeout(() => {
+          const error = new Error('Request timed out')
+          try {
+            abortController?.abort(error)
+          } finally {
+            reject(error)
+          }
+        }, timeoutMs)
       }),
     ])
   } finally {
-    if (timeout) clearTimeout(timeout)
+    if (timeout !== undefined) clearTimeout(timeout)
   }
 }
 

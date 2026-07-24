@@ -2,7 +2,10 @@ import { createSecretStore } from '../../security/secret-store/secret-store'
 import { sanitizeSettingsForPersistence } from '../../security/secret-store/settings-secrets'
 
 import { SETTINGS_SCHEMA_VERSION } from './migrations'
-import { parseSmartComposerSettings } from './settings'
+import { parseSmartComposerSettingsResult } from './settings'
+
+const parseSmartComposerSettings = (data: unknown) =>
+  parseSmartComposerSettingsResult(data).settings
 
 describe('security baseline protects provider and MCP secret fields', () => {
   it('keeps provider and MCP secrets out of ordinary settings', async () => {

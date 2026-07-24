@@ -30,26 +30,6 @@ export class ChatConversationManager {
     this.app = app
   }
 
-  async createChatConversation(id: string): Promise<ChatConversation> {
-    const newChatConversation: ChatConversation = {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      id,
-      title: 'New chat',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [],
-    }
-    await this.saveChatConversation(newChatConversation)
-    return newChatConversation
-  }
-
-  async deleteChatConversation(id: string): Promise<void> {
-    const failures = await this.deleteChatConversations([id])
-    if (failures.length > 0) {
-      throw new Error(`Failed to delete chat conversation ${id}`)
-    }
-  }
-
   async deleteChatConversations(ids: string[]): Promise<string[]> {
     const uniqueIds = [...new Set(ids)]
     const paths = uniqueIds.map(
@@ -93,18 +73,6 @@ export class ChatConversationManager {
     return null
   }
 
-  async saveChatConversation(
-    chatConversation: ChatConversation,
-  ): Promise<void> {
-    const filePath = this.getChatConversationPath(chatConversation.id)
-    await this.ensureChatConversationDir()
-    await this.app.vault.adapter.write(
-      filePath,
-      JSON.stringify(chatConversation),
-    )
-    await this.updateChatList(chatConversation)
-  }
-
   async getChatList(): Promise<ChatConversationMeta[]> {
     const chatListPath = this.getChatListPath()
     if (await this.app.vault.adapter.exists(chatListPath)) {
@@ -126,39 +94,6 @@ export class ChatConversationManager {
       )
     }
     return []
-  }
-
-  private async ensureChatConversationDir() {
-    const dirPath = normalizePath(CHAT_HISTORY_DIR)
-    if (!(await this.app.vault.adapter.exists(dirPath))) {
-      await this.app.vault.createFolder(dirPath)
-    }
-  }
-
-  private async updateChatList(
-    chatConversation: ChatConversation,
-  ): Promise<void> {
-    const chatList = await this.getChatList()
-    const chatMeta: ChatConversationMeta = {
-      schemaVersion: chatConversation.schemaVersion,
-      id: chatConversation.id,
-      title: chatConversation.title,
-      createdAt: chatConversation.createdAt,
-      updatedAt: chatConversation.updatedAt,
-    }
-    const existingIndex = chatList.findIndex(
-      (chat) => chat.id === chatConversation.id,
-    )
-    if (existingIndex !== -1) {
-      chatList[existingIndex] = chatMeta
-    } else {
-      chatList.push(chatMeta)
-    }
-    chatList.sort((a, b) => b.updatedAt - a.updatedAt)
-    await this.app.vault.adapter.write(
-      this.getChatListPath(),
-      JSON.stringify(chatList),
-    )
   }
 
   private getChatListPath(): string {

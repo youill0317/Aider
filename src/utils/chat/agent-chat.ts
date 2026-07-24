@@ -31,69 +31,10 @@ export const AGENT_CHAT_CONTEXT_HEADING = '## Current Obsidian Markdown File'
 const AGENT_CHAT_HISTORY_TURNS = 10
 const MAX_AGENT_HISTORY_CONTENT_CHARS = 24_000
 
-type BuildAgentChatToolMessageParams = {
-  readonly conversationId: string
-  readonly prompt: string
-  readonly isExecutionAllowed: (params: {
-    readonly requestToolName: string
-    readonly requestArgs?: string
-    readonly conversationId?: string
-  }) => boolean
-}
-
 type BuildAgentPromptParams = {
   readonly messages: readonly ChatMessage[]
   readonly prompt: string
   readonly userMessage: ChatUserMessage
-}
-
-export function buildAgentChatToolMessage({
-  conversationId,
-  prompt,
-  isExecutionAllowed,
-}: BuildAgentChatToolMessageParams): ChatToolMessage {
-  const requestArgs = JSON.stringify({
-    prompt,
-    summary: AGENT_CHAT_SUMMARY,
-  })
-  const request = {
-    id: uuidv4(),
-    name: CODEX_TOOL_NAME,
-    arguments: requestArgs,
-  }
-
-  return {
-    role: 'tool',
-    id: uuidv4(),
-    toolCalls: [
-      {
-        request,
-        response: {
-          status: isExecutionAllowed({
-            requestToolName: request.name,
-            requestArgs,
-            conversationId,
-          })
-            ? ToolCallResponseStatus.Running
-            : ToolCallResponseStatus.PendingApproval,
-        },
-      },
-    ],
-  }
-}
-
-export function buildAgentChatMessages(
-  params: BuildAgentChatToolMessageParams,
-): readonly [ChatAssistantMessage, ChatToolMessage] {
-  const toolMessage = buildAgentChatToolMessage(params)
-  const assistantMessage: ChatAssistantMessage = {
-    role: 'assistant',
-    content: '',
-    id: uuidv4(),
-    toolCallRequests: toolMessage.toolCalls.map((toolCall) => toolCall.request),
-  }
-
-  return [assistantMessage, toolMessage]
 }
 
 export function buildAgentChatRequestArgs(prompt: string): string {

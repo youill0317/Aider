@@ -10,9 +10,7 @@ import { ToolCallResponseStatus } from '../../types/tool-call.types'
 import {
   AGENT_CHAT_CONTEXT_HEADING,
   buildAgentAssistantMessage,
-  buildAgentChatMessages,
   buildAgentChatRequestArgs,
-  buildAgentChatToolMessage,
   buildAgentCommandMessageFromEvent,
   buildAgentPrompt,
   getRunningAgentChatToolCallIds,
@@ -20,6 +18,10 @@ import {
   upsertAgentCommandMessage,
   withCurrentFileMentionable,
 } from './agent-chat'
+import {
+  buildAgentChatMessages,
+  buildAgentChatToolMessage,
+} from './agent-chat.test-utils'
 
 describe('buildAgentChatToolMessage', () => {
   it('creates a pending Codex tool call for an unapproved Agent Chat request', () => {

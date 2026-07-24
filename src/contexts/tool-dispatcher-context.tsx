@@ -2,7 +2,7 @@ import { PropsWithChildren, createContext, useContext, useMemo } from 'react'
 
 import type { ToolDispatcher } from '../utils/chat/tool-dispatcher'
 
-export type ToolDispatcherContextType = {
+type ToolDispatcherContextType = {
   getToolDispatcher: () => Promise<ToolDispatcher>
 }
 

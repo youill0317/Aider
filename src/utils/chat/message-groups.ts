@@ -4,7 +4,7 @@ import {
   ChatUserMessage,
 } from '../../types/chat'
 
-export function groupAssistantAndToolMessages(
+function groupAssistantAndToolMessages(
   messages: ChatMessage[],
 ): (ChatUserMessage | AssistantToolMessageGroup)[] {
   return messages.reduce(

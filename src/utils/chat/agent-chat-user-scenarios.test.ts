@@ -1,4 +1,4 @@
-import { buildAgentChatMessages, buildAgentPrompt } from './agent-chat'
+import { buildAgentPrompt } from './agent-chat'
 import {
   agentCommand,
   assistant,
@@ -9,6 +9,7 @@ import {
   getCodexToolIndex,
   user,
 } from './agent-chat-user-scenarios.test-utils'
+import { buildAgentChatMessages } from './agent-chat.test-utils'
 
 describe('Agent Chat user journeys', () => {
   it('preserves context when a user alternates vault chat, Agent Chat, and normal chat', async () => {

@@ -34,7 +34,7 @@ export const mcpServerParametersSchema = z.object({
 })
 export type McpServerParameters = z.infer<typeof mcpServerParametersSchema>
 
-export const mcpServerToolOptionsSchema = z
+const mcpServerToolOptionsSchema = z
   .record(
     z.string().max(MAX_MCP_PARAMETER_CHARS),
     z.object({

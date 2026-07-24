@@ -8,10 +8,10 @@ import {
 
 import { SETTINGS_SCHEMA_VERSION } from './migrations'
 import { MAX_MCP_SERVERS } from './setting.types'
-import {
-  parseSmartComposerSettings,
-  parseSmartComposerSettingsResult,
-} from './settings'
+import { parseSmartComposerSettingsResult } from './settings'
+
+const parseSmartComposerSettings = (data: unknown) =>
+  parseSmartComposerSettingsResult(data).settings
 
 describe('parseSmartComposerSettings', () => {
   it('should return default values for empty input', () => {

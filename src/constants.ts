@@ -14,7 +14,7 @@ export const MAX_PGLITE_DATABASE_BYTES = 512 * 1024 * 1024
 
 export const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const CODEX_ISSUER = 'https://auth.openai.com'
-export const CODEX_REDIRECT_PORT = 1455 // Other ports are blocked by OpenAI
+const CODEX_REDIRECT_PORT = 1455 // Other ports are blocked by OpenAI
 export const CODEX_REDIRECT_URI = `http://localhost:${CODEX_REDIRECT_PORT}/auth/callback`
 export const CODEX_AUTH_CLAIMS_URL = 'https://api.openai.com/auth'
 export const CODEX_RESPONSES_ENDPOINT =
@@ -22,7 +22,6 @@ export const CODEX_RESPONSES_ENDPOINT =
 
 export const CLAUDE_CODE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 export const CLAUDE_CODE_AUTHORIZE_BASE_URL = 'https://claude.ai'
-export const CLAUDE_CODE_CONSOLE_BASE_URL = 'https://console.anthropic.com'
 export const CLAUDE_CODE_OAUTH_TOKEN_ENDPOINT =
   'https://console.anthropic.com/v1/oauth/token'
 export const CLAUDE_CODE_REDIRECT_URI =

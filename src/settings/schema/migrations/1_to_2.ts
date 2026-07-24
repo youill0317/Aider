@@ -369,7 +369,7 @@ type SmartComposerSettingsV1 = z.infer<typeof smartComposerSettingsSchemaV1>
  * V2 constants
  */
 
-export const V2_PROVIDER_TYPES_INFO = {
+const V2_PROVIDER_TYPES_INFO = {
   openai: {
     label: 'OpenAI',
     defaultProviderId: 'openai',
@@ -432,7 +432,7 @@ export const V2_PROVIDER_TYPES_INFO = {
   },
 } as const
 
-export const V2_DEFAULT_PROVIDERS: readonly V2LLMProvider[] = [
+const V2_DEFAULT_PROVIDERS: readonly V2LLMProvider[] = [
   {
     type: 'openai',
     id: V2_PROVIDER_TYPES_INFO.openai.defaultProviderId,

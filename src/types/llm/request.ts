@@ -6,7 +6,7 @@ import { Reasoning } from 'openai/resources/shared'
 
 import { ToolCallRequest } from '../tool-call.types'
 
-export type LLMRequestBase = {
+type LLMRequestBase = {
   messages: RequestMessage[]
   model: string
 

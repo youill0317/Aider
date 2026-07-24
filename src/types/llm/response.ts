@@ -1,7 +1,7 @@
 // These types are based on the OpenRouter API specification
 // https://openrouter.ai/docs/api-reference/overview#responses
 
-export type LLMResponseBase = {
+type LLMResponseBase = {
   id: string
   created?: number
   model: string
@@ -18,8 +18,6 @@ export type LLMResponseStreaming = LLMResponseBase & {
   choices: StreamingChoice[]
   object: 'chat.completion.chunk'
 }
-
-export type LLMResponse = LLMResponseNonStreaming | LLMResponseStreaming
 
 export type ResponseUsage = {
   prompt_tokens: number

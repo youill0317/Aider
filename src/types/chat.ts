@@ -63,7 +63,7 @@ export type AssistantToolMessageGroup = (
   | ChatAgentCommandMessage
 )[]
 
-export type SerializedChatUserMessage = {
+type SerializedChatUserMessage = {
   role: 'user'
   content: SerializedEditorState | null
   promptContent: string | ContentPart[] | null
@@ -73,7 +73,7 @@ export type SerializedChatUserMessage = {
     similarity: number
   })[]
 }
-export type SerializedChatAssistantMessage = {
+type SerializedChatAssistantMessage = {
   role: 'assistant'
   content: string
   reasoning?: string
@@ -86,7 +86,7 @@ export type SerializedChatAssistantMessage = {
   }
   providerMetadata?: RequestProviderMetadata
 }
-export type SerializedChatToolMessage = {
+type SerializedChatToolMessage = {
   role: 'tool'
   toolCalls: {
     request: ToolCallRequest
@@ -94,7 +94,7 @@ export type SerializedChatToolMessage = {
   }[]
   id: string
 }
-export type SerializedChatAgentCommandMessage = ChatAgentCommandMessage
+type SerializedChatAgentCommandMessage = ChatAgentCommandMessage
 export type SerializedChatMessage =
   | SerializedChatUserMessage
   | SerializedChatAssistantMessage

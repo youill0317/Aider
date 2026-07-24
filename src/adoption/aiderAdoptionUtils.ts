@@ -3,7 +3,7 @@ import { normalizePath } from 'obsidian'
 import type { AiderAdoptionAdapter } from './aiderAdoptionTypes'
 
 export const MAX_ADOPTION_JSON_FILE_BYTES = 64 * 1024 * 1024
-export const MAX_ADOPTION_TOTAL_JSON_BYTES = 512 * 1024 * 1024
+const MAX_ADOPTION_TOTAL_JSON_BYTES = 512 * 1024 * 1024
 export const MAX_ADOPTION_JSON_FILES = 10_000
 export const MAX_ADOPTION_DIRECTORY_DEPTH = 32
 

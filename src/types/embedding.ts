@@ -2,7 +2,7 @@ import { LLMProviderType } from './provider.types'
 
 export type ContextualEmbeddingInputType = 'document' | 'query'
 
-export type ContextualEmbeddingChunk = {
+type ContextualEmbeddingChunk = {
   embedding: number[]
   text: string
 }

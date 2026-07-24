@@ -26,7 +26,7 @@ export type AiderAdoptionMarker = {
   readonly resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>>
 }
 
-export type AdapterList = {
+type AdapterList = {
   readonly files: readonly string[]
   readonly folders: readonly string[]
 }

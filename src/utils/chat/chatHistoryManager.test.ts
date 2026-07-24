@@ -65,25 +65,15 @@ describe('ChatConversationManager path safety', () => {
     ])
   })
 
-  it('rejects traversal ids before read, write, or delete', async () => {
+  it('rejects traversal ids before migration reads or deletes', async () => {
     const { adapter, manager } = createManager()
 
     await expect(manager.findChatConversation(unsafeId)).rejects.toThrow(
       'Invalid chat conversation id',
     )
-    await expect(manager.deleteChatConversation(unsafeId)).rejects.toThrow(
+    await expect(manager.deleteChatConversations([unsafeId])).rejects.toThrow(
       'Invalid chat conversation id',
     )
-    await expect(
-      manager.saveChatConversation({
-        schemaVersion: 3,
-        id: unsafeId,
-        title: 'Unsafe',
-        createdAt: 1,
-        updatedAt: 2,
-        messages: [],
-      }),
-    ).rejects.toThrow('Invalid chat conversation id')
 
     expect(adapter.read).not.toHaveBeenCalled()
     expect(adapter.write).not.toHaveBeenCalled()

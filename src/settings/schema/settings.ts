@@ -105,9 +105,3 @@ export function parseSmartComposerSettingsResult(
     }
   }
 }
-
-export function parseSmartComposerSettings(
-  data: unknown,
-): SmartComposerSettings {
-  return parseSmartComposerSettingsResult(data).settings
-}

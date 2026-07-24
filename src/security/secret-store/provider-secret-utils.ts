@@ -175,7 +175,7 @@ export async function writeSecret(
   throw new Error('Failed to write secret')
 }
 
-export async function writeRequiredSecret(
+async function writeRequiredSecret(
   secretStore: SecretStore,
   key: string,
   value: string,

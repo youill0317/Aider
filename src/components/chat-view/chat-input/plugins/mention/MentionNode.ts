@@ -11,7 +11,6 @@ import {
   $applyNodeReplacement,
   type DOMConversionMap,
   type EditorConfig,
-  type LexicalNode,
   type NodeKey,
   type SerializedTextNode,
   type Spread,
@@ -20,7 +19,7 @@ import {
 
 import { SerializedMentionable } from '../../../../../types/mentionable'
 
-export const MENTION_NODE_TYPE = 'mention'
+const MENTION_NODE_TYPE = 'mention'
 
 export type SerializedMentionNode = Spread<
   {
@@ -109,10 +108,4 @@ export function $createMentionNode(
   const mentionNode = new MentionNode(mentionName, mentionable)
   mentionNode.setMode('token').toggleDirectionless()
   return $applyNodeReplacement(mentionNode)
-}
-
-export function $isMentionNode(
-  node: LexicalNode | null | undefined,
-): node is MentionNode {
-  return node instanceof MentionNode
 }

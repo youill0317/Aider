@@ -2,7 +2,7 @@ import { PropsWithChildren, createContext, useContext, useMemo } from 'react'
 
 import { RAGEngine } from '../core/rag/ragEngine'
 
-export type RAGContextType = {
+type RAGContextType = {
   getRAGEngine: () => Promise<RAGEngine>
 }
 

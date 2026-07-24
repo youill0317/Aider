@@ -8,7 +8,7 @@ import {
 } from '../../types/chat'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
-import { buildAgentChatMessages } from './agent-chat'
+import { buildAgentChatMessages } from './agent-chat.test-utils'
 import { PromptGenerator } from './promptGenerator'
 
 export async function createRequestMessages(messages: readonly ChatMessage[]) {
@@ -108,16 +108,6 @@ export function extractAssistantText(
   return requestMessages
     .filter((message) => message.role === 'assistant')
     .map((message) => message.content)
-}
-
-export function getCodexAssistantIndex(
-  requestMessages: Awaited<ReturnType<typeof createRequestMessages>>,
-): number {
-  return requestMessages.findIndex(
-    (message) =>
-      message.role === 'assistant' &&
-      message.tool_calls?.[0]?.name === 'run_codex',
-  )
 }
 
 export function getCodexToolIndex(

@@ -1,6 +1,4 @@
-export type SecretBackendStatus =
-  | 'obsidian-secret-storage'
-  | 'memory-only-fallback'
+type SecretBackendStatus = 'obsidian-secret-storage' | 'memory-only-fallback'
 
 export type SecretStore = {
   readonly getSecret: (key: string) => Promise<string | null>

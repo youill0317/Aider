@@ -17,13 +17,13 @@ export function isYoutubeUrl(url: string) {
   return RE_YOUTUBE.test(url)
 }
 
-export class YoutubeTranscriptError extends Error {
+class YoutubeTranscriptError extends Error {
   constructor(message: string) {
     super(`[YoutubeTranscript] 🚨 ${message}`)
   }
 }
 
-export class YoutubeTranscriptTooManyRequestError extends YoutubeTranscriptError {
+class YoutubeTranscriptTooManyRequestError extends YoutubeTranscriptError {
   constructor() {
     super(
       'YouTube is receiving too many requests from this IP and now requires solving a captcha to continue',
@@ -31,25 +31,25 @@ export class YoutubeTranscriptTooManyRequestError extends YoutubeTranscriptError
   }
 }
 
-export class YoutubeTranscriptVideoUnavailableError extends YoutubeTranscriptError {
+class YoutubeTranscriptVideoUnavailableError extends YoutubeTranscriptError {
   constructor(videoId: string) {
     super(`The video is no longer available (${videoId})`)
   }
 }
 
-export class YoutubeTranscriptDisabledError extends YoutubeTranscriptError {
+class YoutubeTranscriptDisabledError extends YoutubeTranscriptError {
   constructor(videoId: string) {
     super(`Transcript is disabled on this video (${videoId})`)
   }
 }
 
-export class YoutubeTranscriptNotAvailableError extends YoutubeTranscriptError {
+class YoutubeTranscriptNotAvailableError extends YoutubeTranscriptError {
   constructor(videoId: string) {
     super(`No transcripts are available for this video (${videoId})`)
   }
 }
 
-export class YoutubeTranscriptNotAvailableLanguageError extends YoutubeTranscriptError {
+class YoutubeTranscriptNotAvailableLanguageError extends YoutubeTranscriptError {
   constructor(lang: string, availableLangs: string[], videoId: string) {
     super(
       `No transcripts are available in ${lang} this video (${videoId}). Available languages: ${availableLangs.join(
@@ -63,7 +63,7 @@ export type TranscriptConfig = {
   lang?: string
   signal?: AbortSignal
 }
-export type Transcript = {
+type Transcript = {
   text: string
   duration: number
   offset: number

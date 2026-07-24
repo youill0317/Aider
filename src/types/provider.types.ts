@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const baseLlmProviderSchema = z.object({
+const baseLlmProviderSchema = z.object({
   id: z.string().min(1, 'id is required').max(128),
   baseUrl: z.string().max(4_096).optional(),
   apiKey: z

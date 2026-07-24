@@ -31,16 +31,36 @@ export type ToolDispatcher = {
   abortToolCall: (id: string) => boolean
 }
 
+export const disabledToolDispatcher: ToolDispatcher = {
+  listAvailableTools: async () => [],
+  isToolExecutionAllowed: () => false,
+  allowToolForConversation: () => undefined,
+  callTool: async () => ({
+    status: ToolCallResponseStatus.Error,
+    error: 'Tools are disabled.',
+  }),
+  abortToolCall: () => false,
+}
+
+export function resolveToolDispatcher(
+  enableTools: boolean,
+  getToolDispatcher: () => Promise<ToolDispatcher>,
+): Promise<ToolDispatcher> {
+  return enableTools
+    ? getToolDispatcher()
+    : Promise.resolve(disabledToolDispatcher)
+}
+
 export function createToolDispatcher({
   mcpManager,
   codexToolRunner,
 }: {
-  readonly mcpManager: McpManager
+  readonly mcpManager?: McpManager
   readonly codexToolRunner?: CodexToolRunner
 }): ToolDispatcher {
   return {
     async listAvailableTools() {
-      const mcpTools = await mcpManager.listAvailableTools()
+      const mcpTools = mcpManager ? await mcpManager.listAvailableTools() : []
       const requestTools = mcpTools.map(mcpToolToRequestTool)
       if (codexToolRunner?.isAvailable()) {
         requestTools.push(codexToolRunner.getToolDefinition())
@@ -57,10 +77,12 @@ export function createToolDispatcher({
           }) ?? false
         )
       }
-      return mcpManager.isToolExecutionAllowed({
-        requestToolName,
-        conversationId,
-      })
+      return (
+        mcpManager?.isToolExecutionAllowed({
+          requestToolName,
+          conversationId,
+        }) ?? false
+      )
     },
 
     allowToolForConversation(requestToolName, requestArgs, conversationId) {
@@ -68,7 +90,7 @@ export function createToolDispatcher({
         codexToolRunner?.allowToolForConversation(requestArgs, conversationId)
         return
       }
-      mcpManager.allowToolForConversation(requestToolName, conversationId)
+      mcpManager?.allowToolForConversation(requestToolName, conversationId)
     },
 
     callTool({ name, args, id, onEvent, signal }) {
@@ -81,12 +103,17 @@ export function createToolDispatcher({
         }
         return codexToolRunner.callTool({ args, id, onEvent, signal })
       }
-      return mcpManager.callTool({ name, args, id, signal })
+      return mcpManager
+        ? mcpManager.callTool({ name, args, id, signal })
+        : Promise.resolve({
+            status: ToolCallResponseStatus.Error,
+            error: 'MCP tools are not available.',
+          })
     },
 
     abortToolCall(id) {
       return (
-        mcpManager.abortToolCall(id) ||
+        (mcpManager?.abortToolCall(id) ?? false) ||
         (codexToolRunner?.abortToolCall(id) ?? false)
       )
     },

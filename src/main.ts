@@ -1,7 +1,9 @@
 import { Editor, MarkdownView, Notice, Plugin } from 'obsidian'
 
+import { isTerminalAdoptionStatus } from './adoption/aiderAdoptionTypes'
 import {
   adoptAiderStorage,
+  adoptAiderVectorStorage,
   summarizeAdoptionError,
 } from './adoption/aiderStorageAdoption'
 import { loadAiderMigrationWiring } from './aiderMigrationWiring'
@@ -11,6 +13,8 @@ import type { ChatProps } from './components/chat-view/Chat'
 import { InstallerUpdateRequiredModal } from './components/modals/InstallerUpdateRequiredModal'
 import { CHAT_VIEW_TYPE } from './constants'
 import { CodexToolRunner } from './core/agent/CodexToolRunner'
+import { stopCodexCallbackServer } from './core/llm/codexAuth'
+import { stopGeminiCallbackServer } from './core/llm/geminiAuth'
 import { McpManager } from './core/mcp/mcpManager'
 import { RAGEngine } from './core/rag/ragEngine'
 import { DatabaseManager } from './database/DatabaseManager'
@@ -36,6 +40,7 @@ import {
 } from './security/secret-store/settings-secrets'
 import {
   SmartComposerSettings,
+  SmartComposerSettingsUpdate,
   smartComposerSettingsSchema,
 } from './settings/schema/setting.types'
 import { parseSmartComposerSettingsResult } from './settings/schema/settings'
@@ -46,9 +51,13 @@ import {
 } from './utils/chat/tool-dispatcher'
 import { getMentionableBlockData } from './utils/obsidian'
 
+type AiderRuntime = typeof globalThis & {
+  __aiderPluginCleanupBarrier?: Promise<void>
+}
+
 export default class SmartComposerPlugin extends Plugin {
   settings: SmartComposerSettings
-  initialChatProps?: ChatProps // TODO: change this to use view state like ApplyView
+  initialChatProps?: ChatProps
   settingsChangeListeners: ((newSettings: SmartComposerSettings) => void)[] = []
   codexToolRunner: CodexToolRunner | null = null
   toolDispatcher: ToolDispatcher | null = null
@@ -60,10 +69,14 @@ export default class SmartComposerPlugin extends Plugin {
   private mcpManagerInitPromise: Promise<McpManager> | null = null
   private secretStore: SecretStore | null = null
   private settingsSaveQueue: Promise<void> | null = null
+  private adoptionTask: Promise<boolean> | null = null
+  private migrationTask: Promise<void> | null = null
   private timeoutIds: ReturnType<typeof setTimeout>[] = [] // Use ReturnType instead of number
   private unloading = false
 
   async onload() {
+    this.unloading = true
+    await (globalThis as AiderRuntime).__aiderPluginCleanupBarrier
     this.unloading = false
     await loadAiderMigrationWiring(
       {
@@ -77,6 +90,13 @@ export default class SmartComposerPlugin extends Plugin {
         chatView: (leaf) => new ChatView(leaf, this),
       },
     )
+    const adoptionTask = this.adoptSmartComposerVectorData()
+    this.adoptionTask = adoptionTask
+    void adoptionTask.then(() => {
+      if (this.adoptionTask === adoptionTask) {
+        this.adoptionTask = null
+      }
+    })
 
     // This creates an icon in the left ribbon.
     this.addRibbonIcon('wand-sparkles', 'Open Aider', () => this.openChatView())
@@ -169,7 +189,16 @@ export default class SmartComposerPlugin extends Plugin {
     // This adds a settings tab so the user can configure various aspects of the plugin
     this.addSettingTab(new SmartComposerSettingTab(this.app, this))
 
-    void this.migrateToJsonStorage()
+    const migrationTask = adoptionTask.then(async (adoptionSucceeded) => {
+      if (this.unloading) return
+      await this.migrateToJsonStorage(adoptionSucceeded)
+    })
+    this.migrationTask = migrationTask
+    void migrationTask.then(() => {
+      if (this.migrationTask === migrationTask) {
+        this.migrationTask = null
+      }
+    })
   }
 
   onunload() {
@@ -181,28 +210,72 @@ export default class SmartComposerPlugin extends Plugin {
     // Finish queued RAG work before closing its database.
     const ragEngine = this.ragEngine
     const dbManager = this.dbManager
+    const mcpManager = this.mcpManager
+    const adoptionTask = this.adoptionTask
+    const migrationTask = this.migrationTask
+    const settingsSaveQueue = this.settingsSaveQueue
+    const dbManagerInitPromise = this.dbManagerInitPromise
+    const ragEngineInitPromise = this.ragEngineInitPromise
+    const mcpManagerInitPromise = this.mcpManagerInitPromise
     this.ragEngine = null
 
     // Promise cleanup
     this.dbManagerInitPromise = null
     this.ragEngineInitPromise = null
     this.mcpManagerInitPromise = null
+    this.settingsSaveQueue = null
+    this.adoptionTask = null
+    this.migrationTask = null
 
     this.dbManager = null
-    void (async () => {
-      await ragEngine?.cleanup()
-      await dbManager?.cleanup()
-    })().catch(() => {
-      console.error('Failed to close the Aider database cleanly')
-    })
+    const databaseCleanup = (async () => {
+      await Promise.allSettled([ragEngineInitPromise])
+      const ragCleanup = await Promise.allSettled([ragEngine?.cleanup()])
+      const dbCleanup = await Promise.allSettled([dbManager?.cleanup()])
+      if (
+        ragCleanup.some((result) => result.status === 'rejected') ||
+        dbCleanup.some((result) => result.status === 'rejected')
+      ) {
+        throw new Error('Database cleanup failed')
+      }
+    })()
 
     // McpManager cleanup
-    this.mcpManager?.cleanup()
     this.mcpManager = null
+    const mcpCleanup = mcpManager?.cleanup()
 
-    this.codexToolRunner?.cleanup()
+    const codexCleanup = this.codexToolRunner?.cleanup()
     this.codexToolRunner = null
     this.toolDispatcher = null
+    this.settingsChangeListeners = []
+    const oauthCallbackCleanup = Promise.allSettled([
+      stopCodexCallbackServer(),
+      stopGeminiCallbackServer(),
+    ])
+
+    const cleanupBarrier = Promise.allSettled([
+      settingsSaveQueue,
+      adoptionTask,
+      migrationTask,
+      databaseCleanup,
+      mcpCleanup,
+      codexCleanup,
+      oauthCallbackCleanup,
+      dbManagerInitPromise,
+      ragEngineInitPromise,
+      mcpManagerInitPromise,
+    ]).then((results) => {
+      if (results.some((result) => result.status === 'rejected')) {
+        console.error('Aider cleanup did not complete cleanly')
+      }
+    })
+    const runtime = globalThis as AiderRuntime
+    runtime.__aiderPluginCleanupBarrier = cleanupBarrier
+    void cleanupBarrier.then(() => {
+      if (runtime.__aiderPluginCleanupBarrier === cleanupBarrier) {
+        delete runtime.__aiderPluginCleanupBarrier
+      }
+    })
   }
 
   async loadSettings() {
@@ -224,19 +297,24 @@ export default class SmartComposerPlugin extends Plugin {
     }
   }
 
-  async setSettings(newSettings: SmartComposerSettings) {
-    const validationResult = smartComposerSettingsSchema.safeParse(newSettings)
-
-    if (!validationResult.success) {
-      new Notice(`Invalid settings:
-${validationResult.error.issues.map((v) => v.message).join('\n')}`)
-      return
-    }
-    const validatedSettings = validationResult.data
+  async setSettings(update: SmartComposerSettingsUpdate) {
+    this.assertLoaded()
     const previousSave = this.settingsSaveQueue
     const save = (previousSave ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => this.persistSettingsUpdate(validatedSettings))
+      .then(async () => {
+        const nextSettings =
+          typeof update === 'function' ? update(this.settings) : update
+        const validationResult =
+          smartComposerSettingsSchema.safeParse(nextSettings)
+
+        if (!validationResult.success) {
+          const message = `Invalid settings:
+${validationResult.error.issues.map((v) => v.message).join('\n')}`
+          throw new Error(message)
+        }
+        await this.persistSettingsUpdate(validationResult.data)
+      })
     this.settingsSaveQueue = save
     try {
       await save
@@ -257,6 +335,12 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       nextSettings,
       secretStore,
       publishRuntimeSettings: (settings) => {
+        if (
+          this.settings.chatOptions.enableTools !==
+          settings.chatOptions.enableTools
+        ) {
+          this.toolDispatcher = null
+        }
         this.settings = settings
       },
       saveData: (settings) => this.saveData(settings),
@@ -301,23 +385,32 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   async activateChatView(chatProps?: ChatProps, openNewChat = false) {
-    // chatProps is consumed in ChatView.tsx
-    this.initialChatProps = chatProps
-
     const leaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0]
-
-    await (leaf ?? this.app.workspace.getRightLeaf(false))?.setViewState({
-      type: CHAT_VIEW_TYPE,
-      active: true,
-    })
-
-    if (openNewChat && leaf && leaf.view instanceof ChatView) {
-      leaf.view.openNewChat(chatProps?.selectedBlock)
+    if (leaf?.view instanceof ChatView) {
+      if (openNewChat) {
+        leaf.view.openNewChat(chatProps?.selectedBlock)
+      } else if (chatProps?.selectedBlock) {
+        leaf.view.addSelectionToChat(chatProps.selectedBlock)
+      }
+      await this.app.workspace.revealLeaf(leaf)
+      leaf.view.focusMessage()
+      return
     }
 
-    this.app.workspace.revealLeaf(
-      this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0],
-    )
+    this.initialChatProps = chatProps
+    try {
+      await this.app.workspace.getRightLeaf(false)?.setViewState({
+        type: CHAT_VIEW_TYPE,
+        active: true,
+      })
+    } finally {
+      this.initialChatProps = undefined
+    }
+
+    const openedLeaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0]
+    if (openedLeaf) {
+      await this.app.workspace.revealLeaf(openedLeaf)
+    }
   }
 
   async addSelectionToChat(editor: Editor, view: MarkdownView) {
@@ -424,7 +517,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
           this.mcpManager = manager
           return manager
         } catch (error) {
-          manager.cleanup()
+          await manager.cleanup()
           this.mcpManagerInitPromise = null
           throw error
         }
@@ -457,12 +550,12 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
 
   async setTrustedProviderSettings(
     provider: SmartComposerSettings['providers'][number],
-    newSettings: SmartComposerSettings,
+    update: SmartComposerSettingsUpdate,
     previousProvider?: SmartComposerSettings['providers'][number],
   ): Promise<void> {
     await this.trustProviderRoute(provider)
     try {
-      await this.setSettings(newSettings)
+      await this.setSettings(update)
     } catch (error) {
       const activeProvider = this.settings.providers.find(
         (candidate) =>
@@ -470,6 +563,12 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
       )
       if (!activeProvider || !providerRoutesMatch(activeProvider, provider)) {
         if (previousProvider) {
+          if (
+            previousProvider.id !== provider.id ||
+            previousProvider.type !== provider.type
+          ) {
+            await this.revokeProviderRouteTrust(provider)
+          }
           await this.trustProviderRoute(previousProvider)
         } else {
           await this.revokeProviderRouteTrust(provider)
@@ -508,7 +607,9 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     }
 
     this.toolDispatcher = createToolDispatcher({
-      mcpManager: await this.getMcpManager(),
+      mcpManager: this.settings.chatOptions.enableTools
+        ? await this.getMcpManager()
+        : undefined,
       codexToolRunner: this.getCodexToolRunner(),
     })
     return this.toolDispatcher
@@ -521,17 +622,24 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
   }
 
   private registerTimeout(callback: () => void, timeout: number): void {
-    const timeoutId = setTimeout(callback, timeout)
+    const timeoutId = setTimeout(() => {
+      this.timeoutIds = this.timeoutIds.filter((id) => id !== timeoutId)
+      callback()
+    }, timeout)
     this.timeoutIds.push(timeoutId)
   }
 
   private async adoptSmartComposerData() {
     try {
-      const marker = await adoptAiderStorage(this.app)
+      const marker = await adoptAiderStorage(this.app, {
+        includeVectorDb: false,
+      })
       if (
         Object.entries(marker.resources).some(
           ([resource, status]) =>
-            resource !== 'secrets' && status?.status === 'failed',
+            resource !== 'secrets' &&
+            resource !== 'vectorDb' &&
+            status?.status === 'failed',
         )
       ) {
         throw new Error('Aider storage adoption is incomplete')
@@ -546,7 +654,30 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     }
   }
 
-  private async migrateToJsonStorage() {
+  private async adoptSmartComposerVectorData(): Promise<boolean> {
+    try {
+      const marker = await adoptAiderVectorStorage(this.app)
+      const status = marker.resources.vectorDb?.status
+      if (status === 'failed') {
+        console.error('Failed to adopt Smart Composer vector data into Aider')
+        new Notice(
+          'Aider could not adopt the existing Smart Composer vector index. You can rebuild the vault index from Aider.',
+        )
+      }
+      return isTerminalAdoptionStatus(status)
+    } catch (error) {
+      console.error(
+        'Failed to adopt Smart Composer vector data into Aider:',
+        summarizeAdoptionError(error),
+      )
+      new Notice(
+        'Aider could not adopt the existing Smart Composer vector index. You can rebuild the vault index from Aider.',
+      )
+      return false
+    }
+  }
+
+  private async migrateToJsonStorage(finalizeMigration = true) {
     try {
       await migrateToJsonDatabase(
         this.app,
@@ -556,6 +687,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
           await this.reloadChatView()
           console.log('Migration to JSON storage completed successfully')
         },
+        finalizeMigration,
       )
     } catch (error) {
       if (this.unloading) return

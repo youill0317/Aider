@@ -4,7 +4,11 @@ import { v4 as uuidv4 } from 'uuid'
 import { AbstractJsonRepository } from '../base'
 import { CHAT_DIR, ROOT_DIR } from '../constants'
 import { EmptyChatTitleException } from '../exception'
-import { encodeFileNameLabel, fitLabelToFileName } from '../file-name'
+import {
+  MAX_JSON_FILE_NAME_BYTES,
+  encodeFileNameLabel,
+  fitLabelToFileName,
+} from '../file-name'
 
 import {
   CHAT_SCHEMA_VERSION,
@@ -26,6 +30,8 @@ export class ChatManager extends AbstractJsonRepository<
   ChatConversation,
   ChatConversationMetadata
 > {
+  private fileNameById = new Map<string, string>()
+
   constructor(app: App) {
     super(app, `${ROOT_DIR}/${CHAT_DIR}`)
   }
@@ -88,6 +94,7 @@ export class ChatManager extends AbstractJsonRepository<
     }
 
     await this.create(newChat)
+    this.fileNameById.set(newChat.id, this.generateFileName(newChat))
     return newChat
   }
 
@@ -107,6 +114,7 @@ export class ChatManager extends AbstractJsonRepository<
       schemaVersion: CHAT_SCHEMA_VERSION,
     }
     await this.create(importedChat)
+    this.fileNameById.set(importedChat.id, this.generateFileName(importedChat))
 
     const verifiedChat = await this.read(this.generateFileName(importedChat))
     if (
@@ -158,6 +166,7 @@ export class ChatManager extends AbstractJsonRepository<
       await this.create(updatedChat)
       await this.delete(fileName)
     }
+    this.fileNameById.set(id, this.generateFileName(updatedChat))
     return updatedChat
   }
 
@@ -178,16 +187,82 @@ export class ChatManager extends AbstractJsonRepository<
     if (copies.size === 0) return false
 
     for (const fileName of copies) await this.delete(fileName)
+    this.fileNameById.delete(id)
     return true
   }
 
   public async listChats(): Promise<ChatConversationMetadata[]> {
-    return (await this.listStoredChats()).map(({ chat }) => ({
-      id: chat.id,
-      schemaVersion: chat.schemaVersion,
-      title: chat.title,
-      updatedAt: chat.updatedAt,
-    }))
+    const candidatesById = new Map<
+      string,
+      (ChatConversationMetadata & { fileName: string })[]
+    >()
+    for (const metadata of await this.listMetadata()) {
+      const candidates = candidatesById.get(metadata.id) ?? []
+      candidates.push(metadata)
+      candidatesById.set(metadata.id, candidates)
+    }
+
+    const chats = new Map<
+      string,
+      { metadata: ChatConversationMetadata; fileName: string }
+    >()
+    const remember = (metadata: ChatConversationMetadata, fileName: string) => {
+      const current = chats.get(metadata.id)
+      if (
+        !current ||
+        metadata.updatedAt > current.metadata.updatedAt ||
+        (metadata.updatedAt === current.metadata.updatedAt &&
+          fileName.localeCompare(current.fileName) < 0)
+      ) {
+        chats.set(metadata.id, { metadata, fileName })
+      }
+    }
+    this.fileNameById.clear()
+    for (const candidates of candidatesById.values()) {
+      const needsRowValidation =
+        candidates.length > 1 ||
+        candidates.some(
+          ({ fileName, title }) =>
+            fileName.length >= MAX_JSON_FILE_NAME_BYTES - 12 ||
+            AMBIGUOUS_CHAT_ID_PATTERN.test(title),
+        )
+      if (needsRowValidation) {
+        const stored = await this.selectStoredChat(
+          candidates.map(({ fileName }) => fileName),
+        )
+        if (!stored) continue
+        remember(
+          {
+            id: stored.chat.id,
+            schemaVersion: stored.chat.schemaVersion,
+            title: stored.chat.title,
+            updatedAt: stored.chat.updatedAt,
+          },
+          stored.fileName,
+        )
+        continue
+      }
+
+      const [metadata] = candidates
+      remember(
+        {
+          id: metadata.id,
+          schemaVersion: metadata.schemaVersion,
+          title: metadata.title,
+          updatedAt: metadata.updatedAt,
+        },
+        metadata.fileName,
+      )
+    }
+    for (const [id, { fileName }] of chats) {
+      this.fileNameById.set(id, fileName)
+    }
+    return [...chats.values()]
+      .map(({ metadata }) => metadata)
+      .sort(
+        (left, right) =>
+          right.updatedAt - left.updatedAt || left.id.localeCompare(right.id),
+      )
   }
 
   public async listChatConversations(): Promise<ChatConversation[]> {
@@ -218,12 +293,33 @@ export class ChatManager extends AbstractJsonRepository<
   }
 
   private async findStoredById(id: string): Promise<StoredChat | null> {
+    const cachedFileName = this.fileNameById.get(id)
+    if (cachedFileName) {
+      const chat = await this.read(cachedFileName)
+      if (chat?.id === id && this.matchesStoredFileName(chat, cachedFileName)) {
+        return { chat, fileName: cachedFileName }
+      }
+      this.fileNameById.delete(id)
+    }
+
+    const selected = await this.selectStoredChat(
+      await this.listCandidateFileNames(id),
+      id,
+    )
+    if (selected) this.fileNameById.set(id, selected.fileName)
+    return selected
+  }
+
+  private async selectStoredChat(
+    fileNames: string[],
+    expectedId?: string,
+  ): Promise<StoredChat | null> {
     let selected: StoredChat | null = null
-    for (const fileName of await this.listCandidateFileNames(id)) {
+    for (const fileName of fileNames) {
       const chat = await this.read(fileName)
       if (
         !chat ||
-        chat.id !== id ||
+        (expectedId !== undefined && chat.id !== expectedId) ||
         !this.matchesStoredFileName(chat, fileName)
       ) {
         continue

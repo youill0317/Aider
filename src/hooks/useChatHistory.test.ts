@@ -1,7 +1,7 @@
 import type { App } from 'obsidian'
 
 import type { ChatConversation } from '../database/json/chat/types'
-import type { SerializedChatMessage } from '../types/chat'
+import type { ChatMessage, SerializedChatMessage } from '../types/chat'
 
 import { useChatHistory } from './useChatHistory'
 
@@ -37,6 +37,20 @@ jest.mock('./useJsonManagers', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks()
+})
+
+test('loads the latest pending snapshot during rapid conversation switches', async () => {
+  const latestMessages = [
+    { role: 'assistant', id: 'latest', content: 'latest response' },
+  ] as ChatMessage[]
+  mockChatManager.updateChat.mockReturnValue(new Promise(() => undefined))
+  const history = useChatHistory()
+
+  history.createOrUpdateConversation('chat', latestMessages)
+  const loadedMessages = await history.getChatMessagesById('chat')
+
+  expect(loadedMessages).toBe(latestMessages)
+  expect(mockChatManager.findById).not.toHaveBeenCalled()
 })
 
 test('delegates unchanged conversation detection to the manager', async () => {

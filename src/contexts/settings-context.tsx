@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
-import { SmartComposerSettings } from '../settings/schema/setting.types'
+import {
+  SmartComposerSettings,
+  SmartComposerSettingsUpdate,
+} from '../settings/schema/setting.types'
 
 type SettingsContextType = {
   settings: SmartComposerSettings
-  setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  setSettings: (update: SmartComposerSettingsUpdate) => void | Promise<void>
   getSettings: () => SmartComposerSettings
 }
 
@@ -22,7 +25,7 @@ export const SettingsProvider = ({
 }: {
   children: React.ReactNode
   settings: SmartComposerSettings
-  setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  setSettings: (update: SmartComposerSettingsUpdate) => void | Promise<void>
   getSettings: () => SmartComposerSettings
   addSettingsChangeListener: (
     listener: (newSettings: SmartComposerSettings) => void,

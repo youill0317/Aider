@@ -26,16 +26,27 @@ type UseChatHistory = {
   getChatMessagesById: (id: string) => Promise<ChatMessage[] | null>
   updateConversationTitle: (id: string, title: string) => Promise<void>
   chatList: ChatConversationMetadata[]
+  chatListStatus: 'loading' | 'ready' | 'error'
 }
 
 export function useChatHistory(): UseChatHistory {
   const app = useApp()
   const chatManager = useChatManager()
   const [chatList, setChatList] = useState<ChatConversationMetadata[]>([])
+  const [chatListStatus, setChatListStatus] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading')
 
   const fetchChatList = useCallback(async () => {
-    const list = await chatManager.listChats()
-    setChatList(list)
+    try {
+      const list = await chatManager.listChats()
+      setChatList(list)
+      setChatListStatus('ready')
+    } catch (error) {
+      setChatListStatus('error')
+      new Notice('Failed to load chat history')
+      console.error('Failed to load chat history', error)
+    }
   }, [chatManager])
 
   useEffect(() => {
@@ -45,6 +56,7 @@ export function useChatHistory(): UseChatHistory {
 
   const cacheConversation = useCallback(
     ({ id, title, updatedAt, schemaVersion }: ChatConversationMetadata) => {
+      setChatListStatus('ready')
       setChatList((current) =>
         [
           { id, title, updatedAt, schemaVersion },
@@ -127,6 +139,10 @@ export function useChatHistory(): UseChatHistory {
 
   const getChatMessagesById = useCallback(
     async (id: string): Promise<ChatMessage[] | null> => {
+      const pendingMessages = saveQueue.peek(id)
+      if (pendingMessages) {
+        return pendingMessages
+      }
       const conversation = await chatManager.findById(id)
       if (!conversation) {
         return null
@@ -135,7 +151,7 @@ export function useChatHistory(): UseChatHistory {
         deserializeChatMessage(message, app),
       )
     },
-    [chatManager, app],
+    [chatManager, app, saveQueue],
   )
 
   const updateConversationTitle = useCallback(
@@ -161,6 +177,7 @@ export function useChatHistory(): UseChatHistory {
     getChatMessagesById,
     updateConversationTitle,
     chatList,
+    chatListStatus,
   }
 }
 

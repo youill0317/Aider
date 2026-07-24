@@ -87,4 +87,3 @@ export const templateTable = pgTable('template', {
 })
 
 export type SelectTemplate = typeof templateTable.$inferSelect
-export type InsertTemplate = typeof templateTable.$inferInsert

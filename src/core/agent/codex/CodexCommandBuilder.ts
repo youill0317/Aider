@@ -9,7 +9,7 @@ const DEFAULT_CODEX_COMMAND = 'codex'
 const SKIP_GIT_REPO_CHECK_ARG = '--skip-git-repo-check'
 const SAFE_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 
-export class CodexCommandBuildError extends Error {
+class CodexCommandBuildError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'CodexCommandBuildError'

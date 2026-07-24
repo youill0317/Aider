@@ -174,7 +174,7 @@ describe('CodexToolRunner', () => {
     const execute = jest.fn()
     const runner = createRunner({ runtime: { execute } })
 
-    runner.cleanup()
+    await runner.cleanup()
     const response = await runner.callTool({
       args: JSON.stringify({ prompt: 'Inspect the project' }),
       id: 'tool-call-1',
@@ -184,30 +184,67 @@ describe('CodexToolRunner', () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
-  it('keeps an aborted run active until its process settles', async () => {
+  it('waits for active runs to settle during cleanup', async () => {
     const runtime = createDeferredRuntime()
     const runner = createRunner({ runtime })
-    const firstRun = runner.callTool({
+    const response = runner.callTool({
       args: JSON.stringify({ prompt: 'Inspect the project' }),
       id: 'tool-call-1',
     })
     await runtime.waitForExecutions(1)
 
-    expect(runner.abortToolCall('tool-call-1')).toBe(true)
-    await expect(
-      runner.callTool({
-        args: JSON.stringify({ prompt: 'Run tests' }),
-        id: 'tool-call-2',
-      }),
-    ).resolves.toMatchObject({
-      status: ToolCallResponseStatus.Error,
-      error: 'Another Codex run is already active.',
+    let cleanupFinished = false
+    const cleanup = runner.cleanup().then(() => {
+      cleanupFinished = true
     })
+    await Promise.resolve()
+
+    expect(runtime.abort).toHaveBeenCalledTimes(1)
+    expect(cleanupFinished).toBe(false)
 
     runtime.resolveRun(createRunResult('cancelled'))
+    await cleanup
+    await response
+    expect(cleanupFinished).toBe(true)
+  })
+
+  it('waits for an aborted process to settle before retrying', async () => {
+    let resolveFirstRun: ((result: CodexRunResult) => void) | undefined
+    const firstRunDone = new Promise<CodexRunResult>((resolve) => {
+      resolveFirstRun = resolve
+    })
+    const abort = jest.fn()
+    const execute = jest
+      .fn()
+      .mockReturnValueOnce({ abort, done: firstRunDone })
+      .mockReturnValueOnce({
+        abort: jest.fn(),
+        done: Promise.resolve(createRunResult('completed')),
+      })
+    const runtime: CodexRuntime = { execute }
+    const runner = createRunner({ runtime })
+    const firstRun = runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+    await Promise.resolve()
+
+    expect(runner.abortToolCall('tool-call-1')).toBe(true)
+    const retry = runner.callTool({
+      args: JSON.stringify({ prompt: 'Run tests' }),
+      id: 'tool-call-2',
+    })
+    await Promise.resolve()
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    resolveFirstRun?.(createRunResult('cancelled'))
     await expect(firstRun).resolves.toEqual({
       status: ToolCallResponseStatus.Aborted,
     })
+    await expect(retry).resolves.toMatchObject({
+      status: ToolCallResponseStatus.Success,
+    })
+    expect(execute).toHaveBeenCalledTimes(2)
   })
 
   it('uses only the last Codex agent message as the final tool result', async () => {

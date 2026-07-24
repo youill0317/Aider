@@ -44,14 +44,18 @@ export class VectorManager {
   private static readonly EMBEDDING_CONCURRENCY = 8
   private static readonly MAX_INDEX_FILE_BYTES = 16 * 1024 * 1024
   private static readonly MAX_CHUNKS_PER_FILE = 2_000
+  private static readonly MAX_INDEX_SNAPSHOTS = 32
   private app: App
   private repository: VectorRepository
   private saveCallback: (() => Promise<void>) | null = null
   private vacuumCallback: (() => Promise<void>) | null = null
   private mutationQueue: Promise<void> = Promise.resolve()
+  private lifetimeAbortController = new AbortController()
   private closed = false
   private vaultRevision = 0
-  private lastIndexSnapshot: { key: string; vaultRevision: number } | undefined
+  private fullScanRevision = 0
+  private changedPathRevisions = new Map<string, number>()
+  private indexSnapshots = new Map<string, number>()
   private skippedFileSignatures = new Map<string, string>()
   private vaultEventRefs: EventRef[] = []
 
@@ -89,16 +93,37 @@ export class VectorManager {
       const invalidateMarkdown = (file: TAbstractFile) => {
         if (file.path.toLowerCase().endsWith('.md')) {
           this.vaultRevision += 1
+          this.changedPathRevisions.set(file.path, this.vaultRevision)
         }
       }
-      const invalidateAll = () => {
+      const invalidateDeleted = (file: TAbstractFile) => {
         this.vaultRevision += 1
+        if (file.path.toLowerCase().endsWith('.md')) {
+          this.changedPathRevisions.set(file.path, this.vaultRevision)
+        } else {
+          this.fullScanRevision = this.vaultRevision
+        }
+      }
+      const invalidateRenamed = (
+        file: TAbstractFile,
+        previousPath = file.path,
+      ) => {
+        this.vaultRevision += 1
+        if (
+          file.path.toLowerCase().endsWith('.md') ||
+          previousPath.toLowerCase().endsWith('.md')
+        ) {
+          this.changedPathRevisions.set(file.path, this.vaultRevision)
+          this.changedPathRevisions.set(previousPath, this.vaultRevision)
+        } else {
+          this.fullScanRevision = this.vaultRevision
+        }
       }
       this.vaultEventRefs = [
         app.vault.on('create', invalidateMarkdown),
         app.vault.on('modify', invalidateMarkdown),
-        app.vault.on('delete', invalidateAll),
-        app.vault.on('rename', invalidateAll),
+        app.vault.on('delete', invalidateDeleted),
+        app.vault.on('rename', invalidateRenamed),
       ]
     }
   }
@@ -139,9 +164,21 @@ export class VectorManager {
     options: UpdateVaultIndexOptions,
     updateProgress?: (indexProgress: IndexProgress) => void,
   ): Promise<void> {
-    return this.enqueueMutation(() =>
-      this.updateVaultIndexNow(embeddingModel, options, updateProgress),
+    const combinedSignal = combineAbortSignals(
+      options.signal,
+      this.lifetimeAbortController.signal,
     )
+    try {
+      return await this.enqueueMutation(() =>
+        this.updateVaultIndexNow(
+          embeddingModel,
+          { ...options, signal: combinedSignal.signal },
+          updateProgress,
+        ),
+      )
+    } finally {
+      combinedSignal.dispose()
+    }
   }
 
   private async updateVaultIndexNow(
@@ -151,13 +188,23 @@ export class VectorManager {
   ): Promise<void> {
     throwIfAborted(options.signal)
     const snapshotKey = this.createIndexSnapshotKey(embeddingModel, options)
+    const previousSnapshotRevision = this.indexSnapshots.get(snapshotKey)
     if (
       !options.reindexAll &&
-      this.lastIndexSnapshot?.key === snapshotKey &&
-      this.lastIndexSnapshot.vaultRevision === this.vaultRevision
+      previousSnapshotRevision === this.vaultRevision
     ) {
       return
     }
+    const changedPaths =
+      !options.reindexAll &&
+      previousSnapshotRevision !== undefined &&
+      previousSnapshotRevision >= this.fullScanRevision
+        ? new Set(
+            [...this.changedPathRevisions]
+              .filter(([, revision]) => revision > previousSnapshotRevision)
+              .map(([path]) => path),
+          )
+        : undefined
     const vaultRevision = this.vaultRevision
     const embeddingProfile = this.getEmbeddingProfile(embeddingModel)
     const matchesIndexFilters = this.createIndexFilter(
@@ -169,6 +216,7 @@ export class VectorManager {
       indexedFiles,
       embeddingModel,
       matchesIndexFilters,
+      changedPaths,
     )
     const filesToIndex = this.getFilesToIndex({
       embeddingModel,
@@ -178,13 +226,14 @@ export class VectorManager {
       embeddingProfile,
       reindexAll: options.reindexAll,
       scope: options.reindexAll ? undefined : options.scope,
+      changedPaths,
     })
 
     if (filesToIndex.length === 0) {
       if (indexChanged) {
         await this.requestSave()
       }
-      this.lastIndexSnapshot = { key: snapshotKey, vaultRevision }
+      this.rememberIndexSnapshot(snapshotKey, vaultRevision)
       return
     }
 
@@ -198,7 +247,7 @@ export class VectorManager {
         signal: options.signal,
         updateProgress,
       })
-      this.lastIndexSnapshot = { key: snapshotKey, vaultRevision }
+      this.rememberIndexSnapshot(snapshotKey, vaultRevision)
       return
     }
 
@@ -365,6 +414,7 @@ export class VectorManager {
         }
         if (this.hasFileChanged(file.path, sourceMtime, sourceSize)) {
           this.vaultRevision += 1
+          this.changedPathRevisions.set(file.path, this.vaultRevision)
           continue
         }
         await this.repository.replaceVectorsForFile(
@@ -406,17 +456,30 @@ Please report this issue to the developer if it persists.`,
         await this.requestSave()
       }
     }
-    this.lastIndexSnapshot = { key: snapshotKey, vaultRevision }
+    this.rememberIndexSnapshot(snapshotKey, vaultRevision)
   }
 
   async clearAllVectors(modelId: string): Promise<void> {
     return this.enqueueMutation(() => this.clearAllVectorsNow(modelId))
   }
 
+  async clearAllVectorsForModels(modelIds: string[]): Promise<void> {
+    if (modelIds.length === 0) return
+    return this.enqueueMutation(async () => {
+      await this.repository.clearAllVectorsForModels(modelIds)
+      await this.finishClearingVectors()
+    })
+  }
+
   private async clearAllVectorsNow(modelId: string): Promise<void> {
     await this.repository.clearAllVectors(modelId)
+    await this.finishClearingVectors()
+  }
+
+  private async finishClearingVectors(): Promise<void> {
     this.vaultRevision += 1
-    this.lastIndexSnapshot = undefined
+    this.fullScanRevision = this.vaultRevision
+    this.indexSnapshots.clear()
     try {
       await this.requestVacuum()
     } finally {
@@ -426,6 +489,7 @@ Please report this issue to the developer if it persists.`,
 
   async close(): Promise<void> {
     this.closed = true
+    this.lifetimeAbortController.abort()
     await this.mutationQueue
     this.vaultEventRefs.forEach((eventRef) => this.app.vault.offref(eventRef))
     this.vaultEventRefs = []
@@ -569,6 +633,7 @@ Please report this issue to the developer if it persists.`,
 
         if (this.hasFileChanged(file.path, sourceMtime, sourceSize)) {
           this.vaultRevision += 1
+          this.changedPathRevisions.set(file.path, this.vaultRevision)
           continue
         }
         await this.repository.replaceVectorsForFile(
@@ -620,13 +685,22 @@ Please report this issue to the developer if it persists.`,
     indexedFiles: IndexedVectorFile[],
     embeddingModel: EmbeddingModelClient,
     matchesIndexFilters: (filePath: string) => boolean,
+    changedPaths?: ReadonlySet<string>,
   ) {
-    const markdownFilePaths = new Set(
-      this.app.vault.getMarkdownFiles().map(({ path }) => path),
-    )
-    const staleFilePaths = [
+    const indexedPaths = [
       ...new Set(indexedFiles.map(({ path }) => path)),
-    ].filter(
+    ].filter((path) => !changedPaths || changedPaths.has(path))
+    const markdownFilePaths = changedPaths
+      ? new Set(
+          [...changedPaths].filter((path) => {
+            const file = this.app.vault.getAbstractFileByPath(path)
+            return Boolean(
+              file && path.toLowerCase().endsWith('.md') && 'stat' in file,
+            )
+          }),
+        )
+      : new Set(this.app.vault.getMarkdownFiles().map(({ path }) => path))
+    const staleFilePaths = [...indexedPaths].filter(
       (filePath) =>
         !markdownFilePaths.has(filePath) || !matchesIndexFilters(filePath),
     )
@@ -648,6 +722,7 @@ Please report this issue to the developer if it persists.`,
     embeddingProfile,
     reindexAll,
     scope,
+    changedPaths,
   }: {
     embeddingModel: EmbeddingModelClient
     indexedFiles?: IndexedVectorFile[]
@@ -656,8 +731,15 @@ Please report this issue to the developer if it persists.`,
     embeddingProfile: string
     reindexAll?: boolean
     scope?: { files: string[]; folders: string[] }
+    changedPaths?: ReadonlySet<string>
   }): TFile[] {
-    let filesToIndex = this.app.vault.getMarkdownFiles()
+    let filesToIndex = changedPaths
+      ? [...changedPaths]
+          .map((path) => this.app.vault.getAbstractFileByPath(path))
+          .filter((file): file is TFile =>
+            Boolean(file?.path.toLowerCase().endsWith('.md') && 'stat' in file),
+          )
+      : this.app.vault.getMarkdownFiles()
 
     filesToIndex = filesToIndex.filter(
       (file) =>
@@ -720,6 +802,23 @@ Please report this issue to the developer if it persists.`,
       }
       return false
     })
+  }
+
+  private rememberIndexSnapshot(key: string, revision: number): void {
+    this.indexSnapshots.delete(key)
+    this.indexSnapshots.set(key, revision)
+    if (this.indexSnapshots.size > VectorManager.MAX_INDEX_SNAPSHOTS) {
+      const oldestKey = this.indexSnapshots.keys().next().value as
+        | string
+        | undefined
+      if (oldestKey !== undefined) this.indexSnapshots.delete(oldestKey)
+    }
+    const oldestRevision = Math.min(...this.indexSnapshots.values())
+    for (const [path, pathRevision] of this.changedPathRevisions) {
+      if (pathRevision <= oldestRevision) {
+        this.changedPathRevisions.delete(path)
+      }
+    }
   }
 
   private createIndexFilter(
@@ -908,6 +1007,31 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+function combineAbortSignals(...signals: (AbortSignal | undefined)[]): {
+  signal: AbortSignal
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  const activeSignals = signals.filter(
+    (signal): signal is AbortSignal => signal !== undefined,
+  )
+  const abort = () => controller.abort()
+  if (activeSignals.some((signal) => signal.aborted)) {
+    abort()
+  } else {
+    activeSignals.forEach((signal) =>
+      signal.addEventListener('abort', abort, { once: true }),
+    )
+  }
+  return {
+    signal: controller.signal,
+    dispose: () =>
+      activeSignals.forEach((signal) =>
+        signal.removeEventListener('abort', abort),
+      ),
+  }
 }
 
 async function abortable<T>(

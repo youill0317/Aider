@@ -9,32 +9,32 @@ export type CodexApprovalPolicy =
   | 'on-request'
   | 'untrusted'
 
-export type CodexThreadStartedEvent = {
+type CodexThreadStartedEvent = {
   readonly kind: 'thread.started'
   readonly line: number
   readonly threadId: string
 }
 
-export type CodexTurnEvent = {
+type CodexTurnEvent = {
   readonly kind: 'turn.started' | 'turn.completed' | 'turn.failed'
   readonly line: number
   readonly turnId?: string
 }
 
-export type CodexItemEvent = {
+type CodexItemEvent = {
   readonly kind: 'item.started' | 'item.updated' | 'item.completed'
   readonly line: number
   readonly item: Record<string, unknown>
 }
 
-export type CodexErrorEvent = {
+type CodexErrorEvent = {
   readonly kind: 'error'
   readonly line: number
   readonly message: string
   readonly code?: string
 }
 
-export type CodexUnknownEvent = {
+type CodexUnknownEvent = {
   readonly kind: 'unknown'
   readonly line: number
   readonly type: string
@@ -65,7 +65,7 @@ export type CodexExecRequest = {
   readonly resume?: CodexResumeContext
 }
 
-export type CodexRunStatus = 'completed' | 'failed' | 'cancelled'
+type CodexRunStatus = 'completed' | 'failed' | 'cancelled'
 
 export type CodexRunResult = {
   readonly status: CodexRunStatus
@@ -80,13 +80,13 @@ export type CodexRunHandle = {
   abort: () => void
 }
 
-export type CodexPermissionOption = {
+type CodexPermissionOption = {
   readonly id: string
   readonly kind: string
   readonly name: string
 }
 
-export type CodexPermissionRequest = {
+type CodexPermissionRequest = {
   readonly id: string
   readonly options: readonly CodexPermissionOption[]
   readonly sessionId: string

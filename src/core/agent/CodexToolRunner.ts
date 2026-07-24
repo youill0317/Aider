@@ -66,6 +66,7 @@ export class CodexToolRunner {
     Set<string>
   >()
   private readonly activeRuns = new Map<string, CodexRunHandle>()
+  private readonly abortingRunIds = new Set<string>()
   private startingRun = false
   private disposed = false
 
@@ -83,12 +84,15 @@ export class CodexToolRunner {
     })
   }
 
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     this.disposed = true
-    this.activeRuns.forEach((run) => run.abort())
+    const activeRuns = [...this.activeRuns.values()]
+    activeRuns.forEach((run) => run.abort())
     this.activeRuns.clear()
+    this.abortingRunIds.clear()
     this.allowedExecutionsByConversation.clear()
     this.unsubscribeFromSettings()
+    await Promise.allSettled(activeRuns.map((run) => run.done))
   }
 
   isAvailable(): boolean {
@@ -195,6 +199,15 @@ export class CodexToolRunner {
         error: 'Codex tool is only available in Obsidian desktop when enabled.',
       }
     }
+    if (!this.startingRun && this.activeRuns.size > 0) {
+      const abortingRuns = [...this.activeRuns].filter(([id]) =>
+        this.abortingRunIds.has(id),
+      )
+      if (abortingRuns.length === this.activeRuns.size) {
+        await Promise.allSettled(abortingRuns.map(([, run]) => run.done))
+        await Promise.resolve()
+      }
+    }
     if (this.startingRun || this.activeRuns.size > 0) {
       return {
         status: ToolCallResponseStatus.Error,
@@ -244,7 +257,7 @@ export class CodexToolRunner {
       this.startingRun = false
     }
 
-    const abortListener = () => run.abort()
+    const abortListener = () => this.abortRun(id, run)
     signal?.addEventListener('abort', abortListener, { once: true })
 
     try {
@@ -270,6 +283,7 @@ export class CodexToolRunner {
     } finally {
       signal?.removeEventListener('abort', abortListener)
       this.activeRuns.delete(id)
+      this.abortingRunIds.delete(id)
     }
   }
 
@@ -278,8 +292,13 @@ export class CodexToolRunner {
     if (!run) {
       return false
     }
-    run.abort()
+    this.abortRun(id, run)
     return true
+  }
+
+  private abortRun(id: string, run: CodexRunHandle): void {
+    this.abortingRunIds.add(id)
+    run.abort()
   }
 
   private buildExecRequest(args: CodexToolArgs): CodexExecRequest {

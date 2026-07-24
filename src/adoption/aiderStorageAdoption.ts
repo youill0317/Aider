@@ -24,6 +24,7 @@ export const REDACTED_ADOPTION_ERROR =
 
 export async function adoptAiderStorage(
   app: AiderAdoptionApp,
+  options: { includeVectorDb?: boolean } = {},
 ): Promise<AiderAdoptionMarker> {
   const paths = buildAdoptionPaths(app)
   const marker = await readAdoptionMarker(app, paths.markerPath)
@@ -39,13 +40,15 @@ export async function adoptAiderStorage(
   nextResources = await adoptResource(app, paths, nextResources, 'jsonDb', () =>
     adoptJsonDatabase(app, paths),
   )
-  nextResources = await adoptResource(
-    app,
-    paths,
-    nextResources,
-    'vectorDb',
-    () => adoptVectorDatabase(app, paths),
-  )
+  if (options.includeVectorDb !== false) {
+    nextResources = await adoptResource(
+      app,
+      paths,
+      nextResources,
+      'vectorDb',
+      () => adoptVectorDatabase(app, paths),
+    )
+  }
   nextResources = await adoptResource(
     app,
     paths,
@@ -54,6 +57,22 @@ export async function adoptAiderStorage(
     () => adoptChatHistories(app, paths),
   )
   return { resources: nextResources }
+}
+
+export async function adoptAiderVectorStorage(
+  app: AiderAdoptionApp,
+): Promise<AiderAdoptionMarker> {
+  const paths = buildAdoptionPaths(app)
+  const marker = await readAdoptionMarker(app, paths.markerPath)
+  return {
+    resources: await adoptResource(
+      app,
+      paths,
+      marker.resources,
+      'vectorDb',
+      () => adoptVectorDatabase(app, paths),
+    ),
+  }
 }
 
 async function adoptResource(

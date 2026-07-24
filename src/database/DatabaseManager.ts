@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite'
 import { PgliteDatabase, drizzle } from 'drizzle-orm/pglite'
-import { App, normalizePath, requestUrl } from 'obsidian'
+import { App, Notice, normalizePath } from 'obsidian'
 
 import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
 import { writeBinaryFileAtomically } from '../utils/atomic-file'
@@ -29,6 +29,7 @@ export class DatabaseManager {
   private db: PgliteDatabase | null = null
   private saveQueue: Promise<void> | null = null
   private saveRequested = false
+  private vectorSaveTimer: ReturnType<typeof setTimeout> | null = null
   // WeakMap to prevent circular references
   private static managers = new WeakMap<
     DatabaseManager,
@@ -62,7 +63,7 @@ export class DatabaseManager {
       }
 
       // save, vacuum callback setup
-      const saveCallback = dbManager.save.bind(dbManager) as () => Promise<void>
+      const saveCallback = () => dbManager.scheduleVectorSave()
       const vacuumCallback = dbManager.vacuum.bind(
         dbManager,
       ) as () => Promise<void>
@@ -235,7 +236,7 @@ export class DatabaseManager {
     try {
       const result = await this.pgClient.query<{
         count: string | number
-      }>('SELECT COUNT(*) AS count FROM drizzle_migrations')
+      }>('SELECT COUNT(*) AS count FROM drizzle.drizzle_migrations')
       const count = Number(result.rows[0]?.count)
       return Number.isSafeInteger(count) && count >= 0 ? count : null
     } catch {
@@ -244,6 +245,10 @@ export class DatabaseManager {
   }
 
   async save(): Promise<void> {
+    if (this.vectorSaveTimer) {
+      clearTimeout(this.vectorSaveTimer)
+      this.vectorSaveTimer = null
+    }
     this.saveRequested = true
     if (!this.saveQueue) {
       const save = Promise.resolve().then(() => this.drainSaveRequests())
@@ -258,6 +263,18 @@ export class DatabaseManager {
       )
     }
     return this.saveQueue
+  }
+
+  private async scheduleVectorSave(): Promise<void> {
+    this.saveRequested = true
+    if (this.vectorSaveTimer) clearTimeout(this.vectorSaveTimer)
+    this.vectorSaveTimer = setTimeout(() => {
+      this.vectorSaveTimer = null
+      void this.save().catch((error) => {
+        console.error('Failed to save the vault index', error)
+        new Notice('Failed to save the vault index')
+      })
+    }, 500)
   }
 
   private async drainSaveRequests(): Promise<void> {
@@ -341,25 +358,40 @@ export class DatabaseManager {
         const cached = await this.readCachedPGliteResource(resource)
         if (cached) return cached
 
-        const response = await withRequestTimeout(
-          requestUrl(
+        const resourceBytes = await withRequestTimeout(async (signal) => {
+          const response = await fetch(
             `https://unpkg.com/@electric-sql/pglite@${PGLITE_VERSION}/dist/${resource}`,
-          ),
-        )
-        if (response.arrayBuffer.byteLength > MAX_PGLITE_RESOURCE_BYTES) {
+            { signal },
+          )
+          if (!response.ok) {
+            throw new Error(
+              `Failed to download PGlite resource: ${response.status}`,
+            )
+          }
+          const contentLength = Number(response.headers.get('content-length'))
+          if (
+            Number.isFinite(contentLength) &&
+            contentLength > MAX_PGLITE_RESOURCE_BYTES
+          ) {
+            await response.body?.cancel()
+            throw new Error(`PGlite resource is too large: ${resource}`)
+          }
+          return response.arrayBuffer()
+        })
+        if (resourceBytes.byteLength > MAX_PGLITE_RESOURCE_BYTES) {
           throw new Error(`PGlite resource is too large: ${resource}`)
         }
         await verifySha256(
           resource,
-          response.arrayBuffer,
+          resourceBytes,
           PGLITE_RESOURCE_SHA256[resource],
         )
-        await this.cachePGliteResource(resource, response.arrayBuffer).catch(
+        await this.cachePGliteResource(resource, resourceBytes).catch(
           (error) => {
             console.warn(`Failed to cache PGlite resource ${resource}:`, error)
           },
         )
-        return response.arrayBuffer
+        return resourceBytes
       }
       const [fsBundleBytes, wasmBytes, vectorExtensionBytes] =
         await Promise.all([

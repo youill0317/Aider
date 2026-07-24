@@ -1,4 +1,4 @@
-export type LineVectorMetaData = {
+type LineVectorMetaData = {
   linkMode?: 'line'
   startLine: number
   endLine: number
@@ -18,12 +18,6 @@ export type VectorMetaData = LineVectorMetaData | FileOnlyVectorMetaData
 export type VectorLineRange = {
   startLine: number
   endLine: number
-}
-
-export function hasExactLineMetadata(
-  metadata: unknown,
-): metadata is LineVectorMetaData {
-  return getVectorLineRange(metadata) !== null
 }
 
 export function getVectorLineRange(metadata: unknown): VectorLineRange | null {
@@ -76,9 +70,7 @@ export function hasMatchingVoyageContextualIndexProfile({
   )
 }
 
-export function getVoyageContextualIndexProfile(
-  embeddingProfile: string,
-): string {
+function getVoyageContextualIndexProfile(embeddingProfile: string): string {
   return JSON.stringify([
     'voyage-contextual-v2',
     'route=voyage-contextual-auto-chunk',

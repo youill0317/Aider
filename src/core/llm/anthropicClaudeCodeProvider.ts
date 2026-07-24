@@ -21,25 +21,26 @@ import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
 } from './exception'
+import {
+  PlanProviderUpdateCallback,
+  refreshPlanProviderOnce,
+} from './planProviderRefresh'
 import { redactAuthError } from './redactAuthError'
 
 export class AnthropicClaudeCodeProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'anthropic-plan' }>
 > {
   private adapter: ClaudeCodeMessageAdapter
-  private onProviderUpdate?: (
-    providerId: string,
-    update: Partial<LLMProvider>,
-  ) => void | Promise<void>
+  private onProviderUpdate?: PlanProviderUpdateCallback
 
   constructor(
     provider: Extract<LLMProvider, { type: 'anthropic-plan' }>,
-    onProviderUpdate?: (
-      providerId: string,
-      update: Partial<LLMProvider>,
-    ) => void | Promise<void>,
+    onProviderUpdate?: PlanProviderUpdateCallback,
   ) {
-    super(provider)
+    super({
+      ...provider,
+      oauth: provider.oauth ? { ...provider.oauth } : undefined,
+    })
     this.adapter = new ClaudeCodeMessageAdapter()
     this.onProviderUpdate = onProviderUpdate
   }
@@ -100,19 +101,31 @@ export class AnthropicClaudeCodeProvider extends BaseLLMProvider<
       this.provider.oauth.expiresAt <= Date.now()
     ) {
       try {
-        const tokens = await refreshClaudeCodeAccessToken(
-          this.provider.oauth.refreshToken,
+        const previousRefreshToken = this.provider.oauth.refreshToken
+        const updatedOauth = await refreshPlanProviderOnce(
+          this.provider,
+          previousRefreshToken,
+          async () => {
+            const tokens =
+              await refreshClaudeCodeAccessToken(previousRefreshToken)
+            const oauth = {
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token ?? previousRefreshToken,
+              expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+            }
+            this.provider.oauth = oauth
+            await this.onProviderUpdate?.(
+              this.provider.id,
+              { oauth },
+              {
+                providerType: this.provider.type,
+                refreshToken: previousRefreshToken,
+              },
+            )
+            return oauth
+          },
         )
-        const updatedOauth = {
-          accessToken: tokens.access_token,
-          refreshToken:
-            tokens.refresh_token ?? this.provider.oauth.refreshToken,
-          expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-        }
         this.provider.oauth = updatedOauth
-        await this.onProviderUpdate?.(this.provider.id, {
-          oauth: updatedOauth,
-        })
       } catch (error) {
         throw new LLMAPIKeyInvalidException(
           'Claude Code OAuth token refresh failed. Please log in again.',

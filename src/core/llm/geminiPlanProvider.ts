@@ -21,25 +21,26 @@ import {
   ensureProjectContext,
   invalidateProjectContextCache,
 } from './geminiProject'
+import {
+  PlanProviderUpdateCallback,
+  refreshPlanProviderOnce,
+} from './planProviderRefresh'
 import { redactAuthError } from './redactAuthError'
 
 export class GeminiPlanProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'gemini-plan' }>
 > {
   private adapter: GeminiCodeAssistAdapter
-  private onProviderUpdate?: (
-    providerId: string,
-    update: Partial<LLMProvider>,
-  ) => void | Promise<void>
+  private onProviderUpdate?: PlanProviderUpdateCallback
 
   constructor(
     provider: Extract<LLMProvider, { type: 'gemini-plan' }>,
-    onProviderUpdate?: (
-      providerId: string,
-      update: Partial<LLMProvider>,
-    ) => void | Promise<void>,
+    onProviderUpdate?: PlanProviderUpdateCallback,
   ) {
-    super(provider)
+    super({
+      ...provider,
+      oauth: provider.oauth ? { ...provider.oauth } : undefined,
+    })
     this.adapter = new GeminiCodeAssistAdapter()
     this.onProviderUpdate = onProviderUpdate
   }
@@ -106,24 +107,37 @@ export class GeminiPlanProvider extends BaseLLMProvider<
     ) {
       try {
         const previousRefreshToken = this.provider.oauth.refreshToken
-        invalidateProjectContextCache(previousRefreshToken)
-        const tokens = await refreshGeminiAccessToken(previousRefreshToken)
-        const updatedOauth = {
-          ...this.provider.oauth,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token ?? previousRefreshToken,
-          expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-        }
+        const updatedOauth = await refreshPlanProviderOnce(
+          this.provider,
+          previousRefreshToken,
+          async () => {
+            invalidateProjectContextCache(previousRefreshToken)
+            const tokens = await refreshGeminiAccessToken(previousRefreshToken)
+            const oauth = {
+              ...this.provider.oauth,
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token ?? previousRefreshToken,
+              expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+            }
+            if (
+              tokens.refresh_token &&
+              tokens.refresh_token !== previousRefreshToken
+            ) {
+              invalidateProjectContextCache(tokens.refresh_token)
+            }
+            this.provider.oauth = oauth
+            await this.onProviderUpdate?.(
+              this.provider.id,
+              { oauth },
+              {
+                providerType: this.provider.type,
+                refreshToken: previousRefreshToken,
+              },
+            )
+            return oauth
+          },
+        )
         this.provider.oauth = updatedOauth
-        if (
-          tokens.refresh_token &&
-          tokens.refresh_token !== previousRefreshToken
-        ) {
-          invalidateProjectContextCache(tokens.refresh_token)
-        }
-        await this.onProviderUpdate?.(this.provider.id, {
-          oauth: updatedOauth,
-        })
       } catch (error) {
         throw new LLMAPIKeyInvalidException(
           'Gemini OAuth token refresh failed. Please log in again.',
@@ -146,10 +160,10 @@ export class GeminiPlanProvider extends BaseLLMProvider<
           projectId: nextAuth.projectId,
           managedProjectId: nextAuth.managedProjectId,
         }
-        this.provider.oauth = updatedOauth
         await this.onProviderUpdate?.(this.provider.id, {
           oauth: updatedOauth,
         })
+        this.provider.oauth = updatedOauth
       },
     })
 

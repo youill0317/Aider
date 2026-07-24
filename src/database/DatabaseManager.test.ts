@@ -1,7 +1,6 @@
 import { gzipSync } from 'zlib'
 
 import type { App } from 'obsidian'
-import { requestUrl } from 'obsidian'
 
 import { MAX_PGLITE_DATABASE_BYTES } from '../constants'
 
@@ -11,10 +10,18 @@ jest.mock('obsidian', () => ({
   ...jest.requireActual<typeof import('../../__mocks__/obsidian')>(
     '../../__mocks__/obsidian',
   ),
-  requestUrl: jest.fn(),
 }))
 
-const requestUrlMock = jest.mocked(requestUrl)
+let fetchMock: jest.SpiedFunction<typeof fetch>
+
+function fetched(bytes: ArrayBuffer): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    arrayBuffer: async () => bytes,
+  } as Response
+}
 
 function createManager(adapter: Record<string, jest.Mock>) {
   return new DatabaseManager(
@@ -44,7 +51,7 @@ function setPgClient(
 
 describe('DatabaseManager integrity', () => {
   beforeEach(() => {
-    requestUrlMock.mockReset()
+    fetchMock = jest.spyOn(globalThis, 'fetch')
     jest.spyOn(console, 'log').mockImplementation(() => undefined)
     jest.spyOn(console, 'error').mockImplementation(() => undefined)
   })
@@ -162,6 +169,29 @@ describe('DatabaseManager integrity', () => {
     expect(writeBinary).toHaveBeenCalledTimes(2)
   })
 
+  it('debounces rebuildable vector snapshots without blocking the query', async () => {
+    jest.useFakeTimers()
+    try {
+      const manager = createManager({
+        writeBinary: jest.fn().mockResolvedValue(undefined),
+      })
+      const dumpDataDir = jest.fn().mockResolvedValue(new Blob(['database']))
+      setPgClient(manager, { dumpDataDir })
+      const scheduleVectorSave = (
+        manager as unknown as { scheduleVectorSave: () => Promise<void> }
+      ).scheduleVectorSave.bind(manager)
+
+      await scheduleVectorSave()
+      await scheduleVectorSave()
+      expect(dumpDataDir).not.toHaveBeenCalled()
+
+      await jest.advanceTimersByTimeAsync(500)
+      expect(dumpDataDir).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('propagates save failures', async () => {
     const saveError = new Error('disk full')
     const writeBinary = jest
@@ -177,6 +207,29 @@ describe('DatabaseManager integrity', () => {
     await expect(manager.save()).rejects.toBe(saveError)
     await expect(manager.save()).resolves.toBeUndefined()
     expect(dumpDataDir).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not report unchanged Drizzle migrations as a database change', async () => {
+    const manager = createManager({})
+    const query = jest.fn().mockResolvedValue({ rows: [{ count: '10' }] })
+    const migrate = jest.fn().mockResolvedValue(undefined)
+    const state = manager as unknown as {
+      db: {
+        dialect: { migrate: jest.Mock }
+        session: object
+      }
+      pgClient: { query: jest.Mock }
+      migrateDatabase(): Promise<boolean>
+    }
+    state.pgClient = { query }
+    state.db = { dialect: { migrate }, session: {} }
+
+    await expect(state.migrateDatabase()).resolves.toBe(false)
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(query).toHaveBeenCalledWith(
+      'SELECT COUNT(*) AS count FROM drizzle.drizzle_migrations',
+    )
   })
 
   it('writes database snapshots through an atomic sibling rename', async () => {
@@ -268,10 +321,10 @@ describe('DatabaseManager integrity', () => {
     const fsBundleBytes = Uint8Array.of(1).buffer
     const wasmBytes = Uint8Array.of(2).buffer
     const vectorBytes = Uint8Array.of(3).buffer
-    requestUrlMock
-      .mockResolvedValueOnce({ arrayBuffer: fsBundleBytes } as never)
-      .mockResolvedValueOnce({ arrayBuffer: wasmBytes } as never)
-      .mockResolvedValueOnce({ arrayBuffer: vectorBytes } as never)
+    fetchMock
+      .mockResolvedValueOnce(fetched(fsBundleBytes))
+      .mockResolvedValueOnce(fetched(wasmBytes))
+      .mockResolvedValueOnce(fetched(vectorBytes))
     const digest = jest
       .spyOn(crypto.subtle, 'digest')
       .mockResolvedValueOnce(
@@ -355,13 +408,11 @@ describe('DatabaseManager integrity', () => {
     await loadPGliteResources(manager)
 
     expect(readBinary).toHaveBeenCalledTimes(3)
-    expect(requestUrlMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('fails closed when a PGlite resource hash does not match', async () => {
-    requestUrlMock.mockResolvedValue({
-      arrayBuffer: Uint8Array.of(1).buffer,
-    } as never)
+    fetchMock.mockResolvedValue(fetched(Uint8Array.of(1).buffer))
     jest
       .spyOn(crypto.subtle, 'digest')
       .mockResolvedValue(new Uint8Array(32).buffer)

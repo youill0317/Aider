@@ -58,6 +58,28 @@ describe('provider settings route trust', () => {
     expect(trustProviderRoute).toHaveBeenNthCalledWith(2, previousProvider)
   })
 
+  it('revokes a replacement route key when persistence fails', async () => {
+    const replacementProvider = { ...nextProvider, id: 'replacement' }
+    const revokeProviderRouteTrust = jest.fn().mockResolvedValue(undefined)
+    const trustProviderRoute = jest.fn().mockResolvedValue(undefined)
+    const plugin = createPlugin([previousProvider], {
+      revokeProviderRouteTrust,
+      setSettings: jest.fn().mockRejectedValue(new Error('save failed')),
+      trustProviderRoute,
+    })
+
+    await expect(
+      plugin.setTrustedProviderSettings(
+        replacementProvider,
+        settingsWith(replacementProvider),
+        previousProvider,
+      ),
+    ).rejects.toThrow('save failed')
+    expect(revokeProviderRouteTrust).toHaveBeenCalledWith(replacementProvider)
+    expect(trustProviderRoute).toHaveBeenNthCalledWith(1, replacementProvider)
+    expect(trustProviderRoute).toHaveBeenNthCalledWith(2, previousProvider)
+  })
+
   it('revokes a new provider route when persistence fails', async () => {
     const revokeProviderRouteTrust = jest.fn().mockResolvedValue(undefined)
     const plugin = createPlugin([], {

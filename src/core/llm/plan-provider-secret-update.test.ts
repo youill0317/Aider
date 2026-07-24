@@ -196,7 +196,11 @@ describe('plan provider secret updates', () => {
     const savedSettings: SmartComposerSettings[] = []
     const updateHandler = createProviderUpdateHandler({
       settings: staleSettings,
-      setSettings: async (nextSettings) => {
+      setSettings: async (settingsUpdate) => {
+        const nextSettings =
+          typeof settingsUpdate === 'function'
+            ? settingsUpdate(latestDisconnectedSettings)
+            : settingsUpdate
         savedSettings.push(nextSettings)
       },
       getSettings: () => latestDisconnectedSettings,

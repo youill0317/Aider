@@ -239,9 +239,7 @@ function mapCodexTokenError(
   return error
 }
 
-export function parseCodexJwtClaims(
-  token: string,
-): CodexIdTokenClaims | undefined {
+function parseCodexJwtClaims(token: string): CodexIdTokenClaims | undefined {
   const parts = token.split('.')
   if (parts.length !== 3) return undefined
   try {

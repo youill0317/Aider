@@ -6,7 +6,10 @@ import {
   MAX_ADOPTION_DIRECTORY_DEPTH,
   MAX_ADOPTION_JSON_FILE_BYTES,
 } from './aiderAdoptionUtils'
-import { adoptAiderStorage } from './aiderStorageAdoption'
+import {
+  adoptAiderStorage,
+  adoptAiderVectorStorage,
+} from './aiderStorageAdoption'
 import {
   createTestApp,
   decodeText,
@@ -227,6 +230,26 @@ describe('Aider storage adoption', () => {
     expect(
       decodeText(await app.vault.adapter.readBinary('.aider_vector_db.tar.gz')),
     ).toBe('aider-vector')
+  })
+
+  it('can defer vector adoption until after the main plugin wiring', async () => {
+    const app = createTestApp()
+    await app.vault.adapter.writeBinary(
+      '.smtcmp_vector_db.tar.gz',
+      encodeText('legacy-vector'),
+    )
+
+    const initialMarker = await adoptAiderStorage(app, {
+      includeVectorDb: false,
+    })
+    expect(initialMarker.resources.vectorDb).toBeUndefined()
+    expect(await app.vault.adapter.exists(PGLITE_DB_PATH)).toBe(false)
+
+    const vectorMarker = await adoptAiderVectorStorage(app)
+    expect(vectorMarker.resources.vectorDb?.status).toBe('completed')
+    expect(decodeText(await app.vault.adapter.readBinary(PGLITE_DB_PATH))).toBe(
+      'legacy-vector',
+    )
   })
 
   it('rejects an oversized legacy vector archive before reading it', async () => {

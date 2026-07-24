@@ -288,6 +288,9 @@ export const smartComposerSettingsSchema =
     }
   })
 export type SmartComposerSettings = z.infer<typeof smartComposerSettingsSchema>
+export type SmartComposerSettingsUpdate =
+  | SmartComposerSettings
+  | ((currentSettings: SmartComposerSettings) => SmartComposerSettings)
 
 export type SettingMigration = {
   fromVersion: number

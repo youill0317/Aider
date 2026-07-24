@@ -1,5 +1,6 @@
 import { App, normalizePath } from 'obsidian'
 
+import { PGLITE_DB_PATH } from '../../constants'
 import { ChatConversationManager } from '../../utils/chat/chatHistoryManager'
 import { DatabaseManager } from '../DatabaseManager'
 
@@ -51,7 +52,14 @@ async function markMigrationCompleted(app: App): Promise<void> {
   )
 }
 
-async function transferChatHistoryFromLegacy(app: App): Promise<number> {
+type MigrationResult = {
+  failures: number
+  imported: number
+}
+
+async function transferChatHistoryFromLegacy(
+  app: App,
+): Promise<MigrationResult> {
   const oldChatManager = new ChatConversationManager(app)
   const newChatManager = new ChatManager(app)
 
@@ -62,6 +70,7 @@ async function transferChatHistoryFromLegacy(app: App): Promise<number> {
     ),
   )
   let failures = 0
+  let imported = 0
   const migratedIds: string[] = []
 
   for (const chatMeta of chatList) {
@@ -104,6 +113,7 @@ async function transferChatHistoryFromLegacy(app: App): Promise<number> {
 
       targetChats.set(importedChat.id, importedChat)
       migratedIds.push(normalizedChat.id)
+      imported += 1
     } catch (error) {
       failures += 1
       console.error(`Error migrating chat ${chatMeta.id}:`, error)
@@ -123,7 +133,7 @@ async function transferChatHistoryFromLegacy(app: App): Promise<number> {
   }
 
   console.log('Chat history migration to JSON database completed')
-  return failures
+  return { failures, imported }
 }
 
 function matchesImportedChat(
@@ -142,7 +152,7 @@ function matchesImportedChat(
 async function transferTemplatesFromDrizzle(
   app: App,
   dbManager: DatabaseManager,
-): Promise<number> {
+): Promise<MigrationResult> {
   const jsonTemplateManager = new TemplateManager(app)
   const drizzleTemplateManager = dbManager.getTemplateManager()
 
@@ -153,6 +163,7 @@ async function transferTemplatesFromDrizzle(
     ),
   )
   let failures = 0
+  let imported = 0
   let deletedAnyTemplate = false
 
   for (const template of templates) {
@@ -184,6 +195,7 @@ async function transferTemplatesFromDrizzle(
       }
 
       targetTemplates.set(importedTemplate.name, importedTemplate)
+      imported += 1
 
       deletedAnyTemplate =
         (await drizzleTemplateManager.deleteTemplate(template.id, false)) ||
@@ -199,7 +211,7 @@ async function transferTemplatesFromDrizzle(
   }
 
   console.log('Templates migration to JSON database completed')
-  return failures
+  return { failures, imported }
 }
 
 function hasSameTemplateContent(left: unknown, right: unknown): boolean {
@@ -210,18 +222,26 @@ export async function migrateToJsonDatabase(
   app: App,
   getDatabaseManager: () => Promise<DatabaseManager>,
   onMigrationComplete?: () => void | Promise<void>,
-): Promise<void> {
+  finalizeMigration = true,
+): Promise<boolean> {
   if (await hasMigrationCompleted(app)) {
-    return
+    return false
   }
 
-  const chatFailures = await transferChatHistoryFromLegacy(app)
-  const dbManager = await getDatabaseManager()
-  const templateFailures = await transferTemplatesFromDrizzle(app, dbManager)
-  const failures = chatFailures + templateFailures
+  const chatResult = await transferChatHistoryFromLegacy(app)
+  const templateResult = (await app.vault.adapter.exists(
+    normalizePath(PGLITE_DB_PATH),
+  ))
+    ? await transferTemplatesFromDrizzle(app, await getDatabaseManager())
+    : { failures: 0, imported: 0 }
+  const failures = chatResult.failures + templateResult.failures
   if (failures > 0) {
     throw new Error(`JSON database migration failed for ${failures} record(s)`)
   }
-  await markMigrationCompleted(app)
-  await onMigrationComplete?.()
+  if (finalizeMigration) {
+    await markMigrationCompleted(app)
+  }
+  const imported = chatResult.imported + templateResult.imported > 0
+  if (imported) await onMigrationComplete?.()
+  return imported
 }

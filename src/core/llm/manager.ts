@@ -1,5 +1,8 @@
 import { assertProviderRouteTrusted } from '../../security/config-trust'
-import { SmartComposerSettings } from '../../settings/schema/setting.types'
+import {
+  SmartComposerSettings,
+  SmartComposerSettingsUpdate,
+} from '../../settings/schema/setting.types'
 import { ChatModel } from '../../types/chat-model.types'
 import { LLMProvider } from '../../types/provider.types'
 
@@ -19,6 +22,10 @@ import { OpenAICodexProvider } from './openaiCodexProvider'
 import { OpenAICompatibleProvider } from './openaiCompatibleProvider'
 import { OpenRouterProvider } from './openRouterProvider'
 import { PerplexityProvider } from './perplexityProvider'
+import {
+  PlanProviderRefreshGuard,
+  PlanProviderUpdateCallback,
+} from './planProviderRefresh'
 import { VoyageProvider } from './voyageProvider'
 import { XaiProvider } from './xaiProvider'
 
@@ -35,7 +42,7 @@ export function getProviderClient({
 }: {
   providerId: string
   settings: SmartComposerSettings
-  setSettings?: (newSettings: SmartComposerSettings) => void | Promise<void>
+  setSettings?: (update: SmartComposerSettingsUpdate) => void | Promise<void>
   getSettings?: () => SmartComposerSettings
 }): BaseLLMProvider<LLMProvider> {
   const provider = settings.providers.find((p) => p.id === providerId)
@@ -112,7 +119,7 @@ export function getChatModelClient({
 }: {
   modelId: string
   settings: SmartComposerSettings
-  setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  setSettings: (update: SmartComposerSettingsUpdate) => void | Promise<void>
   getSettings?: () => SmartComposerSettings
 }): {
   providerClient: BaseLLMProvider<LLMProvider>
@@ -137,20 +144,21 @@ export function getChatModelClient({
 }
 
 export function createProviderUpdateHandler({
-  settings,
+  settings: _settings,
   setSettings,
   getSettings,
 }: {
   settings: SmartComposerSettings
-  setSettings: (newSettings: SmartComposerSettings) => void | Promise<void>
+  setSettings: (update: SmartComposerSettingsUpdate) => void | Promise<void>
   getSettings?: () => SmartComposerSettings
-}): (targetProviderId: string, update: Partial<LLMProvider>) => Promise<void> {
-  return async (targetProviderId, update) => {
-    await setSettings(
+}): PlanProviderUpdateCallback {
+  return async (targetProviderId, update, refreshGuard) => {
+    await setSettings((currentSettings) =>
       mergeProviderUpdateIntoSettings(
-        getSettings?.() ?? settings,
+        getSettings?.() ?? currentSettings,
         targetProviderId,
         update,
+        refreshGuard,
       ),
     )
   }
@@ -160,10 +168,22 @@ export function mergeProviderUpdateIntoSettings(
   settings: SmartComposerSettings,
   targetProviderId: string,
   update: Partial<LLMProvider>,
+  refreshGuard?: PlanProviderRefreshGuard,
 ): SmartComposerSettings {
-  const updatedProviders: LLMProvider[] = settings.providers.map((item) =>
-    item.id === targetProviderId ? mergeProviderUpdate(item, update) : item,
-  )
+  const updatedProviders: LLMProvider[] = settings.providers.map((item) => {
+    if (item.id !== targetProviderId) {
+      return item
+    }
+    if (
+      refreshGuard &&
+      (item.type !== refreshGuard.providerType ||
+        !('oauth' in item) ||
+        item.oauth?.refreshToken !== refreshGuard.refreshToken)
+    ) {
+      return item
+    }
+    return mergeProviderUpdate(item, update)
+  })
 
   return {
     ...settings,

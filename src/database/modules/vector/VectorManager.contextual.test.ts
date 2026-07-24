@@ -40,7 +40,7 @@ describe('VectorManager contextual embedding route', () => {
 
     expect(getContextualEmbeddings).toHaveBeenCalledWith(
       'First paragraph.\n\nSecond paragraph.',
-      { inputType: 'document' },
+      { inputType: 'document', signal: expect.any(AbortSignal) },
     )
     expect(getEmbedding).not.toHaveBeenCalled()
     expect(repository.insertedVectors).toHaveLength(2)
@@ -368,8 +368,16 @@ describe('VectorManager contextual embedding route', () => {
     )
 
     expect(getEmbedding).toHaveBeenCalledTimes(2)
-    expect(getEmbedding).toHaveBeenNthCalledWith(1, 'picked', undefined)
-    expect(getEmbedding).toHaveBeenNthCalledWith(2, 'inside', undefined)
+    expect(getEmbedding).toHaveBeenNthCalledWith(
+      1,
+      'picked',
+      expect.any(AbortSignal),
+    )
+    expect(getEmbedding).toHaveBeenNthCalledWith(
+      2,
+      'inside',
+      expect.any(AbortSignal),
+    )
     expect(repository.insertedVectors.map(({ path }) => path)).toEqual([
       'picked.md',
       'notes/inside.md',
@@ -580,23 +588,34 @@ describe('VectorManager contextual embedding route', () => {
     const app = createApp({ 'current.md': 'Current' })
     const file = app.vault.getMarkdownFiles()[0]
     const manager = createVectorManager(app, repository)
-    const getEmbedding = jest.fn(async () => {
-      file.stat.mtime += 1
-      return [0.5, 0.6]
-    })
+    const getEmbedding = jest
+      .fn()
+      .mockImplementationOnce(async () => {
+        file.stat.mtime += 1
+        return [0.5, 0.6]
+      })
+      .mockResolvedValue([0.5, 0.6])
+    const embeddingModel = {
+      id: 'voyage/voyage-4',
+      providerType: 'voyage' as const,
+      model: 'voyage-4',
+      dimension: 2,
+      getEmbedding,
+    }
+    const options = {
+      chunkSize: 1000,
+      excludePatterns: [] as string[],
+      includePatterns: [] as string[],
+    }
 
-    await manager.updateVaultIndex(
-      {
-        id: 'voyage/voyage-4',
-        providerType: 'voyage',
-        model: 'voyage-4',
-        dimension: 2,
-        getEmbedding,
-      },
-      { chunkSize: 1000, excludePatterns: [], includePatterns: [] },
-    )
+    await manager.updateVaultIndex(embeddingModel, options)
 
     expect(repository.replaceVectorsForFile).not.toHaveBeenCalled()
+
+    await manager.updateVaultIndex(embeddingModel, options)
+
+    expect(getEmbedding).toHaveBeenCalledTimes(2)
+    expect(repository.replaceVectorsForFile).toHaveBeenCalledTimes(1)
   })
 
   it('removes a stale index without embedding an oversized file', async () => {
@@ -726,14 +745,16 @@ describe('VectorManager contextual embedding route', () => {
       includePatterns: [],
     })
     await embeddingStarted
+    const observedUpdate = update.catch((error: unknown) => error)
     const close = manager.close()
 
     await expect(manager.clearAllVectors(embeddingModel.id)).rejects.toThrow(
       'Vector manager is closed',
     )
+    await expect(observedUpdate).resolves.toMatchObject({ name: 'AbortError' })
+    await close
+    expect(repository.replaceVectorsForFile).not.toHaveBeenCalled()
     releaseEmbedding?.()
-    await Promise.all([update, close])
-    expect(repository.replaceVectorsForFile).toHaveBeenCalledTimes(1)
   })
 
   it('saves a cleared index even when vacuuming fails', async () => {
@@ -755,6 +776,23 @@ describe('VectorManager contextual embedding route', () => {
       'vacuum failed',
     )
     expect(repository.clearAllVectors).toHaveBeenCalledWith(embeddingModel.id)
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears multiple retired models with one vacuum and save', async () => {
+    const repository = createRepository()
+    const save = jest.fn().mockResolvedValue(undefined)
+    const vacuum = jest.fn().mockResolvedValue(undefined)
+    const manager = createVectorManager(createApp({}), repository, save)
+    manager.setVacuumCallback(vacuum)
+
+    await manager.clearAllVectorsForModels(['first-model', 'second-model'])
+
+    expect(repository.clearAllVectorsForModels).toHaveBeenCalledWith([
+      'first-model',
+      'second-model',
+    ])
+    expect(vacuum).toHaveBeenCalledTimes(1)
     expect(save).toHaveBeenCalledTimes(1)
   })
 
@@ -823,6 +861,7 @@ describe('VectorManager contextual embedding route', () => {
       offref,
     })
     const manager = createVectorManager(app, repository)
+    const getMarkdownFiles = jest.spyOn(app.vault, 'getMarkdownFiles')
     const embeddingModel = {
       id: 'voyage/voyage-4',
       providerType: 'voyage' as const,
@@ -839,10 +878,12 @@ describe('VectorManager contextual embedding route', () => {
     await manager.updateVaultIndex(embeddingModel, options)
     await manager.updateVaultIndex(embeddingModel, options)
     expect(repository.getIndexedFiles).toHaveBeenCalledTimes(1)
+    const fullScanCalls = getMarkdownFiles.mock.calls.length
 
     listeners.get('modify')?.({ path: 'current.md' })
     await manager.updateVaultIndex(embeddingModel, options)
     expect(repository.getIndexedFiles).toHaveBeenCalledTimes(2)
+    expect(getMarkdownFiles).toHaveBeenCalledTimes(fullScanCalls)
 
     listeners.get('rename')?.({ path: 'renamed-folder' })
     await manager.updateVaultIndex(embeddingModel, options)
@@ -854,6 +895,41 @@ describe('VectorManager contextual embedding route', () => {
 
     await manager.close()
     expect(offref).toHaveBeenCalledTimes(4)
+  })
+
+  it('caches index snapshots independently for alternating scopes', async () => {
+    const repository = createRepository()
+    const manager = createVectorManager(
+      createApp({ 'a.md': 'A', 'b.md': 'B' }),
+      repository,
+    )
+    const embeddingModel = {
+      id: 'voyage/voyage-4',
+      providerType: 'voyage' as const,
+      model: 'voyage-4',
+      dimension: 2,
+      getEmbedding: jest.fn().mockResolvedValue([0.5, 0.6]),
+    }
+    const baseOptions = {
+      chunkSize: 1000,
+      excludePatterns: [] as string[],
+      includePatterns: [] as string[],
+    }
+
+    await manager.updateVaultIndex(embeddingModel, {
+      ...baseOptions,
+      scope: { files: ['a.md'], folders: [] },
+    })
+    await manager.updateVaultIndex(embeddingModel, {
+      ...baseOptions,
+      scope: { files: ['b.md'], folders: [] },
+    })
+    await manager.updateVaultIndex(embeddingModel, {
+      ...baseOptions,
+      scope: { files: ['a.md'], folders: [] },
+    })
+
+    expect(repository.getIndexedFiles).toHaveBeenCalledTimes(2)
   })
 
   it('does not wait for a scheduled rate-limit retry after abort', async () => {
@@ -923,6 +999,7 @@ function createRepository() {
     getIndexedFiles: jest.fn().mockResolvedValue([]),
     deleteVectorsForMultipleFiles: jest.fn().mockResolvedValue(undefined),
     clearAllVectors: jest.fn().mockResolvedValue(undefined),
+    clearAllVectorsForModels: jest.fn().mockResolvedValue(undefined),
     replaceVectorsForFile: jest.fn(async function (
       this: { insertedVectors: InsertEmbedding[] },
       filePath: string,

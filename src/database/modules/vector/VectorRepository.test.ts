@@ -169,4 +169,14 @@ describe('VectorRepository SQL', () => {
     expect(queries[0].query).toMatch(/^delete from "embeddings"/)
     expect(queries[0].params).toEqual(['retired-model'])
   })
+
+  it('clears multiple retired models in one query', async () => {
+    const { queries, repository } = createRepository()
+
+    await repository.clearAllVectorsForModels(['first-model', 'second-model'])
+
+    expect(queries).toHaveLength(1)
+    expect(queries[0].query).toMatch(/^delete from "embeddings"/)
+    expect(queries[0].params).toEqual(['first-model', 'second-model'])
+  })
 })

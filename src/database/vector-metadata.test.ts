@@ -1,7 +1,6 @@
 import {
   createVoyageContextualMetadata,
   getVectorLineRange,
-  hasExactLineMetadata,
 } from './vector-metadata'
 
 describe('vector metadata helpers', () => {
@@ -11,7 +10,6 @@ describe('vector metadata helpers', () => {
       endLine: 18,
     }
 
-    expect(hasExactLineMetadata(metadata)).toBe(true)
     expect(getVectorLineRange(metadata)).toEqual({
       startLine: 12,
       endLine: 18,
@@ -32,7 +30,6 @@ describe('vector metadata helpers', () => {
     })
     expect(metadata).not.toHaveProperty('startLine')
     expect(metadata).not.toHaveProperty('endLine')
-    expect(hasExactLineMetadata(metadata)).toBe(false)
     expect(getVectorLineRange(metadata)).toBeNull()
   })
 })

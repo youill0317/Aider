@@ -460,7 +460,7 @@ describe('ChatManager', () => {
     expect(mockAdapter.remove).toHaveBeenCalledWith(filePath)
   })
 
-  it('validates chat files sequentially', async () => {
+  it('lists normal chat metadata without reading message bodies', async () => {
     const chats: ChatConversation[] = [
       {
         id: 'first-chat',
@@ -487,18 +487,69 @@ describe('ChatManager', () => {
       files: fileNames.map((fileName) => `.aider_json_db/chats/${fileName}`),
       folders: [],
     })
-    let activeReads = 0
-    let maximumActiveReads = 0
-    mockAdapter.read.mockImplementation(async (filePath: string) => {
-      activeReads += 1
-      maximumActiveReads = Math.max(maximumActiveReads, activeReads)
-      await Promise.resolve()
-      activeReads -= 1
-      return JSON.stringify(chats[filePath.endsWith(fileNames[0]) ? 0 : 1])
+    await expect(chatManager.listChats()).resolves.toEqual([
+      {
+        id: 'second-chat',
+        title: 'Second',
+        updatedAt: 2,
+        schemaVersion: CHAT_SCHEMA_VERSION,
+      },
+      {
+        id: 'first-chat',
+        title: 'First',
+        updatedAt: 1,
+        schemaVersion: CHAT_SCHEMA_VERSION,
+      },
+    ])
+    expect(mockAdapter.read).not.toHaveBeenCalled()
+  })
+
+  it('keeps a corrupt chat visible so the user can remove it', async () => {
+    const id = 'broken-chat'
+    const fileName = `v${CHAT_SCHEMA_VERSION}_Broken_1_${id}.json`
+    mockAdapter.list.mockResolvedValue({
+      files: [`.aider_json_db/chats/${fileName}`],
+      folders: [],
     })
+    mockAdapter.read.mockResolvedValue('{broken')
+
+    await expect(chatManager.listChats()).resolves.toEqual([
+      {
+        id,
+        title: 'Broken',
+        updatedAt: 1,
+        schemaVersion: CHAT_SCHEMA_VERSION,
+      },
+    ])
+    await expect(chatManager.findById(id)).resolves.toBeNull()
+    await expect(chatManager.deleteChat(id)).resolves.toBe(true)
+  })
+
+  it('reuses the filename index when loading a listed conversation', async () => {
+    const chat: ChatConversation = {
+      id: 'cached-chat',
+      title: 'Cached',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 2,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    }
+    const fileName = (
+      chatManager as unknown as {
+        generateFileName: (value: ChatConversation) => string
+      }
+    ).generateFileName(chat)
+    mockAdapter.list.mockResolvedValue({
+      files: [`.aider_json_db/chats/${fileName}`],
+      folders: [],
+    })
+    mockAdapter.read.mockResolvedValue(JSON.stringify(chat))
 
     await chatManager.listChats()
-    expect(maximumActiveReads).toBe(1)
+    await expect(chatManager.findById(chat.id)).resolves.toEqual(chat)
+
+    expect(mockAdapter.list).toHaveBeenCalledTimes(1)
+    expect(mockAdapter.read).toHaveBeenCalledTimes(1)
   })
 
   it('encodes Windows-reserved asterisks in generated filenames', () => {

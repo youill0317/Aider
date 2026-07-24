@@ -1,10 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-} from 'react'
+import { createContext, useCallback, useContext, useMemo } from 'react'
 
 import { DatabaseManager } from '../database/DatabaseManager'
 import { VectorManager } from '../database/modules/vector/VectorManager'
@@ -24,11 +18,6 @@ export function DatabaseProvider({
 }) {
   const getVectorManager = useCallback(async () => {
     return (await getDatabaseManager()).getVectorManager()
-  }, [getDatabaseManager])
-
-  useEffect(() => {
-    // start initialization of dbManager in the background
-    void getDatabaseManager()
   }, [getDatabaseManager])
 
   const value = useMemo(() => {

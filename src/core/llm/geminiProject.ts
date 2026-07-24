@@ -1,10 +1,8 @@
-import { requestUrl } from 'obsidian'
-
 import {
   GEMINI_CODE_ASSIST_ENDPOINT,
   GEMINI_CODE_ASSIST_HEADERS,
 } from '../../constants'
-import { withRequestTimeout } from '../../utils/llm/httpTransport'
+import { postJson } from '../../utils/llm/httpTransport'
 import { redactSecrets } from '../../utils/security/redact-secrets'
 
 type GeminiOAuthState = {
@@ -129,7 +127,7 @@ export function invalidateProjectContextCache(refreshToken?: string): void {
   projectContextResultCache.delete(refreshToken)
 }
 
-export async function loadManagedProject(
+async function loadManagedProject(
   accessToken: string,
   projectId?: string,
 ): Promise<LoadCodeAssistPayload | null> {
@@ -140,24 +138,16 @@ export async function loadManagedProject(
       requestBody.cloudaicompanionProject = projectId
     }
 
-    const response = await withRequestTimeout(
-      requestUrl({
-        url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
-        method: 'POST',
+    return await postJson<LoadCodeAssistPayload>(
+      `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
+      requestBody,
+      {
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
           ...GEMINI_CODE_ASSIST_HEADERS,
         },
-        body: JSON.stringify(requestBody),
-      }),
+      },
     )
-
-    if (response.status < 200 || response.status >= 300) {
-      return null
-    }
-
-    return response.json as LoadCodeAssistPayload
   } catch (error) {
     console.error(
       'Failed to load Gemini managed project:',
@@ -167,7 +157,7 @@ export async function loadManagedProject(
   }
 }
 
-export async function onboardManagedProject(
+async function onboardManagedProject(
   accessToken: string,
   tierId: string,
   projectId?: string,
@@ -189,24 +179,16 @@ export async function onboardManagedProject(
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await withRequestTimeout(
-        requestUrl({
-          url: `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`,
-          method: 'POST',
+      const payload = await postJson<OnboardUserPayload>(
+        `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`,
+        requestBody,
+        {
           headers: {
-            'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
             ...GEMINI_CODE_ASSIST_HEADERS,
           },
-          body: JSON.stringify(requestBody),
-        }),
+        },
       )
-
-      if (response.status < 200 || response.status >= 300) {
-        return undefined
-      }
-
-      const payload = response.json as OnboardUserPayload
       const managedProjectId = payload.response?.cloudaicompanionProject?.id
       if (payload.done && managedProjectId) {
         return managedProjectId

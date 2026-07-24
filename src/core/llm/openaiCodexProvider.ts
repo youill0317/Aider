@@ -19,25 +19,26 @@ import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
 } from './exception'
+import {
+  PlanProviderUpdateCallback,
+  refreshPlanProviderOnce,
+} from './planProviderRefresh'
 import { redactAuthError } from './redactAuthError'
 
 export class OpenAICodexProvider extends BaseLLMProvider<
   Extract<LLMProvider, { type: 'openai-plan' }>
 > {
   private adapter: CodexMessageAdapter
-  private onProviderUpdate?: (
-    providerId: string,
-    update: Partial<LLMProvider>,
-  ) => void | Promise<void>
+  private onProviderUpdate?: PlanProviderUpdateCallback
 
   constructor(
     provider: Extract<LLMProvider, { type: 'openai-plan' }>,
-    onProviderUpdate?: (
-      providerId: string,
-      update: Partial<LLMProvider>,
-    ) => void | Promise<void>,
+    onProviderUpdate?: PlanProviderUpdateCallback,
   ) {
-    super(provider)
+    super({
+      ...provider,
+      oauth: provider.oauth ? { ...provider.oauth } : undefined,
+    })
     this.adapter = new CodexMessageAdapter()
     this.onProviderUpdate = onProviderUpdate
   }
@@ -96,21 +97,33 @@ export class OpenAICodexProvider extends BaseLLMProvider<
       this.provider.oauth.expiresAt <= Date.now()
     ) {
       try {
-        const tokens = await refreshCodexAccessToken(
-          this.provider.oauth.refreshToken,
+        const previousOauth = this.provider.oauth
+        const previousRefreshToken = previousOauth.refreshToken
+        const updatedOauth = await refreshPlanProviderOnce(
+          this.provider,
+          previousRefreshToken,
+          async () => {
+            const tokens = await refreshCodexAccessToken(previousRefreshToken)
+            const accountId = extractCodexAccountId(tokens)
+            const oauth = {
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token ?? previousRefreshToken,
+              expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+              accountId: accountId ?? previousOauth.accountId,
+            }
+            this.provider.oauth = oauth
+            await this.onProviderUpdate?.(
+              this.provider.id,
+              { oauth },
+              {
+                providerType: this.provider.type,
+                refreshToken: previousRefreshToken,
+              },
+            )
+            return oauth
+          },
         )
-        const accountId = extractCodexAccountId(tokens)
-        const updatedOauth = {
-          accessToken: tokens.access_token,
-          refreshToken:
-            tokens.refresh_token ?? this.provider.oauth.refreshToken,
-          expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-          accountId: accountId ?? this.provider.oauth.accountId,
-        }
         this.provider.oauth = updatedOauth
-        await this.onProviderUpdate?.(this.provider.id, {
-          oauth: updatedOauth,
-        })
       } catch (error) {
         throw new LLMAPIKeyInvalidException(
           'OpenAI Codex OAuth token refresh failed. Please log in again.',

@@ -320,6 +320,323 @@ describe('Aider plugin migration wiring', () => {
     expect(warningSpy).toHaveBeenCalledTimes(2)
   })
 
+  it('registers views without waiting for vector-index adoption', async () => {
+    const calls: string[] = []
+    let finishVectorAdoption: (() => void) | undefined
+    const migrateToJsonStorage = jest.fn(async () => {
+      calls.push('migrate')
+    })
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      app: {},
+      adoptionTask: null,
+      unloading: false,
+      adoptSmartComposerData: async () => {
+        calls.push('adopt-critical')
+      },
+      loadSettings: async () => {
+        calls.push('load-settings')
+      },
+      registerView: (type: string) => {
+        calls.push(`register:${type}`)
+      },
+      adoptSmartComposerVectorData: () =>
+        new Promise<boolean>((resolve) => {
+          calls.push('adopt-vector')
+          finishVectorAdoption = () => resolve(true)
+        }),
+      addRibbonIcon: jest.fn(),
+      addCommand: jest.fn(),
+      addSettingTab: jest.fn(),
+      migrateToJsonStorage,
+    }) as SmartComposerPlugin
+
+    await plugin.onload()
+
+    expect(calls).toEqual([
+      'adopt-critical',
+      'load-settings',
+      `register:${CHAT_VIEW_TYPE}`,
+      `register:${APPLY_VIEW_TYPE}`,
+      `register:${LEGACY_CHAT_VIEW_TYPE}`,
+      `register:${LEGACY_APPLY_VIEW_TYPE}`,
+      'adopt-vector',
+    ])
+    expect(migrateToJsonStorage).not.toHaveBeenCalled()
+    const migrationTask = (
+      plugin as unknown as { migrationTask: Promise<void> }
+    ).migrationTask
+    finishVectorAdoption?.()
+    await migrationTask
+    expect(calls.at(-1)).toBe('migrate')
+  })
+
+  it('defers the migration marker until vector adoption can complete', async () => {
+    const migrateToJsonStorage = jest.fn().mockResolvedValue(undefined)
+    const vectorAdoptionResults = [false, true]
+    const createPlugin = () =>
+      Object.assign(Object.create(SmartComposerPlugin.prototype), {
+        app: {},
+        adoptionTask: null,
+        migrationTask: null,
+        unloading: false,
+        adoptSmartComposerData: jest.fn().mockResolvedValue(undefined),
+        loadSettings: jest.fn().mockResolvedValue(undefined),
+        registerView: jest.fn(),
+        adoptSmartComposerVectorData: jest
+          .fn()
+          .mockResolvedValue(vectorAdoptionResults.shift()),
+        addRibbonIcon: jest.fn(),
+        addCommand: jest.fn(),
+        addSettingTab: jest.fn(),
+        migrateToJsonStorage,
+      }) as SmartComposerPlugin
+
+    const failedAttempt = createPlugin()
+    await failedAttempt.onload()
+    await (failedAttempt as unknown as { migrationTask: Promise<void> })
+      .migrationTask
+    expect(migrateToJsonStorage).toHaveBeenNthCalledWith(1, false)
+
+    const successfulRetry = createPlugin()
+    await successfulRetry.onload()
+    await (successfulRetry as unknown as { migrationTask: Promise<void> })
+      .migrationTask
+    expect(migrateToJsonStorage).toHaveBeenNthCalledWith(2, true)
+  })
+
+  it('keeps migration pending until a late legacy vector database is adopted', async () => {
+    const app = createTestApp()
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      app,
+    }) as SmartComposerPlugin
+    const adoptVectorData = () =>
+      (
+        plugin as unknown as {
+          adoptSmartComposerVectorData(): Promise<boolean>
+        }
+      ).adoptSmartComposerVectorData()
+
+    expect(await adoptVectorData()).toBe(false)
+
+    await app.vault.adapter.writeBinary(
+      '.smtcmp_vector_db.tar.gz',
+      new TextEncoder().encode('legacy-vector').buffer,
+    )
+
+    expect(await adoptVectorData()).toBe(true)
+  })
+
+  it('applies queued model and tool updates to the latest settings', async () => {
+    const defaults = smartComposerSettingsSchema.parse({})
+    const alternateModel = {
+      ...defaults.chatModels[0],
+      id: 'alternate-model',
+    }
+    const settings = smartComposerSettingsSchema.parse({
+      ...defaults,
+      chatModels: [...defaults.chatModels, alternateModel],
+      chatOptions: {
+        ...defaults.chatOptions,
+        enableTools: false,
+      },
+    })
+    let releaseFirstSave: (() => void) | undefined
+    let markFirstSaveStarted: (() => void) | undefined
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve
+    })
+    const saveData = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirstSave = resolve
+            markFirstSaveStarted?.()
+          }),
+      )
+      .mockResolvedValue(undefined)
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      settings,
+      settingsSaveQueue: null,
+      settingsChangeListeners: [],
+      ragEngine: null,
+      secretStore: {
+        getBackendStatus: () => 'obsidian-secret-storage',
+        getSecret: async () => null,
+        setSecret: async () => undefined,
+        deleteSecret: async () => undefined,
+      },
+      saveData,
+    }) as SmartComposerPlugin
+
+    const selectModel = plugin.setSettings((currentSettings) => ({
+      ...currentSettings,
+      chatModelId: alternateModel.id,
+    }))
+    await firstSaveStarted
+    const enableTools = plugin.setSettings((currentSettings) => ({
+      ...currentSettings,
+      chatOptions: {
+        ...currentSettings.chatOptions,
+        enableTools: true,
+      },
+    }))
+    releaseFirstSave?.()
+
+    await Promise.all([selectModel, enableTools])
+
+    expect(plugin.settings.chatModelId).toBe(alternateModel.id)
+    expect(plugin.settings.chatOptions.enableTools).toBe(true)
+    expect(saveData).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects invalid settings instead of reporting a successful save', async () => {
+    const settings = smartComposerSettingsSchema.parse({})
+    const saveData = jest.fn()
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      settings,
+      settingsSaveQueue: null,
+      settingsChangeListeners: [],
+      ragEngine: null,
+      secretStore: {
+        getBackendStatus: () => 'obsidian-secret-storage',
+        getSecret: async () => null,
+        setSecret: async () => undefined,
+        deleteSecret: async () => undefined,
+      },
+      saveData,
+    }) as SmartComposerPlugin
+
+    await expect(
+      plugin.setSettings((currentSettings) => ({
+        ...currentSettings,
+        chatModelId: 'missing-model',
+      })),
+    ).rejects.toThrow('Selected model missing-model does not exist')
+    expect(saveData).not.toHaveBeenCalled()
+    expect(plugin.settings).toBe(settings)
+  })
+
+  it('waits for unload settings durability before reactivation', async () => {
+    let finishSettingsSave: (() => void) | undefined
+    const settingsSave = new Promise<void>((resolve) => {
+      finishSettingsSave = resolve
+    })
+    const unloadingPlugin = Object.assign(
+      Object.create(SmartComposerPlugin.prototype),
+      {
+        adoptionTask: null,
+        codexToolRunner: null,
+        dbManager: null,
+        dbManagerInitPromise: null,
+        mcpManager: null,
+        mcpManagerInitPromise: null,
+        ragEngine: null,
+        ragEngineInitPromise: null,
+        settingsChangeListeners: [],
+        settingsSaveQueue: settingsSave,
+        timeoutIds: [],
+        toolDispatcher: null,
+        unloading: false,
+      },
+    ) as SmartComposerPlugin
+    unloadingPlugin.onunload()
+
+    const calls: string[] = []
+    const reactivatedPlugin = Object.assign(
+      Object.create(SmartComposerPlugin.prototype),
+      {
+        app: {},
+        adoptionTask: null,
+        unloading: false,
+        adoptSmartComposerData: async () => {
+          calls.push('adopt')
+        },
+        loadSettings: async () => {
+          calls.push('load')
+        },
+        registerView: jest.fn(),
+        adoptSmartComposerVectorData: async () => true,
+        addRibbonIcon: jest.fn(),
+        addCommand: jest.fn(),
+        addSettingTab: jest.fn(),
+        migrateToJsonStorage: jest.fn(),
+      },
+    ) as SmartComposerPlugin
+
+    const loading = reactivatedPlugin.onload()
+    await Promise.resolve()
+    expect(calls).toEqual([])
+
+    finishSettingsSave?.()
+    await loading
+
+    expect(calls).toEqual(['adopt', 'load'])
+  })
+
+  it('does not close the database while RAG initialization is settling', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined)
+    let finishRagInitialization: (() => void) | undefined
+    const ragEngineInitPromise = new Promise<never>((_resolve, reject) => {
+      finishRagInitialization = () =>
+        reject(new Error('unloaded during RAG initialization'))
+    })
+    const cleanupDatabase = jest.fn().mockResolvedValue(undefined)
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      adoptionTask: null,
+      codexToolRunner: null,
+      dbManager: { cleanup: cleanupDatabase },
+      dbManagerInitPromise: null,
+      mcpManager: null,
+      mcpManagerInitPromise: null,
+      ragEngine: null,
+      ragEngineInitPromise,
+      settingsChangeListeners: [],
+      settingsSaveQueue: null,
+      timeoutIds: [],
+      toolDispatcher: null,
+      unloading: false,
+    }) as SmartComposerPlugin
+
+    plugin.onunload()
+    const cleanupBarrier = (
+      globalThis as typeof globalThis & {
+        __aiderPluginCleanupBarrier?: Promise<void>
+      }
+    ).__aiderPluginCleanupBarrier
+    await Promise.resolve()
+    expect(cleanupDatabase).not.toHaveBeenCalled()
+
+    finishRagInitialization?.()
+    await cleanupBarrier
+
+    expect(cleanupDatabase).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a Codex-only dispatcher without initializing MCP when tools are disabled', async () => {
+    const defaults = smartComposerSettingsSchema.parse({})
+    const settings = smartComposerSettingsSchema.parse({
+      ...defaults,
+      chatOptions: {
+        ...defaults.chatOptions,
+        enableTools: false,
+      },
+    })
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      codexToolRunner: {},
+      mcpManager: null,
+      mcpManagerInitPromise: null,
+      settings,
+      settingsChangeListeners: [],
+      toolDispatcher: null,
+      unloading: false,
+    }) as SmartComposerPlugin
+
+    await plugin.getToolDispatcher()
+
+    expect(McpManager).not.toHaveBeenCalled()
+  })
+
   it('shares MCP initialization across concurrent callers', async () => {
     const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
       mcpManager: null,

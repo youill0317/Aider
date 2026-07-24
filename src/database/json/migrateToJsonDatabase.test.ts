@@ -1,5 +1,6 @@
 import { App } from 'obsidian'
 
+import { PGLITE_DB_PATH } from '../../constants'
 import { ChatConversationManager } from '../../utils/chat/chatHistoryManager'
 import { DatabaseManager } from '../DatabaseManager'
 
@@ -76,6 +77,65 @@ describe('migrateToJsonDatabase', () => {
     await migrateToJsonDatabase(app, getDatabaseManager)
 
     expect(getDatabaseManager).not.toHaveBeenCalled()
+  })
+
+  it('does not initialize PGlite or reload the view on a fresh install', async () => {
+    const { app, adapter } = createApp()
+    adapter.exists.mockImplementation(async (filePath: string) => {
+      if (
+        filePath.endsWith(INITIAL_MIGRATION_MARKER) ||
+        filePath === PGLITE_DB_PATH
+      ) {
+        return false
+      }
+      return true
+    })
+    const { getDatabaseManager } = createDatabaseGetter()
+    const onMigrationComplete = jest.fn()
+    jest
+      .spyOn(ChatConversationManager.prototype, 'getChatList')
+      .mockResolvedValue([])
+
+    await expect(
+      migrateToJsonDatabase(app, getDatabaseManager, onMigrationComplete),
+    ).resolves.toBe(false)
+
+    expect(getDatabaseManager).not.toHaveBeenCalled()
+    expect(onMigrationComplete).not.toHaveBeenCalled()
+  })
+
+  it('migrates chats without finalizing while vector adoption is pending', async () => {
+    const { app, adapter } = createApp()
+    adapter.exists.mockImplementation(async (filePath: string) => {
+      if (
+        filePath.endsWith(INITIAL_MIGRATION_MARKER) ||
+        filePath === PGLITE_DB_PATH
+      ) {
+        return false
+      }
+      return true
+    })
+    const { getDatabaseManager } = createDatabaseGetter()
+    jest
+      .spyOn(ChatConversationManager.prototype, 'getChatList')
+      .mockResolvedValue([legacyChat])
+    jest
+      .spyOn(ChatConversationManager.prototype, 'findChatConversation')
+      .mockResolvedValue(legacyChat)
+    const importChat = jest
+      .spyOn(ChatManager.prototype, 'importChat')
+      .mockResolvedValue(migratedChat)
+
+    await expect(
+      migrateToJsonDatabase(app, getDatabaseManager, undefined, false),
+    ).resolves.toBe(true)
+
+    expect(importChat).toHaveBeenCalledTimes(1)
+    expect(getDatabaseManager).not.toHaveBeenCalled()
+    expect(adapter.rename).not.toHaveBeenCalledWith(
+      expect.any(String),
+      `.aider_json_db/${INITIAL_MIGRATION_MARKER}`,
+    )
   })
 
   it('does not write a marker when any record fails', async () => {

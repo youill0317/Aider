@@ -79,6 +79,36 @@ test('keeps the latest snapshot scheduled while a save fails', async () => {
   expect(saved).toEqual([messages, latestMessages])
 })
 
+test('exposes the latest snapshot until it is durably saved', async () => {
+  let finishFirstSave: (() => void) | undefined
+  let saveCount = 0
+  const latestMessages = [
+    { role: 'assistant', id: 'latest-answer', content: 'latest' },
+  ] as ChatMessage[]
+  const queue = new ChatSaveQueue(() => {
+    saveCount += 1
+    return saveCount === 1
+      ? new Promise<void>((resolve) => {
+          finishFirstSave = resolve
+        })
+      : Promise.resolve()
+  }, fail)
+
+  queue.schedule('chat', messages)
+  queue.drain()
+  await Promise.resolve()
+  expect(finishFirstSave).toBeDefined()
+  queue.schedule('chat', latestMessages)
+
+  expect(queue.peek('chat')).toBe(latestMessages)
+
+  finishFirstSave?.()
+  await Promise.resolve()
+  expect(queue.peek('chat')).toBe(latestMessages)
+  await queue.flush()
+  expect(queue.peek('chat')).toBeUndefined()
+})
+
 test('serializes deletion after pending saves and blocks resurrection', async () => {
   let finishSave: (() => void) | undefined
   const events: string[] = []

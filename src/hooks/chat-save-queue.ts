@@ -3,6 +3,7 @@ import { ChatMessage } from '../types/chat'
 export class ChatSaveQueue {
   private static readonly MAX_DELETED_TOMBSTONES = 1_000
   private pending = new Map<string, ChatMessage[]>()
+  private latest = new Map<string, ChatMessage[]>()
   private deleteRecovery = new Map<string, ChatMessage[]>()
   private deleting = new Set<string>()
   private deleted = new Set<string>()
@@ -19,9 +20,15 @@ export class ChatSaveQueue {
     }
     if (this.deleting.has(id)) {
       this.deleteRecovery.set(id, messages)
+      this.latest.set(id, messages)
       return
     }
     this.pending.set(id, messages)
+    this.latest.set(id, messages)
+  }
+
+  peek(id: string): ChatMessage[] | undefined {
+    return this.latest.get(id)
   }
 
   drain(): void {
@@ -34,6 +41,9 @@ export class ChatSaveQueue {
         const [id, messages] = pending[index]
         try {
           await this.persist(id, messages)
+          if (this.latest.get(id) === messages) {
+            this.latest.delete(id)
+          }
         } catch (error) {
           for (
             let retryIndex = index;
@@ -77,6 +87,7 @@ export class ChatSaveQueue {
       await this.flush()
       await remove()
       this.deleteRecovery.delete(id)
+      this.latest.delete(id)
       this.rememberDeleted(id)
     } catch (error) {
       this.deleting.delete(id)

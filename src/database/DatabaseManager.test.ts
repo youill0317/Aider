@@ -1,5 +1,6 @@
 import { gzipSync } from 'zlib'
 
+import { PGlite } from '@electric-sql/pglite'
 import type { App } from 'obsidian'
 
 import { MAX_PGLITE_DATABASE_BYTES } from '../constants'
@@ -76,6 +77,40 @@ describe('DatabaseManager integrity', () => {
 
     await expect(DatabaseManager.create(app)).rejects.toBe(readError)
     expect(writeBinary).not.toHaveBeenCalled()
+  })
+
+  it('treats a persisted database abort as rebuildable', async () => {
+    const manager = createManager({
+      exists: jest.fn().mockResolvedValue(true),
+      stat: jest.fn().mockResolvedValue(null),
+      readBinary: jest
+        .fn()
+        .mockResolvedValue(
+          Uint8Array.from(gzipSync(Buffer.from('database'))).buffer,
+        ),
+    })
+    const internals = manager as unknown as {
+      loadExistingDatabase: () => Promise<unknown>
+      loadPGliteResources: () => Promise<{
+        fsBundle: Blob
+        wasmModule: WebAssembly.Module
+        vectorExtensionBundlePath: URL
+      }>
+    }
+    jest.spyOn(internals, 'loadPGliteResources').mockResolvedValue({
+      fsBundle: new Blob(),
+      wasmModule: {} as WebAssembly.Module,
+      vectorExtensionBundlePath: new URL(
+        'data:application/gzip;base64,database',
+      ),
+    })
+    jest
+      .spyOn(PGlite, 'create')
+      .mockRejectedValueOnce(
+        new Error('Aborted(). Build with -sASSERTIONS for more info.'),
+      )
+
+    await expect(internals.loadExistingDatabase()).resolves.toBeNull()
   })
 
   it('closes an opened client when initialization fails after loading it', async () => {

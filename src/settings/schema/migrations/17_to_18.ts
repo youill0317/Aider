@@ -1,6 +1,10 @@
 import type { SettingMigration } from '../setting.types'
 
-import { getMigratedProviders } from './migrationUtils'
+import { DEFAULT_PROVIDERS_V16 } from './15_to_16'
+import {
+  getMigratedProviders,
+  hasCompatibleProviderRoute,
+} from './migrationUtils'
 
 const DEFAULT_PROVIDERS_V18 = [
   { type: 'anthropic-plan', id: 'anthropic-plan' },
@@ -43,14 +47,14 @@ const DEFAULT_VOYAGE_EMBEDDING_MODELS = [
   },
 ] as const
 
-const DEFAULT_VOYAGE_EMBEDDING_MODEL_IDS = new Set<string>(
-  DEFAULT_VOYAGE_EMBEDDING_MODELS.map((model) => model.id),
-)
-
 export const migrateFrom17To18: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 18
-  newData.providers = getMigratedProviders(newData, DEFAULT_PROVIDERS_V18)
+  newData.providers = getMigratedProviders(
+    newData,
+    DEFAULT_PROVIDERS_V18,
+    DEFAULT_PROVIDERS_V16,
+  )
   newData.embeddingModels = getMigratedEmbeddingModels(newData)
 
   return newData
@@ -58,16 +62,32 @@ export const migrateFrom17To18: SettingMigration['migrate'] = (data) => {
 
 function getMigratedEmbeddingModels(data: Record<string, unknown>): unknown[] {
   if (!Array.isArray(data.embeddingModels)) {
-    return [...DEFAULT_VOYAGE_EMBEDDING_MODELS]
+    return DEFAULT_VOYAGE_EMBEDDING_MODELS.filter((model) =>
+      hasCompatibleProviderRoute(data, model),
+    )
   }
 
-  const customModels = data.embeddingModels.filter(
-    (model) =>
-      !isRecord(model) ||
-      !DEFAULT_VOYAGE_EMBEDDING_MODEL_IDS.has(String(model.id)),
+  const defaultIds = new Set<string>(
+    DEFAULT_VOYAGE_EMBEDDING_MODELS.map((model) => model.id),
+  )
+  const seenDefaultIds = new Set<string>()
+  const existingModels = data.embeddingModels.filter((model) => {
+    if (!isRecord(model) || !defaultIds.has(String(model.id))) return true
+    if (seenDefaultIds.has(String(model.id))) return false
+    seenDefaultIds.add(String(model.id))
+    return true
+  })
+  const existingIds = new Set(
+    existingModels.filter(isRecord).map((model) => String(model.id)),
   )
 
-  return [...customModels, ...DEFAULT_VOYAGE_EMBEDDING_MODELS]
+  return [
+    ...existingModels,
+    ...DEFAULT_VOYAGE_EMBEDDING_MODELS.filter(
+      (model) =>
+        !existingIds.has(model.id) && hasCompatibleProviderRoute(data, model),
+    ),
+  ]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

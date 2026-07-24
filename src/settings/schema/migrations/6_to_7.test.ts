@@ -127,7 +127,13 @@ describe('Migration from v6 to v7', () => {
     ])
   })
 
-  it('should remove provider with id "perplexity"', () => {
+  it('should preserve a custom provider that collides with "perplexity"', () => {
+    const customProvider = {
+      type: 'openai-compatible',
+      id: 'perplexity',
+      baseUrl: 'https://private-perplexity.example.com',
+      apiKey: 'perplexity-api-key',
+    }
     const oldSettings = {
       version: 6,
       providers: [
@@ -135,16 +141,15 @@ describe('Migration from v6 to v7', () => {
           type: 'openai',
           id: 'openai',
         },
-        {
-          type: 'openai-compatible',
-          id: 'perplexity',
-          baseUrl: 'https://api.perplexity.ai',
-          apiKey: 'perplexity-api-key',
-        },
+        customProvider,
       ],
     }
     const result = migrateFrom6To7(oldSettings)
-    expect(result.providers).toEqual(DEFAULT_PROVIDERS_V7)
+    expect(
+      (result.providers as { id: string }[]).filter(
+        ({ id }) => id === 'perplexity',
+      ),
+    ).toEqual([customProvider])
   })
 
   it('should use default models if chatModels is not present', () => {
@@ -154,6 +159,30 @@ describe('Migration from v6 to v7', () => {
     const result = migrateFrom6To7(oldSettings)
     expect(result.version).toBe(7)
     expect(result.chatModels).toEqual(DEFAULT_CHAT_MODELS_V7)
+  })
+
+  it('should preserve a custom gemini-2.5-pro collision', () => {
+    const customModel = {
+      providerType: 'openai-compatible',
+      providerId: 'local-llm',
+      id: 'gemini-2.5-pro',
+      model: 'private-gemini-alias',
+      enable: false,
+    }
+    const oldSettings = {
+      version: 6,
+      chatModels: [customModel],
+      chatModelId: customModel.id,
+    }
+
+    const result = migrateFrom6To7(oldSettings)
+
+    expect(
+      (result.chatModels as { id: string }[]).filter(
+        ({ id }) => id === customModel.id,
+      ),
+    ).toEqual([customModel])
+    expect(result.chatModelId).toBe(customModel.id)
   })
 
   it('should add default models and preserve custom models', () => {

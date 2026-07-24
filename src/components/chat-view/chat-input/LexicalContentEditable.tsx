@@ -44,7 +44,6 @@ export type LexicalContentEditableProps = {
     image?: boolean
     mention?: boolean
     onEnter?: {
-      onAgentChat: () => void
       onVaultChat: () => void
     }
     template?: boolean
@@ -148,7 +147,6 @@ export default function LexicalContentEditable({
       {onEnter && (
         <OnEnterPlugin
           onEnter={onEnter}
-          onAgentChat={plugins?.onEnter?.onAgentChat}
           onVaultChat={plugins?.onEnter?.onVaultChat}
         />
       )}

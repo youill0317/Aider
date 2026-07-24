@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   bigint,
+  check,
   customType,
   index,
   jsonb,
@@ -54,6 +55,10 @@ export const embeddingTable = pgTable(
     index('embeddings_path_index').on(table.path),
     index('embeddings_model_index').on(table.model),
     index('embeddings_dimension_index').on(table.dimension),
+    check(
+      'embeddings_embedding_dimension_check',
+      sql`${table.embedding} IS NULL OR vector_dims(${table.embedding}) = ${table.dimension}`,
+    ),
     ...supportedDimensionsForIndex.map((dimension) =>
       // https://github.com/pgvector/pgvector?tab=readme-ov-file#can-i-store-vectors-with-different-dimensions-in-the-same-column
       index(`embeddings_embedding_${dimension}_index`)

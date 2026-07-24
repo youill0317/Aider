@@ -149,6 +149,14 @@ Some text after without closing tag`,
     expect(result).toEqual(expected)
   })
 
+  it('falls back to raw text for parser-created children', () => {
+    const input = '<smtcmp_block></p></smtcmp_block>'
+
+    expect(parseTagContents(input)).toEqual([
+      { type: 'string', content: input },
+    ])
+  })
+
   it('should handle smtcmp_block with startline and endline attributes', () => {
     const input = `<smtcmp_block language="markdown" startline="2" endline="5"></smtcmp_block>`
     const expected: ParsedTagContent[] = [

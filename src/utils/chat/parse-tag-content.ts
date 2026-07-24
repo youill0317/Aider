@@ -20,6 +20,7 @@ export type ParsedTagContent =
  */
 export function parseTagContents(input: string): ParsedTagContent[] {
   const parsedResult: ParsedTagContent[] = []
+  const rawInput: ParsedTagContent[] = [{ type: 'string', content: input }]
   const fragment = parseFragment(input, {
     sourceCodeLocationInfo: true,
   })
@@ -27,7 +28,7 @@ export function parseTagContents(input: string): ParsedTagContent[] {
   for (const node of fragment.childNodes) {
     if (node.nodeName === 'smtcmp_block') {
       if (!node.sourceCodeLocation) {
-        throw new Error('sourceCodeLocation is undefined')
+        return rawInput
       }
       const startOffset = node.sourceCodeLocation.startOffset
       const endOffset = node.sourceCodeLocation.endOffset
@@ -64,8 +65,11 @@ export function parseTagContents(input: string): ParsedTagContent[] {
           children[0].sourceCodeLocation?.startOffset
         const innerContentEndOffset =
           children[children.length - 1].sourceCodeLocation?.endOffset
-        if (!innerContentStartOffset || !innerContentEndOffset) {
-          throw new Error('sourceCodeLocation is undefined')
+        if (
+          innerContentStartOffset === undefined ||
+          innerContentEndOffset === undefined
+        ) {
+          return rawInput
         }
         parsedResult.push({
           type: 'smtcmp_block',
@@ -79,7 +83,7 @@ export function parseTagContents(input: string): ParsedTagContent[] {
       lastEndOffset = endOffset
     } else if (node.nodeName === 'think') {
       if (!node.sourceCodeLocation) {
-        throw new Error('sourceCodeLocation is undefined')
+        return rawInput
       }
       const startOffset = node.sourceCodeLocation.startOffset
       const endOffset = node.sourceCodeLocation.endOffset
@@ -96,8 +100,11 @@ export function parseTagContents(input: string): ParsedTagContent[] {
           children[0].sourceCodeLocation?.startOffset
         const innerContentEndOffset =
           children[children.length - 1].sourceCodeLocation?.endOffset
-        if (!innerContentStartOffset || !innerContentEndOffset) {
-          throw new Error('sourceCodeLocation is undefined')
+        if (
+          innerContentStartOffset === undefined ||
+          innerContentEndOffset === undefined
+        ) {
+          return rawInput
         }
         parsedResult.push({
           type: 'think',

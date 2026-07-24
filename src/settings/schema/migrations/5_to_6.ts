@@ -1,6 +1,8 @@
 import { PROVIDER_TYPES_INFO } from '../../../constants'
 import { SettingMigration } from '../setting.types'
 
+import { hasCompatibleProviderRoute } from './migrationUtils'
+
 /**
  * Migration from version 5 to version 6
  * - Remove deprecated 'streamingDisabled' property from OpenAI models
@@ -54,23 +56,17 @@ export const migrateFrom5To6: SettingMigration['migrate'] = (data) => {
       reasoning_effort: 'medium',
     }
 
-    // override existing model with same id
     const existingModel = existingModelsMap.get(newModel.id)
-    if (existingModel) {
-      // Remove the existing model from the array
-      newData.chatModels = newData.chatModels.filter(
-        (model) => model.id !== newModel.id,
+    if (!existingModel && hasCompatibleProviderRoute(newData, newModel)) {
+      // Find the index of the model with id 'o1'
+      const o1Index = (newData.chatModels as unknown[]).findIndex(
+        (model: unknown) => {
+          return (model as { id: string }).id === 'o1'
+        },
       )
+      const insertIndex = o1Index !== -1 ? o1Index + 1 : 0
+      ;(newData.chatModels as unknown[]).splice(insertIndex, 0, newModel)
     }
-
-    // Find the index of the model with id 'o1'
-    const o1Index = (newData.chatModels as unknown[]).findIndex(
-      (model: unknown) => {
-        return (model as { id: string }).id === 'o1'
-      },
-    )
-    const insertIndex = o1Index !== -1 ? o1Index + 1 : 0
-    ;(newData.chatModels as unknown[]).splice(insertIndex, 0, newModel)
   }
 
   return newData

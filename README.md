@@ -25,7 +25,7 @@ The original Smart Composer README is preserved below for provenance. This top s
 
 - Successor-fork migration from Smart Composer to Aider-owned plugin metadata and storage paths.
 - Automatic adoption of existing Smart Composer settings, chat/template JSON storage, legacy chat histories, RAG vector storage, and provider secrets.
-- Codex-based Agent Chat support, visible Codex tool activity, and Agent Chat keyboard shortcut support.
+- Codex-based Agent Chat support and visible Codex tool activity.
 - Voyage AI embedding provider support and contextual RAG embedding improvements.
 - Credential, MCP, and Codex execution-boundary hardening for safer local use.
 - GitHub Release based manual installation while Obsidian community-plugin listing is not yet available.

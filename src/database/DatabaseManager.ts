@@ -201,8 +201,7 @@ export class DatabaseManager {
           'Aborted(). Build with -sASSERTIONS for more info.',
         )
       ) {
-        // This error occurs when using an outdated Obsidian installer version
-        throw new PGLiteAbortedException()
+        return null
       }
       throw error
     }

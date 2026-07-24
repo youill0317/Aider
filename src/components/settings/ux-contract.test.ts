@@ -27,6 +27,14 @@ describe('settings UX contract', () => {
     expect(order).toEqual([...order].sort((left, right) => left - right))
   })
 
+  it('opens the support link without exposing an opener', () => {
+    const source = readProjectFile(
+      'src/components/settings/SettingsTabRoot.tsx',
+    )
+
+    expect(source).toContain("'noopener,noreferrer'")
+  })
+
   it('tool approval labels are unchanged', () => {
     // Given: tool approval UI owns the visible approval labels.
     const source = readProjectFile('src/components/chat-view/ToolMessage.tsx')

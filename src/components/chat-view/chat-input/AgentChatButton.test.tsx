@@ -8,6 +8,7 @@ describe('AgentChatButton', () => {
 
     expect(html).toContain('Agent')
     expect(html).not.toContain('&gt;_')
+    expect(html).not.toContain('Ctrl+↵')
   })
 
   it('explains when Agent is unavailable', () => {

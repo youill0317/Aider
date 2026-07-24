@@ -1,5 +1,7 @@
 import type { SettingMigration } from '../setting.types'
 
+import { hasCompatibleProviderRoute } from './migrationUtils'
+
 const DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL = {
   providerType: 'voyage',
   providerId: 'voyage',
@@ -18,16 +20,31 @@ export const migrateFrom19To20: SettingMigration['migrate'] = (data) => {
 
 function getMigratedEmbeddingModels(data: Record<string, unknown>): unknown[] {
   if (!Array.isArray(data.embeddingModels)) {
-    return [DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL]
+    return hasCompatibleProviderRoute(
+      data,
+      DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL,
+    )
+      ? [DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL]
+      : []
   }
 
-  const customModels = data.embeddingModels.filter(
-    (model) =>
+  let foundExistingModel = false
+  const existingModels = data.embeddingModels.filter((model) => {
+    if (
       !isRecord(model) ||
-      String(model.id) !== DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL.id,
-  )
+      String(model.id) !== DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL.id
+    ) {
+      return true
+    }
+    if (foundExistingModel) return false
+    foundExistingModel = true
+    return true
+  })
 
-  return [...customModels, DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL]
+  return foundExistingModel ||
+    !hasCompatibleProviderRoute(data, DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL)
+    ? existingModels
+    : [...existingModels, DEFAULT_VOYAGE_CONTEXTUAL_EMBEDDING_MODEL]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

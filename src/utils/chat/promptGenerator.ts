@@ -67,7 +67,7 @@ export class PromptGenerator {
       throw new Error('No messages provided')
     }
 
-    const compiledMessages = [...messages]
+    const compiledMessages = getLastChatTurns(messages, this.MAX_CONTEXT_TURNS)
     let lastUserMessageIndex = -1
     for (let i = 0; i < compiledMessages.length; ++i) {
       const message = compiledMessages[i]

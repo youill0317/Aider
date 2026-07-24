@@ -1,9 +1,6 @@
 import type { ViewCreator } from 'obsidian'
 
-import {
-  createTestApp,
-  jsonFile,
-} from './adoption/aiderStorageAdoption.test-support'
+import { createTestApp } from './adoption/aiderStorageAdoption.test-support'
 import { loadAiderMigrationWiring } from './aiderMigrationWiring'
 import {
   APPLY_VIEW_TYPE,
@@ -108,19 +105,11 @@ describe('Aider plugin migration wiring', () => {
     expect(calls).toEqual(['adopt', 'load'])
   })
 
-  it('does not load settings after adoption reports a failed resource', async () => {
+  it('continues startup when malformed legacy data cannot be adopted', async () => {
     const app = createTestApp()
     const adapter = app.vault.adapter
     await adapter.mkdir('.obsidian/plugins/smart-composer')
-    await adapter.write(
-      '.obsidian/plugins/smart-composer/data.json',
-      jsonFile({ version: 20, providers: [] }),
-    )
-    const write = adapter.write.bind(adapter)
-    jest.spyOn(adapter, 'write').mockImplementationOnce(async (path) => {
-      await write(path, '{')
-      throw new Error('disk full')
-    })
+    await adapter.write('.obsidian/plugins/smart-composer/data.json', '[]')
     jest.spyOn(console, 'error').mockImplementation(() => undefined)
     const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
       app,
@@ -128,25 +117,30 @@ describe('Aider plugin migration wiring', () => {
     const harness = createHarness()
     const loadSettings = jest.fn().mockResolvedValue(undefined)
 
-    await expect(
-      loadAiderMigrationWiring(
-        {
-          adoptSmartComposerData: () =>
-            (
-              plugin as unknown as {
-                adoptSmartComposerData(): Promise<void>
-              }
-            ).adoptSmartComposerData(),
-          loadSettings,
-          registerView: harness.registerView,
-        },
-        {
-          applyView: harness.applyView,
-          chatView: harness.chatView,
-        },
-      ),
-    ).rejects.toThrow('Adoption failed')
-    expect(loadSettings).not.toHaveBeenCalled()
+    await loadAiderMigrationWiring(
+      {
+        adoptSmartComposerData: () =>
+          (
+            plugin as unknown as {
+              adoptSmartComposerData(): Promise<void>
+            }
+          ).adoptSmartComposerData(),
+        loadSettings,
+        registerView: harness.registerView,
+      },
+      {
+        applyView: harness.applyView,
+        chatView: harness.chatView,
+      },
+    )
+
+    expect(loadSettings).toHaveBeenCalledTimes(1)
+    expect(harness.registerView.mock.calls.map((call) => call[0])).toEqual([
+      CHAT_VIEW_TYPE,
+      APPLY_VIEW_TYPE,
+      LEGACY_CHAT_VIEW_TYPE,
+      LEGACY_APPLY_VIEW_TYPE,
+    ])
     expect(await adapter.exists('.obsidian/plugins/aider/data.json')).toBe(
       false,
     )

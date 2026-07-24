@@ -62,7 +62,7 @@ describe('settings 7_to_8 migration', () => {
       ])
     })
 
-    it('should replace models that are in the new default models', () => {
+    it('should preserve custom models that collide with new defaults', () => {
       const oldSettings = {
         version: 7,
         chatModels: [
@@ -111,34 +111,23 @@ describe('settings 7_to_8 migration', () => {
       }
 
       const migratedSettings = migrateFrom7To8(oldSettings)
-      const expectedCustomDisabledModelIds = [
+      const customModelIds = [
         'gpt-4.1',
         'gpt-4.1-mini',
         'gpt-4.1-nano',
         'o3',
         'o4-mini',
       ]
-      const expectedDefaultAndCustomModels = [
-        ...DEFAULT_CHAT_MODELS_V8.map((model) => {
-          if (expectedCustomDisabledModelIds.includes(model.id)) {
-            return {
-              ...model,
-              enable: false,
-            }
-          }
-          return model
-        }),
-        {
-          providerType: 'gemini',
-          providerId: 'gemini',
-          id: 'gemini-exp-1206',
-          model: 'gemini-exp-1206',
-        },
-      ]
+      const migratedModels = migratedSettings.chatModels as {
+        id: string
+        model: string
+      }[]
 
-      expect(migratedSettings.chatModels).toEqual(
-        expectedDefaultAndCustomModels,
-      )
+      for (const id of customModelIds) {
+        expect(migratedModels.filter((model) => model.id === id)).toEqual([
+          oldSettings.chatModels.find((model) => model.id === id),
+        ])
+      }
     })
 
     it('keeps o3-mini and o1 models as custom models if they were already there', () => {

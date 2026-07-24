@@ -1,7 +1,7 @@
 const REDACTED = '[REDACTED]'
 
 const SECRET_KEY_PATTERN =
-  /api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|^code$|authorization|private[_-]?key|secret|ssh|password|token|(?:^|[_-])key$|(?:^|[_-])(?:database|redis)[_-]?url$/i
+  /api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|^code$|authorization|private[_-]?key|secret|ssh|password|token|(?:^|[_-])key$|(?:^|[_-])(?:database|redis)[_-]?url$|^(?:all|https?)[_-]proxy$/i
 
 const BEARER_TOKEN_PATTERN = /(Authorization:\s*Bearer\s+)[^\s'",}]+/gi
 const QUERY_SECRET_PATTERN =

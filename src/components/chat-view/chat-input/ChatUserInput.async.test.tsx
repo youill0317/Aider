@@ -11,6 +11,10 @@ let mockInputHandle:
     }
   | undefined
 const mockConvertFilesToMentionableImages = jest.fn()
+const mockSyntaxHighlighter = jest.fn(({ children }: { children: string }) => (
+  <pre>{children}</pre>
+))
+let mockQueryData: string | null = null
 
 jest.mock('react', () => {
   const React = jest.requireActual<typeof import('react')>('react')
@@ -36,7 +40,7 @@ jest.mock('react', () => {
 })
 
 jest.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: null }),
+  useQuery: () => ({ data: mockQueryData }),
 }))
 
 jest.mock('obsidian', () => ({
@@ -46,6 +50,10 @@ jest.mock('obsidian', () => ({
 
 jest.mock('../../../contexts/app-context', () => ({
   useApp: () => ({ vault: {} }),
+}))
+
+jest.mock('../../../contexts/dark-mode-context', () => ({
+  useDarkModeContext: () => ({ isDarkMode: false }),
 }))
 
 jest.mock('../../../contexts/settings-context', () => ({
@@ -58,8 +66,8 @@ jest.mock('../../../utils/llm/image', () => ({
   convertFilesToMentionableImages: mockConvertFilesToMentionableImages,
 }))
 
-jest.mock('../ObsidianMarkdown', () => ({
-  ObsidianMarkdown: () => null,
+jest.mock('../SyntaxHighlighterWrapper', () => ({
+  MemoizedSyntaxHighlighterWrapper: mockSyntaxHighlighter,
 }))
 
 jest.mock('./AgentChatButton', () => ({
@@ -156,6 +164,8 @@ describe('ChatUserInput async image lifecycle', () => {
     mockOnCreateImageMentionables = undefined
     mockInputHandle = undefined
     mockConvertFilesToMentionableImages.mockReset()
+    mockSyntaxHighlighter.mockClear()
+    mockQueryData = null
   })
 
   it('does not attach a conversion that finishes after input replacement', async () => {
@@ -199,5 +209,33 @@ describe('ChatUserInput async image lifecycle', () => {
       type: 'url',
       url: 'https://example.com',
     })
+  })
+
+  it('renders vault file previews as inert text', () => {
+    const payload = '![tracking pixel](https://attacker.invalid/pixel)'
+    mockQueryData = payload
+
+    const html = renderToStaticMarkup(
+      <ChatUserInput
+        initialSerializedEditorState={null}
+        onChange={jest.fn()}
+        onSubmit={jest.fn()}
+        onFocus={jest.fn()}
+        mentionables={[
+          {
+            type: 'file',
+            file: { path: 'untrusted.md' } as import('obsidian').TFile,
+          } as Mentionable,
+        ]}
+        setMentionables={jest.fn()}
+        addedBlockKey="file:untrusted.md"
+      />,
+    )
+
+    expect(mockSyntaxHighlighter.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ children: payload, language: 'markdown' }),
+    )
+    expect(html).toContain('![tracking pixel]')
+    expect(html).not.toContain('<img')
   })
 })

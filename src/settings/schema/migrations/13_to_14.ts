@@ -1,5 +1,7 @@
 import { SettingMigration } from '../setting.types'
 
+import { DEFAULT_CHAT_MODELS_V13 } from './12_to_13'
+import { DEFAULT_PROVIDERS_V10 } from './9_to_10'
 import { getMigratedChatModels, getMigratedProviders } from './migrationUtils'
 
 /**
@@ -79,13 +81,21 @@ export const migrateFrom13To14: SettingMigration['migrate'] = (data) => {
 
   migrateLegacyProviders(newData)
 
-  newData.providers = getMigratedProviders(newData, DEFAULT_PROVIDERS_V14)
-  newData.chatModels = getMigratedChatModels(newData, DEFAULT_CHAT_MODELS_V14)
+  newData.providers = getMigratedProviders(
+    newData,
+    DEFAULT_PROVIDERS_V14,
+    DEFAULT_PROVIDERS_V10,
+  )
+  newData.chatModels = getMigratedChatModels(
+    newData,
+    DEFAULT_CHAT_MODELS_V14,
+    DEFAULT_CHAT_MODELS_V13,
+  )
 
   return newData
 }
 
-const DEFAULT_PROVIDERS_V14 = [
+export const DEFAULT_PROVIDERS_V14 = [
   { type: 'openai', id: 'openai' },
   { type: 'anthropic', id: 'anthropic' },
   { type: 'gemini', id: 'gemini' },

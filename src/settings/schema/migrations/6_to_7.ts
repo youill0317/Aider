@@ -214,12 +214,40 @@ export const DEFAULT_CHAT_MODELS_V7: DefaultChatModels = [
   },
 ]
 
+const DEFAULT_PROVIDERS_V6 = DEFAULT_PROVIDERS_V7.filter(
+  ({ id }) => id !== 'perplexity',
+)
+const DEFAULT_CHAT_MODELS_V6 = DEFAULT_CHAT_MODELS_V7.filter(
+  ({ id }) =>
+    ![
+      'gemini-2.5-pro',
+      'gemini-2.0-flash-lite',
+      'sonar',
+      'sonar-pro',
+      'sonar-deep-research',
+      'sonar-reasoning',
+      'sonar-reasoning-pro',
+    ].includes(id),
+).map((model) =>
+  model.id === 'gemini-2.0-flash'
+    ? { ...model, model: 'gemini-2.0-flash-exp' }
+    : model,
+)
+
 export const migrateFrom6To7: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 7
 
-  newData.providers = getMigratedProviders(newData, DEFAULT_PROVIDERS_V7)
-  newData.chatModels = getMigratedChatModels(newData, DEFAULT_CHAT_MODELS_V7)
+  newData.providers = getMigratedProviders(
+    newData,
+    DEFAULT_PROVIDERS_V7,
+    DEFAULT_PROVIDERS_V6,
+  )
+  newData.chatModels = getMigratedChatModels(
+    newData,
+    DEFAULT_CHAT_MODELS_V7,
+    DEFAULT_CHAT_MODELS_V6,
+  )
 
   return newData
 }

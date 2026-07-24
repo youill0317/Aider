@@ -141,68 +141,24 @@ describe('Migrate from version 5 to 6', () => {
     ])
   })
 
-  test('should replace existing model with id o3-mini', () => {
+  test('should preserve a custom model with id o3-mini', () => {
+    const customModel = {
+      providerType: 'lm-studio',
+      providerId: 'local-lm-studio',
+      id: 'o3-mini',
+      model: 'private/local-o3-mini-alias',
+      enable: false,
+    }
     const oldSettings = {
       version: 5,
-      chatModels: [
-        {
-          providerType: 'anthropic',
-          providerId: 'anthropic',
-          id: 'claude-3.7-sonnet',
-          model: 'claude-3-7-sonnet-latest',
-        },
-        {
-          providerType: 'openai',
-          providerId: 'openai-1',
-          id: 'o1',
-          model: 'o1',
-          streamingDisabled: true,
-        },
-        {
-          providerType: 'gemini',
-          providerId: 'gemini',
-          id: 'gemini-1.5-pro',
-          model: 'gemini-1.5-pro',
-          enable: false,
-        },
-        {
-          providerType: 'openai',
-          providerId: 'openai',
-          id: 'o3-mini',
-          model: 'o3-mini-custom',
-        },
-      ],
+      chatModels: [customModel],
+      chatModelId: 'o3-mini',
+      applyModelId: 'o3-mini',
     }
 
     const result = migrateFrom5To6(oldSettings)
-    expect(result.chatModels).toEqual([
-      {
-        providerType: 'anthropic',
-        providerId: 'anthropic',
-        id: 'claude-3.7-sonnet',
-        model: 'claude-3-7-sonnet-latest',
-      },
-      {
-        providerType: 'openai',
-        providerId: 'openai-1',
-        id: 'o1',
-        model: 'o1',
-        reasoning_effort: 'medium',
-      },
-      {
-        providerType: 'openai',
-        providerId: 'openai',
-        id: 'o3-mini',
-        model: 'o3-mini',
-        reasoning_effort: 'medium',
-      },
-      {
-        providerType: 'gemini',
-        providerId: 'gemini',
-        id: 'gemini-1.5-pro',
-        model: 'gemini-1.5-pro',
-        enable: false,
-      },
-    ])
+    expect(result.chatModels).toEqual([customModel])
+    expect(result.chatModelId).toBe('o3-mini')
+    expect(result.applyModelId).toBe('o3-mini')
   })
 })

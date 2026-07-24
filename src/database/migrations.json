@@ -116,5 +116,14 @@
     "bps": true,
     "folderMillis": 1738720225813,
     "hash": "18a862af0fda7dc9e56e7122a65964a760410272de2188e777e2e0f035d7814f"
+  },
+  {
+    "sql": [
+      "DELETE FROM \"embeddings\"\nWHERE (\"path\", \"model\") IN (\n  SELECT \"path\", \"model\"\n  FROM \"embeddings\"\n  WHERE \"embedding\" IS NOT NULL\n    AND vector_dims(\"embedding\") <> \"dimension\"\n);\n",
+      "\nALTER TABLE \"embeddings\" ADD CONSTRAINT \"embeddings_embedding_dimension_check\" CHECK (\"embeddings\".\"embedding\" IS NULL OR vector_dims(\"embeddings\".\"embedding\") = \"embeddings\".\"dimension\");\n"
+    ],
+    "bps": true,
+    "folderMillis": 1784884240792,
+    "hash": "9fd8533ad61c677628d80946281eca5268b8d106feb69bd68fe8414ebee23dc5"
   }
 ]

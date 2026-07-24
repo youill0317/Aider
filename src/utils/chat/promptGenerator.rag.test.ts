@@ -298,6 +298,44 @@ describe('PromptGenerator RAG metadata handling', () => {
     )
   })
 
+  it('does not compile user turns outside the context window', async () => {
+    const processQuery = jest.fn().mockResolvedValue([])
+    const promptGenerator = new PromptGenerator(
+      async () => ({ processQuery }) as unknown as RAGEngine,
+      { vault: {} } as App,
+      createSettings({}),
+    )
+    const staleMessage = {
+      ...createVaultSearchUserMessage(),
+      id: 'stale-user',
+      content: createEditorState('STALE_ATTACKER_QUERY'),
+    }
+    const recentMessages = Array.from({ length: 10 }, (_, index) => ({
+      ...createVaultSearchUserMessage(),
+      id: `recent-user-${index}`,
+      content: createEditorState(`Recent question ${index}`),
+      mentionables: [],
+    }))
+    const compilePrompt = jest.spyOn(
+      promptGenerator,
+      'compileUserMessagePrompt',
+    )
+
+    const requestMessages = await promptGenerator.generateRequestMessages({
+      messages: [staleMessage, ...recentMessages],
+    })
+
+    expect(compilePrompt).toHaveBeenCalledTimes(10)
+    expect(compilePrompt).not.toHaveBeenCalledWith({ message: staleMessage })
+    expect(processQuery).not.toHaveBeenCalled()
+    const requestText = requestMessages
+      .map((message) => getTextContent(message.content))
+      .join('\n')
+    expect(requestText).not.toContain('STALE_ATTACKER_QUERY')
+    expect(requestText).toContain('Recent question 0')
+    expect(requestText).toContain('Recent question 9')
+  })
+
   it('passes prompt cancellation to vault search', async () => {
     const processQuery = jest.fn().mockResolvedValue([])
     const promptGenerator = new PromptGenerator(

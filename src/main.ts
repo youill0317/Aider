@@ -642,7 +642,13 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
             status?.status === 'failed',
         )
       ) {
-        throw new Error('Aider storage adoption is incomplete')
+        console.error(
+          'Failed to adopt Smart Composer data into Aider:',
+          'Aider storage adoption is incomplete',
+        )
+        new Notice(
+          'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+        )
       }
     } catch (error) {
       const summary = summarizeAdoptionError(error)

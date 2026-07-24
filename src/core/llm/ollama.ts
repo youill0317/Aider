@@ -31,6 +31,12 @@ export class OllamaProvider extends BaseLLMProvider<
     this.client = new NoStainlessOpenAI({
       baseURL: `${provider.baseUrl ? provider.baseUrl.replace(/\/+$/, '') : 'http://127.0.0.1:11434'}/v1`,
       apiKey: provider.apiKey ?? '',
+      defaultHeaders: {
+        Authorization: null,
+        'OpenAI-Organization': null,
+        'OpenAI-Project': null,
+        'User-Agent': null,
+      },
       dangerouslyAllowBrowser: true,
     })
   }

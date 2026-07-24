@@ -1,9 +1,9 @@
 import { SettingMigration } from '../setting.types'
 
-import { DEFAULT_CHAT_MODELS_V14 } from './13_to_14'
+import { DEFAULT_CHAT_MODELS_V14, DEFAULT_PROVIDERS_V14 } from './13_to_14'
 import { getMigratedChatModels, getMigratedProviders } from './migrationUtils'
 
-const DEFAULT_PROVIDERS_V15 = [
+export const DEFAULT_PROVIDERS_V15 = [
   { type: 'anthropic-plan', id: 'anthropic-plan' },
   { type: 'openai-plan', id: 'openai-plan' },
   { type: 'anthropic', id: 'anthropic' },
@@ -52,8 +52,16 @@ export const migrateFrom14To15: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 15
 
-  newData.providers = getMigratedProviders(newData, DEFAULT_PROVIDERS_V15)
-  newData.chatModels = getMigratedChatModels(newData, DEFAULT_CHAT_MODELS_V15)
+  newData.providers = getMigratedProviders(
+    newData,
+    DEFAULT_PROVIDERS_V15,
+    DEFAULT_PROVIDERS_V14,
+  )
+  newData.chatModels = getMigratedChatModels(
+    newData,
+    DEFAULT_CHAT_MODELS_V15,
+    DEFAULT_CHAT_MODELS_V14,
+  )
 
   return newData
 }

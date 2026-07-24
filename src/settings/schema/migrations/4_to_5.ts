@@ -1,6 +1,8 @@
 import { PROVIDER_TYPES_INFO } from '../../../constants'
 import { SettingMigration } from '../setting.types'
 
+import { hasCompatibleProviderRoute } from './migrationUtils'
+
 export const migrateFrom4To5: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 5
@@ -20,16 +22,11 @@ export const migrateFrom4To5: SettingMigration['migrate'] = (data) => {
       },
     }
 
-    // override existing model with same id
     const existingModel = existingModelsMap.get(newModel.id)
-    if (existingModel) {
-      // Remove the existing model from the array
-      newData.chatModels = newData.chatModels.filter(
-        (model) => model.id !== newModel.id,
-      )
+    if (!existingModel && hasCompatibleProviderRoute(newData, newModel)) {
+      // Add the new model at index 1 of the array
+      ;(newData.chatModels as unknown[]).splice(1, 0, newModel)
     }
-    // Add the new model at index 1 of the array
-    ;(newData.chatModels as unknown[]).splice(1, 0, newModel)
   }
   return newData
 }

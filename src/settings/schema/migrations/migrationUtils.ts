@@ -1,6 +1,11 @@
 import { SettingMigration } from '../setting.types'
 
 export type ExistingSettingsData = Parameters<SettingMigration['migrate']>[0]
+type ProviderBackedModel = {
+  providerType: string
+  providerId: string
+}
+
 export type DefaultProviders = readonly {
   type: string
   id: string
@@ -9,6 +14,7 @@ export type DefaultProviders = readonly {
 export const getMigratedProviders = (
   existingData: ExistingSettingsData,
   defaultProvidersForVersion: DefaultProviders,
+  previousDefaultProviders: DefaultProviders,
 ) => {
   if (!('providers' in existingData && Array.isArray(existingData.providers))) {
     return defaultProvidersForVersion
@@ -16,13 +22,19 @@ export const getMigratedProviders = (
 
   const defaultProviders = defaultProvidersForVersion.map((provider) => {
     const existingProvider = (existingData.providers as unknown[]).find(
-      (p: unknown) =>
-        (p as { type: string }).type === provider.type &&
-        (p as { id: string }).id === provider.id,
+      (p: unknown) => (p as { id: string }).id === provider.id,
     )
-    return existingProvider
-      ? mergeDefaultRecord(existingProvider, provider)
-      : provider
+    const previousDefault = previousDefaultProviders.find(
+      (p) => p.id === provider.id,
+    )
+    if (
+      existingProvider &&
+      previousDefault &&
+      (existingProvider as { type: string }).type === previousDefault.type
+    ) {
+      return mergeDefaultRecord(existingProvider, provider)
+    }
+    return existingProvider ?? provider
   })
   const customProviders = (existingData.providers as unknown[]).filter(
     (p: unknown) =>
@@ -52,23 +64,38 @@ export type DefaultChatModels = {
 export const getMigratedChatModels = (
   existingData: ExistingSettingsData,
   defaultChatModelsForVersion: DefaultChatModels,
+  previousDefaultChatModels: DefaultChatModels,
 ) => {
   if (
     !('chatModels' in existingData && Array.isArray(existingData.chatModels))
   ) {
-    return defaultChatModelsForVersion
+    return defaultChatModelsForVersion.filter((model) =>
+      hasCompatibleProviderRoute(existingData, model),
+    )
   }
 
-  const defaultChatModels = defaultChatModelsForVersion.map((model) => {
+  const defaultChatModels = defaultChatModelsForVersion.flatMap((model) => {
     const existingModel = (existingData.chatModels as unknown[]).find(
-      (m: unknown) => {
-        return (m as { id: string }).id === model.id
-      },
+      (m: unknown) => (m as { id: string }).id === model.id,
     )
-    if (existingModel) {
-      return mergeDefaultRecord(existingModel, model)
+    const previousDefault = previousDefaultChatModels.find(
+      (m) => m.id === model.id,
+    )
+    if (
+      existingModel &&
+      previousDefault &&
+      (existingModel as { providerType: string }).providerType ===
+        previousDefault.providerType &&
+      (existingModel as { providerId: string }).providerId ===
+        previousDefault.providerId &&
+      (existingModel as { model: string }).model === previousDefault.model
+    ) {
+      return [mergeDefaultRecord(existingModel, model)]
     }
-    return model
+    if (existingModel) {
+      return [existingModel]
+    }
+    return hasCompatibleProviderRoute(existingData, model) ? [model] : []
   })
   const customChatModels = (existingData.chatModels as unknown[]).filter(
     (m: unknown) => {
@@ -79,6 +106,18 @@ export const getMigratedChatModels = (
   )
 
   return [...defaultChatModels, ...customChatModels]
+}
+
+export function hasCompatibleProviderRoute(
+  data: ExistingSettingsData,
+  model: ProviderBackedModel,
+): boolean {
+  if (!Array.isArray(data.providers)) return true
+
+  const provider = data.providers.find(
+    (value) => isRecord(value) && value.id === model.providerId,
+  )
+  return isRecord(provider) && provider.type === model.providerType
 }
 
 function mergeDefaultRecord(

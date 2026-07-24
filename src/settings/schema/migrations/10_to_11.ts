@@ -1,5 +1,6 @@
 import { SettingMigration } from '../setting.types'
 
+import { DEFAULT_CHAT_MODELS_V9 } from './8_to_9'
 import { getMigratedChatModels } from './migrationUtils'
 
 /**
@@ -55,7 +56,11 @@ export const migrateFrom10To11: SettingMigration['migrate'] = (data) => {
     })
   }
 
-  newData.chatModels = getMigratedChatModels(newData, DEFAULT_CHAT_MODELS_V11)
+  newData.chatModels = getMigratedChatModels(
+    newData,
+    DEFAULT_CHAT_MODELS_V11,
+    DEFAULT_CHAT_MODELS_V9,
+  )
 
   return newData
 }

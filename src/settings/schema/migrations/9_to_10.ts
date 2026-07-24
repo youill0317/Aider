@@ -1,5 +1,6 @@
 import { SettingMigration } from '../setting.types'
 
+import { DEFAULT_PROVIDERS_V7 } from './6_to_7'
 import { DefaultProviders, getMigratedProviders } from './migrationUtils'
 
 /**
@@ -56,6 +57,10 @@ export const DEFAULT_PROVIDERS_V10: DefaultProviders = [
 export const migrateFrom9To10: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
   newData.version = 10
-  newData.providers = getMigratedProviders(newData, DEFAULT_PROVIDERS_V10)
+  newData.providers = getMigratedProviders(
+    newData,
+    DEFAULT_PROVIDERS_V10,
+    DEFAULT_PROVIDERS_V7,
+  )
   return newData
 }

@@ -101,10 +101,12 @@ describe('CodexExecRuntime', () => {
   it('redacts environment secrets and bounds streamed event text', async () => {
     const childProcess = new FakeChildProcess()
     let childEnv: NodeJS.ProcessEnv = {}
+    const proxyUrl = 'http://alice:proxyPass123@proxy.internal:8080'
     const runtime = new CodexExecRuntime({
       spawnSpecResolverOptions: {
         env: {
           DATABASE_URL: 'database-url-secret',
+          HTTP_PROXY: proxyUrl,
           MYSTERY_VALUE: 'arbitrary-long-secret',
           NORMAL_FLAG: 'debug',
           OPENAI_KEY: 'openai-key-secret',
@@ -135,17 +137,18 @@ describe('CodexExecRuntime', () => {
           id: 'command-1',
           type: 'command_execution',
           status: 'completed',
-          command:
-            'echo database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug',
-          aggregated_output: `database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret debug${'x'.repeat(30_000)}`,
+          command: `echo database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret ${proxyUrl} debug`,
+          aggregated_output: `database-url-secret openai-key-secret redis-url-secret arbitrary-long-secret ${proxyUrl} debug${'x'.repeat(30_000)}`,
           result: { token: 'nested-secret' },
         },
       })}\n`,
     )
+    childProcess.stderr.write(`proxy=${proxyUrl}`)
     childProcess.close(0)
 
-    await handle.done
+    const result = await handle.done
     expect(childEnv).not.toHaveProperty('DATABASE_URL')
+    expect(childEnv).toHaveProperty('HTTP_PROXY', proxyUrl)
     expect(childEnv).not.toHaveProperty('MYSTERY_VALUE')
     expect(childEnv).not.toHaveProperty('OPENAI_KEY')
     expect(childEnv).not.toHaveProperty('REDIS_URL')
@@ -154,10 +157,12 @@ describe('CodexExecRuntime', () => {
     expect(JSON.stringify(item)).not.toContain('database-url-secret')
     expect(JSON.stringify(item)).not.toContain('openai-key-secret')
     expect(JSON.stringify(item)).not.toContain('redis-url-secret')
+    expect(JSON.stringify(item)).not.toContain(proxyUrl)
     expect(JSON.stringify(item)).toContain('arbitrary-long-secret')
     expect(JSON.stringify(item)).not.toContain('nested-secret')
     expect(JSON.stringify(item)).toContain('debug')
     expect(String(item.aggregated_output)).toHaveLength(24_000)
+    expect(result.stderr).toBe('proxy=[REDACTED]')
   })
 
   it('cancels the child process when aborted', async () => {

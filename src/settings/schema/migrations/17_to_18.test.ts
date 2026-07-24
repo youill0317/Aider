@@ -63,28 +63,60 @@ describe('Migration from v17 to v18', () => {
     ])
   })
 
-  it('should refresh existing default Voyage embedding models', () => {
+  it('should preserve custom models that collide with Voyage defaults', () => {
+    const customModels = [
+      {
+        providerType: 'custom',
+        providerId: 'private-voyage',
+        id: 'voyage/voyage-4',
+        model: 'private-model',
+        dimension: 256,
+      },
+      {
+        providerType: 'custom',
+        providerId: 'private-voyage',
+        id: 'voyage/voyage-4-large',
+        model: 'private-large-model',
+        dimension: 512,
+      },
+    ]
     const result = migrateFrom17To18({
       version: 17,
-      embeddingModels: [
-        {
-          providerType: 'voyage',
-          providerId: 'old-voyage',
-          id: 'voyage/voyage-4',
-          model: 'old-model',
-          dimension: 256,
-        },
-        {
-          providerType: 'voyage',
-          providerId: 'old-voyage',
-          id: 'voyage/voyage-4-large',
-          model: 'old-large-model',
-          dimension: 512,
-        },
-      ],
+      embeddingModels: customModels,
     })
 
-    expect(result.embeddingModels).toEqual(getDefaultVoyageEmbeddingModels())
+    for (const customModel of customModels) {
+      expect(
+        (result.embeddingModels as { id: string }[]).filter(
+          ({ id }) => id === customModel.id,
+        ),
+      ).toEqual([customModel])
+    }
+  })
+
+  it('keeps only the first model for each colliding Voyage default ID', () => {
+    const first = {
+      providerType: 'custom',
+      providerId: 'first-provider',
+      id: 'voyage/voyage-4',
+      model: 'first-model',
+      dimension: 256,
+    }
+    const duplicate = {
+      ...first,
+      providerId: 'second-provider',
+      model: 'second-model',
+    }
+    const result = migrateFrom17To18({
+      version: 17,
+      embeddingModels: [first, duplicate],
+    })
+
+    expect(
+      (result.embeddingModels as { id: string }[]).filter(
+        ({ id }) => id === first.id,
+      ),
+    ).toEqual([first])
   })
 })
 

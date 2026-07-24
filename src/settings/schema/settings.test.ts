@@ -80,6 +80,130 @@ describe('parseSmartComposerSettings', () => {
     expect(result.settings.version).toBe(SETTINGS_SCHEMA_VERSION)
   })
 
+  it('preserves a custom provider route that collides with later chat defaults', () => {
+    const defaults = parseSmartComposerSettings({})
+    const customProvider = {
+      type: 'openai-compatible' as const,
+      id: 'morph',
+      baseUrl: 'https://private.example/v1',
+    }
+    const customModel = {
+      providerType: 'openai-compatible' as const,
+      providerId: 'morph',
+      id: 'private-morph',
+      model: 'private-model',
+    }
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      version: 2,
+      providers: [
+        ...defaults.providers.filter(({ id }) => id !== customProvider.id),
+        customProvider,
+      ],
+      chatModels: [
+        ...defaults.chatModels.filter(
+          ({ providerId }) => providerId !== customProvider.id,
+        ),
+        customModel,
+      ],
+      chatModelId: customModel.id,
+      applyModelId: customModel.id,
+    })
+
+    expect(result.safeToPersist).toBe(true)
+    expect(
+      result.settings.providers.find(({ id }) => id === customProvider.id),
+    ).toEqual(customProvider)
+    expect(result.settings.chatModels).toContainEqual(customModel)
+    expect(result.settings.chatModels.some(({ id }) => id === 'morph-v0')).toBe(
+      false,
+    )
+  })
+
+  it('uses the first provider when deduplicating a legacy collision', () => {
+    const defaults = parseSmartComposerSettings({})
+    const customProvider = {
+      type: 'openai-compatible' as const,
+      id: 'deepseek',
+      baseUrl: 'https://private.example/v1',
+    }
+    const customModel = {
+      providerType: 'openai-compatible' as const,
+      providerId: 'deepseek',
+      id: 'private-deepseek',
+      model: 'private-model',
+    }
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      version: 2,
+      providers: [
+        ...defaults.providers.filter(({ id }) => id !== customProvider.id),
+        customProvider,
+        { type: 'deepseek', id: 'deepseek' },
+      ],
+      chatModels: [
+        ...defaults.chatModels.filter(
+          ({ providerId }) => providerId !== customProvider.id,
+        ),
+        customModel,
+      ],
+    })
+
+    expect(result.safeToPersist).toBe(true)
+    expect(
+      result.settings.providers.filter(({ id }) => id === customProvider.id),
+    ).toEqual([customProvider])
+    expect(result.settings.chatModels).toContainEqual(customModel)
+    expect(
+      result.settings.chatModels.some(
+        ({ id }) => id === 'deepseek-chat' || id === 'deepseek-reasoner',
+      ),
+    ).toBe(false)
+  })
+
+  it('preserves a custom provider route that collides with Voyage defaults', () => {
+    const defaults = parseSmartComposerSettings({})
+    const customProvider = {
+      type: 'openai-compatible' as const,
+      id: 'voyage',
+      baseUrl: 'https://private.example/v1',
+    }
+    const customModel = {
+      providerType: 'openai-compatible' as const,
+      providerId: 'voyage',
+      id: 'private-voyage',
+      model: 'private-embedding',
+      dimension: 384,
+    }
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      version: 17,
+      providers: [
+        ...defaults.providers.filter(({ id }) => id !== customProvider.id),
+        customProvider,
+      ],
+      embeddingModels: [
+        ...defaults.embeddingModels.filter(
+          ({ providerId }) => providerId !== customProvider.id,
+        ),
+        customModel,
+      ],
+      embeddingModelId: customModel.id,
+    })
+
+    expect(result.safeToPersist).toBe(true)
+    expect(
+      result.settings.providers.find(({ id }) => id === customProvider.id),
+    ).toEqual(customProvider)
+    expect(result.settings.embeddingModels).toContainEqual(customModel)
+    expect(
+      result.settings.embeddingModels.some(
+        ({ providerId, providerType }) =>
+          providerId === customProvider.id && providerType === 'voyage',
+      ),
+    ).toBe(false)
+  })
+
   it('uses runtime defaults without approving future settings for overwrite', () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     const storedSettings = {

@@ -1,5 +1,7 @@
 import { SettingMigration } from '../setting.types'
 
+import { hasCompatibleProviderRoute } from './migrationUtils'
+
 // Provider IDs at version 3 (hardcoded to avoid dependency on current constants)
 const V3_PROVIDER_IDS = {
   'lm-studio': 'lm-studio',
@@ -7,8 +9,7 @@ const V3_PROVIDER_IDS = {
   morph: 'morph',
 } as const
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const NEW_DEFAULT_PROVIDERS: any[] = [
+export const NEW_DEFAULT_PROVIDERS = [
   {
     type: 'lm-studio',
     id: V3_PROVIDER_IDS['lm-studio'],
@@ -21,10 +22,9 @@ export const NEW_DEFAULT_PROVIDERS: any[] = [
     type: 'morph',
     id: V3_PROVIDER_IDS.morph,
   },
-]
+] as const
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const NEW_DEFAULT_CHAT_MODELS: any[] = [
+export const NEW_DEFAULT_CHAT_MODELS = [
   {
     providerType: 'deepseek',
     providerId: V3_PROVIDER_IDS.deepseek,
@@ -43,7 +43,7 @@ export const NEW_DEFAULT_CHAT_MODELS: any[] = [
     id: 'morph-v0',
     model: 'morph-v0',
   },
-]
+] as const
 
 export const migrateFrom2To3: SettingMigration['migrate'] = (data) => {
   const newData = { ...data }
@@ -54,15 +54,8 @@ export const migrateFrom2To3: SettingMigration['migrate'] = (data) => {
     const existingProvidersMap = new Map(
       newData.providers.map((provider) => [provider.id, provider]),
     )
-
-    // Add new providers, overriding provider type if ID exists
     for (const newProvider of NEW_DEFAULT_PROVIDERS) {
-      const existingProvider = existingProvidersMap.get(newProvider.id)
-      if (existingProvider) {
-        // Override the provider type while keeping other settings
-        existingProvider.type = newProvider.type
-      } else {
-        // Add new provider
+      if (!existingProvidersMap.has(newProvider.id)) {
         newData.providers.push({ ...newProvider })
       }
     }
@@ -73,15 +66,11 @@ export const migrateFrom2To3: SettingMigration['migrate'] = (data) => {
     const existingModelsMap = new Map(
       newData.chatModels.map((model) => [model.id, model]),
     )
-
-    // Add new chat models, overriding if ID exists
     for (const newModel of NEW_DEFAULT_CHAT_MODELS) {
-      const existingModel = existingModelsMap.get(newModel.id)
-      if (existingModel) {
-        // Override the model while keeping any custom settings
-        Object.assign(existingModel, newModel)
-      } else {
-        // Add new model
+      if (
+        !existingModelsMap.has(newModel.id) &&
+        hasCompatibleProviderRoute(newData, newModel)
+      ) {
         newData.chatModels.push({ ...newModel })
       }
     }

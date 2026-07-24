@@ -41,27 +41,22 @@ describe('settings 2_to_3 migration', () => {
     expect(result.providers).toHaveLength(4) // 1 existing + 3 new
   })
 
-  it('should override provider type while preserving other settings when ID matches', () => {
+  it('should preserve a custom provider that collides with a new default ID', () => {
+    const customProvider = {
+      type: 'openai-compatible',
+      id: 'morph',
+      apiKey: 'test-key',
+    }
     const oldSettings = {
       version: 2,
-      providers: [
-        {
-          type: 'openai-compatible', // Different type
-          id: 'lm-studio', // Same ID as new provider
-          baseUrl: 'http://localhost:1234',
-          apiKey: 'test-key',
-        },
-      ],
+      providers: [customProvider],
     }
 
     const result = migrateFrom2To3(oldSettings)
     expect(result.version).toBe(3)
-    expect(result.providers).toContainEqual({
-      type: 'lm-studio', // Type is overridden
-      id: 'lm-studio',
-      baseUrl: 'http://localhost:1234', // Other settings preserved
-      apiKey: 'test-key',
-    })
+    expect(
+      (result.providers as { id: string }[]).filter(({ id }) => id === 'morph'),
+    ).toEqual([customProvider])
   })
 
   it('should handle missing providers array', () => {
@@ -113,23 +108,26 @@ describe('settings 2_to_3 migration', () => {
     ])
   })
 
-  it('should override existing chat models with same ID', () => {
+  it('should preserve a custom model that collides with a new default ID', () => {
+    const customModel = {
+      providerType: 'openai',
+      providerId: 'custom',
+      id: 'deepseek-chat',
+      model: 'custom-model',
+    }
     const oldSettings = {
       version: 2,
       providers: [],
-      chatModels: [
-        {
-          providerType: 'openai',
-          providerId: 'custom',
-          id: 'deepseek-chat', // Same ID as new model
-          model: 'custom-model',
-        },
-      ],
+      chatModels: [customModel],
+      chatModelId: 'deepseek-chat',
     }
 
     const result = migrateFrom2To3(oldSettings)
-    expect(result.chatModels).toContainEqual(
-      NEW_DEFAULT_CHAT_MODELS.find((m) => m.id === 'deepseek-chat'),
-    )
+    expect(
+      (result.chatModels as { id: string }[]).filter(
+        ({ id }) => id === 'deepseek-chat',
+      ),
+    ).toEqual([customModel])
+    expect(result.chatModelId).toBe('deepseek-chat')
   })
 })

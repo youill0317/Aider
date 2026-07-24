@@ -82,4 +82,37 @@ describe('Migration from v11 to v12', () => {
       model: 'claude-haiku-4-5',
     })
   })
+
+  it('should preserve custom models that collide with new Claude IDs', () => {
+    const customModels = [
+      {
+        id: 'claude-sonnet-4.5',
+        providerType: 'ollama',
+        providerId: 'local-ollama',
+        model: 'local-private-model',
+        enable: false,
+      },
+      {
+        id: 'claude-haiku-4.5',
+        providerType: 'openai-compatible',
+        providerId: 'private-endpoint',
+        model: 'private-haiku',
+      },
+    ]
+    const oldSettings = {
+      version: 11,
+      chatModels: customModels,
+      chatModelId: 'claude-sonnet-4.5',
+    }
+
+    const result = migrateFrom11To12(oldSettings)
+    const chatModels = result.chatModels as { id: string }[]
+
+    for (const customModel of customModels) {
+      expect(chatModels.filter(({ id }) => id === customModel.id)).toEqual([
+        customModel,
+      ])
+    }
+    expect(result.chatModelId).toBe('claude-sonnet-4.5')
+  })
 })

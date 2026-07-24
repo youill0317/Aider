@@ -38,7 +38,13 @@ export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
       >
         <ObsidianButton
           text="Open Repository"
-          onClick={() => window.open('https://github.com/youill0317/Aider')}
+          onClick={() =>
+            window.open(
+              'https://github.com/youill0317/Aider',
+              '_blank',
+              'noopener,noreferrer',
+            )
+          }
         />
       </ObsidianSetting>
     </>

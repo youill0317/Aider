@@ -13,6 +13,7 @@ import {
 } from 'react'
 
 import { useApp } from '../../../contexts/app-context'
+import { useDarkModeContext } from '../../../contexts/dark-mode-context'
 import { useSettings } from '../../../contexts/settings-context'
 import {
   MAX_MENTIONABLE_IMAGES,
@@ -29,7 +30,7 @@ import {
 } from '../../../utils/chat/mentionable'
 import { convertFilesToMentionableImages } from '../../../utils/llm/image'
 import { openMarkdownFile, readTFileContent } from '../../../utils/obsidian'
-import { ObsidianMarkdown } from '../ObsidianMarkdown'
+import { MemoizedSyntaxHighlighterWrapper } from '../SyntaxHighlighterWrapper'
 
 import { AgentChatButton } from './AgentChatButton'
 import { ImageUploadButton } from './ImageUploadButton'
@@ -404,7 +405,6 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           placeholder="Message Aider · @ for context · / for templates"
           plugins={{
             onEnter: {
-              onAgentChat: () => handleSubmit('agent'),
               onVaultChat: () => handleSubmit('vault'),
             },
             templatePopover: {
@@ -459,6 +459,7 @@ function MentionableContentPreview({
   onClose: () => void
 }) {
   const app = useApp()
+  const { isDarkMode } = useDarkModeContext()
 
   const displayedMentionable: Mentionable | null = useMemo(() => {
     return (
@@ -523,7 +524,14 @@ function MentionableContentPreview({
         <X size={14} />
       </button>
       {displayFileContent ? (
-        <ObsidianMarkdown content={displayFileContent} scale="xs" />
+        <MemoizedSyntaxHighlighterWrapper
+          isDarkMode={isDarkMode}
+          language="markdown"
+          hasFilename={false}
+          wrapLines={false}
+        >
+          {displayFileContent}
+        </MemoizedSyntaxHighlighterWrapper>
       ) : (
         displayImage && <img src={displayImage.data} alt={displayImage.name} />
       )}

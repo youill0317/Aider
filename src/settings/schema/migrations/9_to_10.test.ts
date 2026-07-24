@@ -112,20 +112,23 @@ describe('Migration from v9 to v10', () => {
   })
 
   it('should handle a custom provider with id "mistral" and type "openai-compatible"', () => {
+    const customProvider = {
+      type: 'openai-compatible',
+      id: 'mistral',
+      baseUrl: 'https://custom-mistral-endpoint',
+      apiKey: 'custom-mistral-key',
+      customField: 'custom',
+    }
     const oldSettings = {
       version: 9,
-      providers: [
-        {
-          type: 'openai-compatible',
-          id: 'mistral',
-          baseUrl: 'https://custom-mistral-endpoint',
-          apiKey: 'custom-mistral-key',
-          customField: 'custom',
-        },
-      ],
+      providers: [customProvider],
     }
     const result = migrateFrom9To10(oldSettings)
     expect(result.version).toBe(10)
-    expect(result.providers).toEqual(DEFAULT_PROVIDERS_V10)
+    expect(
+      (result.providers as { id: string }[]).filter(
+        ({ id }) => id === 'mistral',
+      ),
+    ).toEqual([customProvider])
   })
 })

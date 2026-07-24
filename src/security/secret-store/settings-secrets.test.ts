@@ -1,14 +1,17 @@
 import type { SmartComposerSettings } from '../../settings/schema/setting.types'
+import { trustProviderRoute } from '../config-trust'
 
 import {
   deleteProviderSecrets,
   providerSecretKeys,
 } from './provider-secret-utils'
 import {
+  createLegacySmartComposerSecretStoreKey,
   createMcpEnvSecretStoreKey,
   createSecretStore,
   createSecretStoreKey,
   createUnversionedLegacyAiderSecretStoreKey,
+  createUnversionedLegacySmartComposerSecretStoreKey,
 } from './secret-store'
 import type { SecretStore } from './secret-store'
 import {
@@ -61,6 +64,19 @@ function createSettings(
   }
 }
 
+function createMapBackedSecretStore(values: Map<string, string>): SecretStore {
+  return {
+    getBackendStatus: () => 'obsidian-secret-storage',
+    getSecret: async (key) => values.get(key) ?? null,
+    setSecret: async (key, value) => {
+      values.set(key, value)
+    },
+    deleteSecret: async (key) => {
+      values.delete(key)
+    },
+  }
+}
+
 describe('settings secret persistence', () => {
   it('stores MCP environment values outside ordinary settings', async () => {
     const secretStore = createSecretStore({ app: {} })
@@ -105,16 +121,10 @@ describe('settings secret persistence', () => {
       field: 'apiKey',
     })
     const values = new Map([[legacyKey, 'shared-legacy-secret']])
-    const secretStore: SecretStore = {
-      getBackendStatus: () => 'obsidian-secret-storage',
-      getSecret: async (key) => values.get(key) ?? null,
-      setSecret: async (key, value) => {
-        values.set(key, value)
-      },
-      deleteSecret: async (key) => {
-        values.delete(key)
-      },
-    }
+    const secretStore = createMapBackedSecretStore(values)
+    await Promise.all(
+      providers.map((provider) => trustProviderRoute(provider, secretStore)),
+    )
 
     const hydrated = await hydrateSettingsSecrets(
       createSettings(providers),
@@ -128,6 +138,140 @@ describe('settings secret persistence', () => {
         false,
       )
     }
+  })
+
+  it('does not hydrate a crafted provider from another provider legacy key', async () => {
+    const victimKey = createLegacySmartComposerSecretStoreKey({
+      providerId: 'openai',
+      providerType: 'openai',
+      field: 'apiKey',
+    })
+    const craftedProvider = {
+      id: 'id-006f-0070-0065-006e-0061-0069',
+      type: 'openai',
+      baseUrl: 'https://attacker.example/v1',
+    } as const
+    const craftedKeys = providerSecretKeys(craftedProvider, 'apiKey', {
+      includeUnversionedLegacy: true,
+    })
+    const aliasedUnversionedKey =
+      createUnversionedLegacySmartComposerSecretStoreKey({
+        providerId: craftedProvider.id,
+        providerType: craftedProvider.type,
+        field: 'apiKey',
+      })
+    const values = new Map([[victimKey, 'sk-victim-legacy-secret']])
+    const secretStore = createMapBackedSecretStore(values)
+
+    const hydrated = await hydrateSettingsSecrets(
+      createSettings([craftedProvider]),
+      secretStore,
+    )
+
+    expect(aliasedUnversionedKey).toBe(victimKey)
+    expect(craftedKeys.legacy).not.toContain(victimKey)
+    expect(hydrated.providers[0]).not.toHaveProperty('apiKey')
+    expect(values.get(victimKey)).toBe('sk-victim-legacy-secret')
+    expect(values.has(craftedKeys.current)).toBe(false)
+  })
+
+  it('does not hydrate a legacy API key into an attacker-controlled Aider provider', async () => {
+    const provider = {
+      id: 'openai',
+      type: 'openai',
+      baseUrl: 'https://attacker.example/v1',
+    } as const
+    const legacyKey = createUnversionedLegacySmartComposerSecretStoreKey({
+      providerId: provider.id,
+      providerType: provider.type,
+      field: 'apiKey',
+    })
+    const values = new Map([[legacyKey, 'sk-untrusted-legacy-secret']])
+    const secretStore = createMapBackedSecretStore(values)
+
+    const hydrated = await hydrateSettingsSecrets(
+      createSettings([provider]),
+      secretStore,
+    )
+
+    expect(hydrated.providers[0]).not.toHaveProperty('apiKey')
+    expect(values.get(legacyKey)).toBe('sk-untrusted-legacy-secret')
+    expect(values.has(providerSecretKeys(provider, 'apiKey').current)).toBe(
+      false,
+    )
+  })
+
+  it('does not hydrate legacy OAuth tokens into an attacker-controlled Aider provider', async () => {
+    const provider = {
+      id: 'openai-plan',
+      type: 'openai-plan',
+      baseUrl: 'https://attacker.example/v1',
+      oauth: {
+        accessToken: '',
+        refreshToken: '',
+        expiresAt: 1_893_456_000_000,
+      },
+    } as const
+    const accessTokenKey = createUnversionedLegacySmartComposerSecretStoreKey({
+      providerId: provider.id,
+      providerType: provider.type,
+      field: 'accessToken',
+    })
+    const refreshTokenKey = createUnversionedLegacySmartComposerSecretStoreKey({
+      providerId: provider.id,
+      providerType: provider.type,
+      field: 'refreshToken',
+    })
+    const values = new Map([
+      [accessTokenKey, 'legacy-access-token'],
+      [refreshTokenKey, 'legacy-refresh-token'],
+    ])
+    const secretStore = createMapBackedSecretStore(values)
+
+    const hydrated = await hydrateSettingsSecrets(
+      createSettings([provider]),
+      secretStore,
+    )
+
+    expect(hydrated.providers[0]).toMatchObject({
+      oauth: { accessToken: '', refreshToken: '' },
+    })
+    expect(values.get(accessTokenKey)).toBe('legacy-access-token')
+    expect(values.get(refreshTokenKey)).toBe('legacy-refresh-token')
+    for (const field of ['accessToken', 'refreshToken'] as const) {
+      expect(values.has(providerSecretKeys(provider, field).current)).toBe(
+        false,
+      )
+    }
+  })
+
+  it('migrates an ordinary unversioned secret after explicit route trust', async () => {
+    const provider = {
+      id: 'custom-openai',
+      type: 'openai',
+      baseUrl: 'https://trusted.example/v1',
+    } as const
+    const legacyKey = createUnversionedLegacySmartComposerSecretStoreKey({
+      providerId: provider.id,
+      providerType: provider.type,
+      field: 'apiKey',
+    })
+    const values = new Map([[legacyKey, 'sk-trusted-legacy-secret']])
+    const secretStore = createMapBackedSecretStore(values)
+    await trustProviderRoute(provider, secretStore)
+
+    const hydrated = await hydrateSettingsSecrets(
+      createSettings([provider]),
+      secretStore,
+    )
+
+    expect(hydrated.providers[0]).toMatchObject({
+      apiKey: 'sk-trusted-legacy-secret',
+    })
+    expect(values.get(providerSecretKeys(provider, 'apiKey').current)).toBe(
+      'sk-trusted-legacy-secret',
+    )
+    expect(values.has(legacyKey)).toBe(false)
   })
 
   it('rolls back raw secret migration when preserving settings fails', async () => {

@@ -1,3 +1,4 @@
+import { DEFAULT_PROVIDERS } from '../../constants'
 import {
   type SmartComposerSettings,
   assertUniqueSettingsIds,
@@ -7,7 +8,11 @@ import {
   mcpServerConfigSchema,
 } from '../../types/mcp.types'
 import { type LLMProvider, llmProviderSchema } from '../../types/provider.types'
-import { loadProviderRouteTrust } from '../config-trust'
+import {
+  isProviderRouteExplicitlyTrusted,
+  loadProviderRouteTrust,
+  providerRoutesMatch,
+} from '../config-trust'
 
 import {
   OAUTH_SECRET_FIELDS,
@@ -93,6 +98,7 @@ async function hydrateProvider(
   provider: LLMProvider,
   secretStore: SecretStore,
   ambiguousUnversionedKeys: ReadonlySet<string>,
+  allowLegacyFallback: boolean,
 ): Promise<LLMProvider> {
   const hydratedProvider = { ...provider }
   const apiKey = await readProviderSecret(
@@ -102,6 +108,7 @@ async function hydrateProvider(
       'apiKey',
       ambiguousUnversionedKeys,
     ),
+    { allowLegacyFallback },
   )
 
   if (!isNonEmptySecret(hydratedProvider.apiKey) && apiKey !== null) {
@@ -118,6 +125,7 @@ async function hydrateProvider(
     const secret = await readProviderSecret(
       secretStore,
       providerSecretKeysForHydration(provider, field, ambiguousUnversionedKeys),
+      { allowLegacyFallback },
     )
     if (!isNonEmptySecret(hydratedOauth[field]) && secret !== null) {
       hydratedOauth[field] = secret
@@ -539,10 +547,23 @@ export async function hydrateSettingsSecrets(
   const ambiguousUnversionedKeys = findAmbiguousUnversionedSecretKeys(
     settings.providers,
   )
+  const legacyAccess = await Promise.all(
+    settings.providers.map(
+      async (provider) =>
+        DEFAULT_PROVIDERS.some((defaultProvider) =>
+          providerRoutesMatch(provider, defaultProvider),
+        ) || (await isProviderRouteExplicitlyTrusted(provider, secretStore)),
+    ),
+  )
   const [providers, servers] = await Promise.all([
     Promise.all(
-      settings.providers.map((provider) =>
-        hydrateProvider(provider, secretStore, ambiguousUnversionedKeys),
+      settings.providers.map((provider, index) =>
+        hydrateProvider(
+          provider,
+          secretStore,
+          ambiguousUnversionedKeys,
+          legacyAccess[index] ?? false,
+        ),
       ),
     ),
     Promise.all(

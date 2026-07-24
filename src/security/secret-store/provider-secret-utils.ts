@@ -1,6 +1,7 @@
 import type { LLMProvider } from '../../types/provider.types'
 
 import {
+  canUseUnversionedLegacyProviderId,
   createLegacyAiderSecretStoreKey,
   createLegacySmartComposerSecretStoreKey,
   createSecretStoreKey,
@@ -95,7 +96,8 @@ export function providerSecretKeys(
   const legacy = [
     createLegacySmartComposerSecretStoreKey(keyParts),
     createLegacyAiderSecretStoreKey(keyParts),
-    ...(options.includeUnversionedLegacy
+    ...(options.includeUnversionedLegacy &&
+    canUseUnversionedLegacyProviderId(provider.id)
       ? [
           createUnversionedLegacySmartComposerSecretStoreKey(keyParts),
           createUnversionedLegacyAiderSecretStoreKey(keyParts),
@@ -184,8 +186,12 @@ export async function writeRequiredSecret(
 export async function readProviderSecret(
   secretStore: SecretStore,
   keys: ProviderSecretKeys,
+  options: { readonly allowLegacyFallback?: boolean } = {},
 ): Promise<string | null> {
-  const allKeys = new Set([keys.current, ...keys.legacy])
+  const allKeys = new Set([
+    keys.current,
+    ...(options.allowLegacyFallback === true ? keys.legacy : []),
+  ])
 
   for (const key of allKeys) {
     const secret = await readSecret(secretStore, key)

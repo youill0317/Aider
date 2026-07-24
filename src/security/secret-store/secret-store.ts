@@ -347,6 +347,10 @@ export function createSecretStoreKey(parts: SecretStoreKeyParts): string {
   return createNamespacedSecretStoreKey('aider', parts)
 }
 
+export function canUseUnversionedLegacyProviderId(value: string): boolean {
+  return !/^id(?:-[0-9a-f]{4})+$/i.test(normalizeSecretStoreKeyPart(value))
+}
+
 export function createMcpEnvSecretStoreKey(serverId: string): string {
   return `aider-mcp-server-${encodeProviderId(serverId)}-env`
 }

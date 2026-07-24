@@ -1,3 +1,4 @@
+import { $insertDataTransferForPlainText } from '@lexical/clipboard'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import {
   $createTextNode,
@@ -10,7 +11,7 @@ import {
 } from 'lexical'
 import { useEffect } from 'react'
 
-import { Mentionable, MentionableUrl } from '../../../../../types/mentionable'
+import { MentionableUrl } from '../../../../../types/mentionable'
 import {
   getMentionableName,
   serializeMentionable,
@@ -109,26 +110,27 @@ function $textNodeTransform(node: TextNode) {
   spaceNode.select()
 }
 
-function $handlePaste(event: PasteCommandType) {
+export function $handlePaste(event: PasteCommandType) {
   const clipboardData =
     event instanceof ClipboardEvent ? event.clipboardData : null
 
   if (!clipboardData) return false
 
-  const text = clipboardData.getData('text/plain')
+  const text =
+    clipboardData.getData('text/plain') ||
+    clipboardData.getData('text/uri-list')
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) {
+    return true
+  }
 
   const urlMatches = findURLs(text)
   if (urlMatches.length === 0) {
-    return false
-  }
-
-  const selection = $getSelection()
-  if (!$isRangeSelection(selection)) {
-    return false
+    $insertDataTransferForPlainText(clipboardData, selection)
+    return true
   }
 
   const nodes = []
-  const addedMentionables: Mentionable[] = []
   let lastIndex = 0
 
   urlMatches.forEach((urlMatch) => {
@@ -146,7 +148,6 @@ function $handlePaste(event: PasteCommandType) {
     nodes.push(
       $createMentionNode(urlMatch.text, serializeMentionable(mentionable)),
     )
-    addedMentionables.push(mentionable)
 
     lastIndex = urlMatch.index + urlMatch.length
 

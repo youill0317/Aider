@@ -47,10 +47,21 @@ export async function loadProviderRouteTrust(
     trustedProviderRoutes.delete(trustKey)
     return true
   }
-  const trusted = await hasMatchingFingerprint(secretStore, trustKey, canonical)
+  const trusted = await isProviderRouteExplicitlyTrusted(provider, secretStore)
   if (trusted) trustedProviderRoutes.set(trustKey, canonical)
   else trustedProviderRoutes.delete(trustKey)
   return trusted
+}
+
+export async function isProviderRouteExplicitlyTrusted(
+  provider: LLMProvider,
+  secretStore: SecretStore,
+): Promise<boolean> {
+  return hasMatchingFingerprint(
+    secretStore,
+    createProviderRouteTrustKey(provider.id, provider.type),
+    canonicalProviderRoute(provider),
+  )
 }
 
 export async function trustProviderRoute(

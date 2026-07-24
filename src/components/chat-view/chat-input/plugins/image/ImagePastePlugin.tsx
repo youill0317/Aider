@@ -1,5 +1,5 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { COMMAND_PRIORITY_LOW, PASTE_COMMAND, PasteCommandType } from 'lexical'
+import { COMMAND_PRIORITY_HIGH, PASTE_COMMAND, PasteCommandType } from 'lexical'
 import { useEffect } from 'react'
 
 import {
@@ -39,7 +39,7 @@ export default function ImagePastePlugin({
     return editor.registerCommand(
       PASTE_COMMAND,
       handlePaste,
-      COMMAND_PRIORITY_LOW,
+      COMMAND_PRIORITY_HIGH,
     )
   }, [editor, onCreateImageMentionables])
 

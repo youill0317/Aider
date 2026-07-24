@@ -9,9 +9,7 @@
 
 import {
   $applyNodeReplacement,
-  DOMConversionMap,
-  DOMConversionOutput,
-  DOMExportOutput,
+  type DOMConversionMap,
   type EditorConfig,
   type LexicalNode,
   type NodeKey,
@@ -23,9 +21,6 @@ import {
 import { SerializedMentionable } from '../../../../../types/mentionable'
 
 export const MENTION_NODE_TYPE = 'mention'
-export const MENTION_NODE_ATTRIBUTE = 'data-lexical-mention'
-export const MENTION_NODE_MENTION_NAME_ATTRIBUTE = 'data-lexical-mention-name'
-export const MENTION_NODE_MENTIONABLE_ATTRIBUTE = 'data-lexical-mentionable'
 
 export type SerializedMentionNode = Spread<
   {
@@ -34,31 +29,6 @@ export type SerializedMentionNode = Spread<
   },
   SerializedTextNode
 >
-
-function $convertMentionElement(
-  domNode: HTMLElement,
-): DOMConversionOutput | null {
-  const textContent = domNode.textContent
-  const mentionName =
-    domNode.getAttribute(MENTION_NODE_MENTION_NAME_ATTRIBUTE) ??
-    domNode.textContent ??
-    ''
-  const mentionable = JSON.parse(
-    domNode.getAttribute(MENTION_NODE_MENTIONABLE_ATTRIBUTE) ?? '{}',
-  )
-
-  if (textContent !== null) {
-    const node = $createMentionNode(
-      mentionName,
-      mentionable as SerializedMentionable,
-    )
-    return {
-      node,
-    }
-  }
-
-  return null
-}
 
 export class MentionNode extends TextNode {
   __mentionName: string
@@ -71,6 +41,11 @@ export class MentionNode extends TextNode {
   static clone(node: MentionNode): MentionNode {
     return new MentionNode(node.__mentionName, node.__mentionable, node.__key)
   }
+
+  static importDOM(): DOMConversionMap | null {
+    return null
+  }
+
   static importJSON(serializedNode: SerializedMentionNode): MentionNode {
     const node = $createMentionNode(
       serializedNode.mentionName,
@@ -108,39 +83,6 @@ export class MentionNode extends TextNode {
     const dom = super.createDOM(config)
     dom.className = MENTION_NODE_TYPE
     return dom
-  }
-
-  exportDOM(): DOMExportOutput {
-    const element = document.createElement('span')
-    element.setAttribute(MENTION_NODE_ATTRIBUTE, 'true')
-    element.setAttribute(
-      MENTION_NODE_MENTION_NAME_ATTRIBUTE,
-      this.__mentionName,
-    )
-    element.setAttribute(
-      MENTION_NODE_MENTIONABLE_ATTRIBUTE,
-      JSON.stringify(this.__mentionable),
-    )
-    element.textContent = this.__text
-    return { element }
-  }
-
-  static importDOM(): DOMConversionMap | null {
-    return {
-      span: (domNode: HTMLElement) => {
-        if (
-          !domNode.hasAttribute(MENTION_NODE_ATTRIBUTE) ||
-          !domNode.hasAttribute(MENTION_NODE_MENTION_NAME_ATTRIBUTE) ||
-          !domNode.hasAttribute(MENTION_NODE_MENTIONABLE_ATTRIBUTE)
-        ) {
-          return null
-        }
-        return {
-          conversion: $convertMentionElement,
-          priority: 1,
-        }
-      },
-    }
   }
 
   isTextEntity(): true {

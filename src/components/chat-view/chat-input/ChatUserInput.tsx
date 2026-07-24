@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { $nodesOfType, LexicalEditor, SerializedEditorState } from 'lexical'
 import { X } from 'lucide-react'
+import { Notice, Platform } from 'obsidian'
 import {
   forwardRef,
   useCallback,
@@ -12,6 +13,7 @@ import {
 } from 'react'
 
 import { useApp } from '../../../contexts/app-context'
+import { useSettings } from '../../../contexts/settings-context'
 import {
   MAX_MENTIONABLE_IMAGES,
   MAX_MENTIONABLE_IMAGE_TOTAL_DATA_CHARS,
@@ -25,7 +27,7 @@ import {
   getMentionableKey,
   serializeMentionable,
 } from '../../../utils/chat/mentionable'
-import { filesToMentionableImages } from '../../../utils/llm/image'
+import { convertFilesToMentionableImages } from '../../../utils/llm/image'
 import { openMarkdownFile, readTFileContent } from '../../../utils/obsidian'
 import { ObsidianMarkdown } from '../ObsidianMarkdown'
 
@@ -49,7 +51,7 @@ export type ChatUserInputRef = {
 
 export type ChatSubmitMode = 'chat' | 'vault' | 'agent'
 
-export type ChatUserInputProps = {
+type ChatUserInputProps = {
   initialSerializedEditorState: SerializedEditorState | null
   onChange: (content: SerializedEditorState) => void
   onSubmit: (content: SerializedEditorState, mode?: ChatSubmitMode) => void
@@ -81,10 +83,26 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
     ref,
   ) => {
     const app = useApp()
+    const { settings } = useSettings()
+    const isAgentAvailable = Platform.isDesktop && settings.agent.codex.enabled
 
     const editorRef = useRef<LexicalEditor | null>(null)
     const contentEditableRef = useRef<HTMLDivElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const mountedRef = useRef(true)
+    const lastMentionablesPropRef = useRef(mentionables)
+    const mentionablesRef = useRef(mentionables)
+    if (mentionables !== lastMentionablesPropRef.current) {
+      lastMentionablesPropRef.current = mentionables
+      mentionablesRef.current = mentionables
+    }
+
+    useEffect(() => {
+      mountedRef.current = true
+      return () => {
+        mountedRef.current = false
+      }
+    }, [])
 
     const [displayedMentionableKey, setDisplayedMentionableKey] = useState<
       string | null
@@ -94,34 +112,46 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       if (addedBlockKey) setDisplayedMentionableKey(addedBlockKey)
     }, [addedBlockKey])
 
+    const updateMentionables = useCallback(
+      (update: (current: Mentionable[]) => Mentionable[]) => {
+        const current = mentionablesRef.current
+        const next = update(current)
+        if (next === current) return current
+        mentionablesRef.current = next
+        setMentionables(next)
+        return next
+      },
+      [setMentionables],
+    )
+
     const addMentionable = useCallback(
       (mentionable: Mentionable) => {
         const mentionableKey = getMentionableKey(
           serializeMentionable(mentionable),
         )
-        if (
-          !mentionables.some(
+        updateMentionables((current) =>
+          current.some(
             (item) =>
               getMentionableKey(serializeMentionable(item)) === mentionableKey,
           )
-        ) {
-          setMentionables([...mentionables, mentionable])
-        }
+            ? current
+            : [...current, mentionable],
+        )
         setDisplayedMentionableKey(mentionableKey)
       },
-      [mentionables, setMentionables],
+      [updateMentionables],
     )
 
     const setCurrentFile = useCallback(
       (file: MentionableCurrentFile['file']) => {
-        setMentionables([
+        updateMentionables((current) => [
           { type: 'current-file', file },
-          ...mentionables.filter(
+          ...current.filter(
             (mentionable) => mentionable.type !== 'current-file',
           ),
         ])
       },
-      [mentionables, setMentionables],
+      [updateMentionables],
     )
 
     useImperativeHandle(
@@ -159,10 +189,6 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           }
         } else if (mutation.mutation === 'created') {
           if (
-            mentionables.some(
-              (m) =>
-                getMentionableKey(serializeMentionable(m)) === mentionableKey,
-            ) ||
             addedMentionables.some(
               (m) => getMentionableKey(m) === mentionableKey,
             )
@@ -175,60 +201,83 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
         }
       })
 
-      setMentionables(
-        mentionables
-          .filter(
-            (m) =>
-              !destroyedMentionableKeys.includes(
-                getMentionableKey(serializeMentionable(m)),
-              ),
-          )
-          .concat(
-            addedMentionables
-              .map((m) => deserializeMentionable(m, app))
-              .filter((v) => !!v),
-          ),
-      )
-      if (addedMentionables.length > 0) {
+      let actuallyAddedMentionables: SerializedMentionable[] = []
+      updateMentionables((current) => {
+        const retained = current.filter(
+          (mentionable) =>
+            !destroyedMentionableKeys.includes(
+              getMentionableKey(serializeMentionable(mentionable)),
+            ),
+        )
+        actuallyAddedMentionables = addedMentionables.filter(
+          (mentionable) =>
+            !retained.some(
+              (currentMentionable) =>
+                getMentionableKey(serializeMentionable(currentMentionable)) ===
+                getMentionableKey(mentionable),
+            ),
+        )
+        const added = actuallyAddedMentionables
+          .map((mentionable) => deserializeMentionable(mentionable, app))
+          .filter((mentionable) => !!mentionable)
+        if (retained.length === current.length && added.length === 0) {
+          return current
+        }
+        return retained.concat(added)
+      })
+      if (actuallyAddedMentionables.length > 0) {
         setDisplayedMentionableKey(
-          getMentionableKey(addedMentionables[addedMentionables.length - 1]),
+          getMentionableKey(
+            actuallyAddedMentionables[actuallyAddedMentionables.length - 1],
+          ),
         )
       }
     }
 
     const handleCreateImageMentionables = useCallback(
       (mentionableImages: MentionableImage[]) => {
-        const remainingImageSlots = Math.max(
-          0,
-          MAX_MENTIONABLE_IMAGES -
-            mentionables.filter((mentionable) => mentionable.type === 'image')
-              .length,
-        )
-        let remainingImageChars =
-          MAX_MENTIONABLE_IMAGE_TOTAL_DATA_CHARS -
-          mentionables.reduce(
-            (total, mentionable) =>
-              total +
-              (mentionable.type === 'image' ? mentionable.data.length : 0),
+        if (!mountedRef.current) return
+        let newMentionableImages: MentionableImage[] = []
+        updateMentionables((current) => {
+          const remainingImageSlots = Math.max(
             0,
+            MAX_MENTIONABLE_IMAGES -
+              current.filter((mentionable) => mentionable.type === 'image')
+                .length,
           )
-        const newMentionableImages = mentionableImages
-          .filter(
-            (m) =>
-              !mentionables.some(
-                (mentionable) =>
-                  getMentionableKey(serializeMentionable(mentionable)) ===
-                  getMentionableKey(serializeMentionable(m)),
-              ),
+          let remainingImageChars =
+            MAX_MENTIONABLE_IMAGE_TOTAL_DATA_CHARS -
+            current.reduce(
+              (total, mentionable) =>
+                total +
+                (mentionable.type === 'image' ? mentionable.data.length : 0),
+              0,
+            )
+          newMentionableImages = mentionableImages
+            .filter(
+              (image) =>
+                !current.some(
+                  (mentionable) =>
+                    getMentionableKey(serializeMentionable(mentionable)) ===
+                    getMentionableKey(serializeMentionable(image)),
+                ),
+            )
+            .slice(0, remainingImageSlots)
+            .filter((image) => {
+              if (image.data.length > remainingImageChars) return false
+              remainingImageChars -= image.data.length
+              return true
+            })
+          return newMentionableImages.length === 0
+            ? current
+            : [...current, ...newMentionableImages]
+        })
+        if (newMentionableImages.length < mentionableImages.length) {
+          new Notice(
+            'Some images were not attached because the image count or size limit was reached.',
           )
-          .slice(0, remainingImageSlots)
-          .filter((image) => {
-            if (image.data.length > remainingImageChars) return false
-            remainingImageChars -= image.data.length
-            return true
-          })
+        }
         if (newMentionableImages.length === 0) return
-        setMentionables([...mentionables, ...newMentionableImages])
         const lastImage = newMentionableImages.at(-1)
         if (lastImage) {
           setDisplayedMentionableKey(
@@ -236,15 +285,15 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           )
         }
       },
-      [mentionables, setMentionables],
+      [updateMentionables],
     )
 
     const handleMentionableDelete = (mentionable: Mentionable) => {
       const mentionableKey = getMentionableKey(
         serializeMentionable(mentionable),
       )
-      setMentionables(
-        mentionables.filter(
+      updateMentionables((current) =>
+        current.filter(
           (m) => getMentionableKey(serializeMentionable(m)) !== mentionableKey,
         ),
       )
@@ -262,14 +311,32 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
     }
 
     const handleUploadImages = async (images: File[]) => {
-      const mentionableImages = await filesToMentionableImages(
-        images.slice(0, MAX_MENTIONABLE_IMAGES),
-      )
+      const mountedAtStart = mountedRef.current
+      if (images.length > MAX_MENTIONABLE_IMAGES) {
+        new Notice(
+          `Only ${MAX_MENTIONABLE_IMAGES} images can be attached at once.`,
+        )
+      }
+      const { images: mentionableImages, rejected } =
+        await convertFilesToMentionableImages(
+          images.slice(0, MAX_MENTIONABLE_IMAGES),
+        )
+      if (!mountedAtStart || !mountedRef.current) return
+      if (rejected.length > 0) {
+        const first = rejected[0]
+        new Notice(
+          `${rejected.length} image${rejected.length === 1 ? '' : 's'} could not be attached: ${first.name} — ${first.reason}`,
+        )
+      }
       handleCreateImageMentionables(mentionableImages)
     }
 
     const handleSubmit = (mode: ChatSubmitMode = 'chat') => {
       if (isWorking) return
+      if (mode === 'agent' && !isAgentAvailable) {
+        new Notice('Enable Codex in Agent settings on desktop to use Agent.')
+        return
+      }
       const content = editorRef.current?.getEditorState()?.toJSON()
       if (!content || !hasSubmittableContent(content, mentionables)) return
       onSubmit(content, mode)
@@ -364,7 +431,10 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
             {!isWorking && (
               <>
                 <VaultChatButton onClick={() => handleSubmit('vault')} />
-                <AgentChatButton onClick={() => handleSubmit('agent')} />
+                <AgentChatButton
+                  onClick={() => handleSubmit('agent')}
+                  disabled={!isAgentAvailable}
+                />
               </>
             )}
             <SubmitButton

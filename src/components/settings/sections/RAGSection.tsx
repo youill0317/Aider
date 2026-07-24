@@ -23,7 +23,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">RAG</div>
+      <h2 className="smtcmp-settings-header">RAG</h2>
 
       <ObsidianSetting
         name="Embedding model"
@@ -38,10 +38,10 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
             ]),
           )}
           onChange={async (value) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               embeddingModelId: value,
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -71,13 +71,13 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
               .split('\n')
               .map((p: string) => p.trim())
               .filter((p: string) => p.length > 0)
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               ragOptions: {
-                ...settings.ragOptions,
+                ...currentSettings.ragOptions,
                 includePatterns: patterns,
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -107,13 +107,13 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
               .split('\n')
               .map((p) => p.trim())
               .filter((p) => p.length > 0)
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               ragOptions: {
-                ...settings.ragOptions,
+                ...currentSettings.ragOptions,
                 excludePatterns: patterns,
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -126,15 +126,19 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
           value={String(settings.ragOptions.chunkSize)}
           placeholder="1000"
           onChange={async (value) => {
-            const chunkSize = parseInt(value, 10)
-            if (!isNaN(chunkSize)) {
-              await setSettings({
-                ...settings,
+            const chunkSize = Number(value)
+            if (
+              Number.isInteger(chunkSize) &&
+              chunkSize >= 400 &&
+              chunkSize <= 100_000
+            ) {
+              await setSettings((currentSettings) => ({
+                ...currentSettings,
                 ragOptions: {
-                  ...settings.ragOptions,
+                  ...currentSettings.ragOptions,
                   chunkSize,
                 },
-              })
+              }))
             }
           }}
         />
@@ -148,15 +152,20 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
           value={String(settings.ragOptions.thresholdTokens)}
           placeholder="8192"
           onChange={async (value) => {
-            const thresholdTokens = parseInt(value, 10)
-            if (!isNaN(thresholdTokens)) {
-              await setSettings({
-                ...settings,
+            if (value.trim() === '') return
+            const thresholdTokens = Number(value)
+            if (
+              Number.isInteger(thresholdTokens) &&
+              thresholdTokens >= 0 &&
+              thresholdTokens <= 10_000_000
+            ) {
+              await setSettings((currentSettings) => ({
+                ...currentSettings,
                 ragOptions: {
-                  ...settings.ragOptions,
+                  ...currentSettings.ragOptions,
                   thresholdTokens,
                 },
-              })
+              }))
             }
           }}
         />
@@ -170,21 +179,24 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
           value={String(settings.ragOptions.minSimilarity)}
           placeholder="0.0"
           onChange={async (value) => {
-            // Allow decimal point and numbers only
-            if (!/^[0-9.]*$/.test(value)) return
+            if (!/^-?(?:\d+\.?\d*|\.\d*)?$/.test(value)) return
 
-            // Ignore typing decimal point to prevent interference with the input
-            if (value === '.' || value.endsWith('.')) return
+            if (['', '-', '.', '-.'].includes(value) || value.endsWith('.'))
+              return
 
             const minSimilarity = parseFloat(value)
-            if (!isNaN(minSimilarity)) {
-              await setSettings({
-                ...settings,
+            if (
+              !isNaN(minSimilarity) &&
+              minSimilarity >= -1 &&
+              minSimilarity <= 1
+            ) {
+              await setSettings((currentSettings) => ({
+                ...currentSettings,
                 ragOptions: {
-                  ...settings.ragOptions,
+                  ...currentSettings.ragOptions,
                   minSimilarity,
                 },
-              })
+              }))
             }
           }}
         />
@@ -198,15 +210,15 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
           value={String(settings.ragOptions.limit)}
           placeholder="10"
           onChange={async (value) => {
-            const limit = parseInt(value, 10)
-            if (!isNaN(limit)) {
-              await setSettings({
-                ...settings,
+            const limit = Number(value)
+            if (Number.isInteger(limit) && limit >= 1 && limit <= 100) {
+              await setSettings((currentSettings) => ({
+                ...currentSettings,
                 ragOptions: {
-                  ...settings.ragOptions,
+                  ...currentSettings.ragOptions,
                   limit,
                 },
-              })
+              }))
             }
           }}
         />

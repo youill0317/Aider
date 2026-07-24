@@ -13,6 +13,7 @@ import {
   MentionableUrl,
   MentionableVault,
 } from '../../../types/mentionable'
+import { runAsyncAction } from '../../../utils/async-action'
 import { getMentionableName } from '../../../utils/chat/mentionable'
 
 import { getMentionableIcon } from './utils/get-metionable-icon'
@@ -173,16 +174,18 @@ function CurrentFileBadge({
   const handleCurrentFileToggle = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation()
-      setSettings({
-        ...settings,
-        chatOptions: {
-          ...settings.chatOptions,
-          includeCurrentFileContent:
-            !settings.chatOptions.includeCurrentFileContent,
-        },
-      })
+      runAsyncAction(() =>
+        setSettings((currentSettings) => ({
+          ...currentSettings,
+          chatOptions: {
+            ...currentSettings.chatOptions,
+            includeCurrentFileContent:
+              !currentSettings.chatOptions.includeCurrentFileContent,
+          },
+        })),
+      )
     },
-    [settings, setSettings],
+    [setSettings],
   )
 
   const Icon = getMentionableIcon(mentionable)

@@ -9,4 +9,13 @@ describe('AgentChatButton', () => {
     expect(html).toContain('Agent')
     expect(html).not.toContain('&gt;_')
   })
+
+  it('explains when Agent is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <AgentChatButton onClick={jest.fn()} disabled />,
+    )
+
+    expect(html).toContain('disabled')
+    expect(html).toContain('Agent unavailable')
+  })
 })

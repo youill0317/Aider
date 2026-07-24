@@ -2,11 +2,12 @@ import { TextAreaComponent } from 'obsidian'
 import { useEffect, useRef, useState } from 'react'
 
 import { useObsidianSetting } from './ObsidianSetting'
+import { useDebouncedControlValue } from './useDebouncedControlValue'
 
 type ObsidianTextAreaProps = {
   value: string
   placeholder?: string
-  onChange: (value: string) => void
+  onChange: (value: string) => void | Promise<void>
 }
 
 export function ObsidianTextArea({
@@ -18,7 +19,10 @@ export function ObsidianTextArea({
   const { setting } = useObsidianSetting()
   const [textAreaComponent, setTextAreaComponent] =
     useState<TextAreaComponent | null>(null)
-  const onChangeRef = useRef(onChange)
+  const { draft, setDraft, flush } = useDebouncedControlValue({
+    value,
+    onChange,
+  })
 
   useEffect(() => {
     if (setting) {
@@ -42,19 +46,20 @@ export function ObsidianTextArea({
   }, [setting])
 
   useEffect(() => {
-    onChangeRef.current = onChange
-  }, [onChange])
+    if (!textAreaComponent) return
+    textAreaComponent.onChange(setDraft)
+    const input = textAreaComponent.inputEl
+    input.addEventListener('blur', flush)
+    return () => input.removeEventListener('blur', flush)
+  }, [flush, setDraft, textAreaComponent])
 
   useEffect(() => {
     if (!textAreaComponent) return
-    textAreaComponent.onChange((v) => onChangeRef.current(v))
-  }, [textAreaComponent])
-
-  useEffect(() => {
-    if (!textAreaComponent) return
-    if (placeholder) textAreaComponent.setPlaceholder(placeholder)
-    textAreaComponent.setValue(value)
-  }, [textAreaComponent, value, placeholder])
+    textAreaComponent.setPlaceholder(placeholder ?? '')
+    if (textAreaComponent.getValue() !== draft) {
+      textAreaComponent.setValue(draft)
+    }
+  }, [draft, placeholder, textAreaComponent])
 
   return <div ref={containerRef} />
 }

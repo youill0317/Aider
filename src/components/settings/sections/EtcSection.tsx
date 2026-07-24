@@ -12,7 +12,7 @@ type EtcSectionProps = {
   plugin: SmartComposerPlugin
 }
 
-export function EtcSection({ app }: EtcSectionProps) {
+export function EtcSection({ app, plugin }: EtcSectionProps) {
   const { setSettings } = useSettings()
 
   const handleResetSettings = () => {
@@ -23,7 +23,15 @@ export function EtcSection({ app }: EtcSectionProps) {
       ctaText: 'Reset',
       onConfirm: async () => {
         const defaultSettings = smartComposerSettingsSchema.parse({})
-        await setSettings(defaultSettings)
+        await Promise.all([
+          ...plugin.settings.providers.map((provider) =>
+            plugin.revokeProviderRouteTrust(provider),
+          ),
+          ...plugin.settings.mcp.servers.map((server) =>
+            plugin.revokeMcpServerTrust(server.id),
+          ),
+        ])
+        await setSettings(() => defaultSettings)
         new Notice('Settings have been reset to defaults')
       },
     }).open()
@@ -31,7 +39,7 @@ export function EtcSection({ app }: EtcSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Maintenance</div>
+      <h2 className="smtcmp-settings-header">Maintenance</h2>
 
       <ObsidianSetting
         name="Reset settings"

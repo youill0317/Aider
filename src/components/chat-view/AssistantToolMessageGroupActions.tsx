@@ -1,15 +1,11 @@
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Check, CopyIcon } from 'lucide-react'
+import { Notice } from 'obsidian'
 import { useMemo, useState } from 'react'
 
-import {
-  AssistantToolMessageGroup,
-  ChatAssistantMessage,
-} from '../../types/chat'
-import { ChatModel } from '../../types/chat-model.types'
-import { ResponseUsage } from '../../types/llm/response'
-import { calculateLLMCost } from '../../utils/llm/price-calculator'
+import { AssistantToolMessageGroup } from '../../types/chat'
 
+import { summarizeAssistantResponses } from './assistant-response-summary'
 import LLMResponseInfoPopover from './LLMResponseInfoPopover'
 import { getToolMessageContent } from './ToolMessage'
 
@@ -43,11 +39,16 @@ function CopyButton({ messages }: { messages: AssistantToolMessageGroup }) {
   }, [messages])
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(content)
-    setCopied(true)
-    setTimeout(() => {
-      setCopied(false)
-    }, 1500)
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => {
+        setCopied(false)
+      }, 1500)
+    } catch (error) {
+      new Notice('Failed to copy the message to the clipboard')
+      console.error('Failed to copy message', error)
+    }
   }
 
   return (
@@ -55,8 +56,10 @@ function CopyButton({ messages }: { messages: AssistantToolMessageGroup }) {
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <button
+            type="button"
             onClick={copied ? undefined : handleCopy}
             className="clickable-icon"
+            aria-label={copied ? 'Message copied' : 'Copy message'}
           >
             {copied ? <Check size={12} /> : <CopyIcon size={12} />}
           </button>
@@ -76,42 +79,10 @@ function LLMResponseInfoButton({
 }: {
   messages: AssistantToolMessageGroup
 }) {
-  const usage = useMemo<ResponseUsage | null>(() => {
-    return messages.reduce((acc: ResponseUsage | null, message) => {
-      if (message.role === 'assistant' && message.metadata?.usage) {
-        if (!acc) {
-          return message.metadata.usage
-        }
-        return {
-          prompt_tokens:
-            acc.prompt_tokens + message.metadata.usage.prompt_tokens,
-          completion_tokens:
-            acc.completion_tokens + message.metadata.usage.completion_tokens,
-          total_tokens: acc.total_tokens + message.metadata.usage.total_tokens,
-        }
-      }
-      return acc
-    }, null)
-  }, [messages])
-
-  // TODO: Handle multiple models in the same message group
-  const model = useMemo<ChatModel | undefined>(() => {
-    const assistantMessageWithModel = messages.find(
-      (message): message is ChatAssistantMessage =>
-        message.role === 'assistant' && !!message.metadata?.model,
-    )
-    return assistantMessageWithModel?.metadata?.model
-  }, [messages])
-
-  const cost = useMemo<number | null>(() => {
-    if (!model || !usage) {
-      return null
-    }
-    return calculateLLMCost({
-      model,
-      usage,
-    })
-  }, [model, usage])
+  const summary = useMemo(
+    () => summarizeAssistantResponses(messages),
+    [messages],
+  )
 
   return (
     <Tooltip.Provider delayDuration={0}>
@@ -119,9 +90,9 @@ function LLMResponseInfoButton({
         <Tooltip.Trigger asChild>
           <div>
             <LLMResponseInfoPopover
-              usage={usage}
-              estimatedPrice={cost}
-              model={model?.model ?? null}
+              usage={summary.usage}
+              estimatedPrice={summary.estimatedPrice}
+              model={summary.model}
             />
           </div>
         </Tooltip.Trigger>

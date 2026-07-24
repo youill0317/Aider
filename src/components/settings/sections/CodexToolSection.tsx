@@ -1,3 +1,5 @@
+import { Platform } from 'obsidian'
+
 import { useSettings } from '../../../contexts/settings-context'
 import type {
   CodexApprovalPolicy,
@@ -25,9 +27,20 @@ export function CodexToolSection() {
   const { settings, setSettings } = useSettings()
   const codexSettings = settings.agent.codex
 
+  if (!Platform.isDesktop) {
+    return (
+      <div className="smtcmp-settings-section">
+        <h2 className="smtcmp-settings-header">Codex tool</h2>
+        <div className="smtcmp-settings-desc">
+          Codex Agent is available only in the Obsidian desktop app.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Codex tool</div>
+      <h2 className="smtcmp-settings-header">Codex tool</h2>
 
       <ObsidianSetting
         name="Enable Codex tool"
@@ -36,16 +49,16 @@ export function CodexToolSection() {
         <ObsidianToggle
           value={codexSettings.enabled}
           onChange={async (enabled) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               agent: {
-                ...settings.agent,
+                ...currentSettings.agent,
                 codex: {
-                  ...codexSettings,
+                  ...currentSettings.agent.codex,
                   enabled,
                 },
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -57,16 +70,16 @@ export function CodexToolSection() {
         <ObsidianTextInput
           value={codexSettings.command}
           onChange={async (command) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               agent: {
-                ...settings.agent,
+                ...currentSettings.agent,
                 codex: {
-                  ...codexSettings,
+                  ...currentSettings.agent.codex,
                   command,
                 },
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -79,16 +92,16 @@ export function CodexToolSection() {
           value={codexSettings.defaultSandbox}
           options={SANDBOX_OPTIONS}
           onChange={async (defaultSandbox) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               agent: {
-                ...settings.agent,
+                ...currentSettings.agent,
                 codex: {
-                  ...codexSettings,
+                  ...currentSettings.agent.codex,
                   defaultSandbox: defaultSandbox as CodexSandboxMode,
                 },
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -101,16 +114,16 @@ export function CodexToolSection() {
           value={codexSettings.approvalPolicy}
           options={APPROVAL_OPTIONS}
           onChange={async (approvalPolicy) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               agent: {
-                ...settings.agent,
+                ...currentSettings.agent,
                 codex: {
-                  ...codexSettings,
+                  ...currentSettings.agent.codex,
                   approvalPolicy: approvalPolicy as CodexApprovalPolicy,
                 },
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>

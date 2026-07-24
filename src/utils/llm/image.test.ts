@@ -1,8 +1,8 @@
 import { MAX_MENTIONABLE_IMAGE_BYTES } from '../../types/mentionable'
 
-import { filesToMentionableImages } from './image'
+import { convertFilesToMentionableImages } from './image'
 
-describe('filesToMentionableImages', () => {
+describe('convertFilesToMentionableImages', () => {
   const originalFileReader = globalThis.FileReader
 
   beforeEach(() => {
@@ -30,7 +30,6 @@ describe('filesToMentionableImages', () => {
   })
 
   it('keeps valid images when another image is rejected', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation()
     const valid = {
       name: 'valid.png',
       size: 10,
@@ -42,8 +41,10 @@ describe('filesToMentionableImages', () => {
       type: 'image/png',
     } as File
 
-    await expect(filesToMentionableImages([valid, oversized])).resolves.toEqual(
-      [
+    await expect(
+      convertFilesToMentionableImages([valid, oversized]),
+    ).resolves.toEqual({
+      images: [
         {
           type: 'image',
           name: 'valid.png',
@@ -51,7 +52,32 @@ describe('filesToMentionableImages', () => {
           data: 'data:image/png;base64,valid.png',
         },
       ],
+      rejected: [
+        {
+          name: 'oversized.png',
+          reason: 'Image file is too large',
+        },
+      ],
+    })
+  })
+
+  it('reports rejected image names and reasons to the UI boundary', async () => {
+    const oversized = {
+      name: 'oversized.png',
+      size: MAX_MENTIONABLE_IMAGE_BYTES + 1,
+      type: 'image/png',
+    } as File
+
+    await expect(convertFilesToMentionableImages([oversized])).resolves.toEqual(
+      {
+        images: [],
+        rejected: [
+          {
+            name: 'oversized.png',
+            reason: 'Image file is too large',
+          },
+        ],
+      },
     )
-    expect(warn).toHaveBeenCalledTimes(1)
   })
 })

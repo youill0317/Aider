@@ -1,7 +1,7 @@
 import { App, Notice } from 'obsidian'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { DEFAULT_PROVIDERS, PROVIDER_TYPES_INFO } from '../../../constants'
+import { PROVIDER_TYPES_INFO } from '../../../constants'
 import { getProviderClient } from '../../../core/llm/manager'
 import { supportedDimensionsForIndex } from '../../../database/schema'
 import SmartComposerPlugin from '../../../main'
@@ -38,16 +38,47 @@ function AddEmbeddingModelModalComponent({
   plugin,
   onClose,
 }: AddEmbeddingModelModalComponentProps) {
-  const [formData, setFormData] = useState<Omit<EmbeddingModel, 'dimension'>>({
-    providerId: DEFAULT_PROVIDERS[0].id,
-    providerType: DEFAULT_PROVIDERS[0].type,
+  const embeddingProviders = plugin.settings.providers.filter(
+    (provider) => PROVIDER_TYPES_INFO[provider.type].supportEmbedding,
+  )
+  const [formData, setFormData] = useState<{
+    providerId: string
+    id: string
+    model: string
+    outputDimension?: number
+  }>(() => ({
+    providerId: embeddingProviders[0]?.id ?? '',
     id: '',
     model: '',
     outputDimension: undefined,
-  })
+  }))
   const [outputDimensionInput, setOutputDimensionInput] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const isSubmittingRef = useRef(false)
+  const mountedRef = useRef(true)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortControllerRef.current?.abort()
+    }
+  }, [])
+
+  const handleClose = () => {
+    mountedRef.current = false
+    abortControllerRef.current?.abort()
+    onClose()
+  }
 
   const handleSubmit = async () => {
+    if (isSubmittingRef.current) return
+    isSubmittingRef.current = true
+    setIsSubmitting(true)
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     try {
       if (plugin.settings.embeddingModels.some((p) => p.id === formData.id)) {
         throw new Error(
@@ -55,12 +86,13 @@ function AddEmbeddingModelModalComponent({
         )
       }
 
-      if (
-        !plugin.settings.providers.some(
-          (provider) => provider.id === formData.providerId,
-        )
-      ) {
-        throw new Error('Provider with this ID does not exist')
+      const provider = plugin.settings.providers.find(
+        (provider) =>
+          provider.id === formData.providerId &&
+          PROVIDER_TYPES_INFO[provider.type].supportEmbedding,
+      )
+      if (!provider) {
+        throw new Error('Select an embedding-capable provider')
       }
 
       const providerClient = getProviderClient({
@@ -71,8 +103,12 @@ function AddEmbeddingModelModalComponent({
       const embeddingResult = await providerClient.getEmbedding(
         formData.model,
         'test',
-        { dimensions: formData.outputDimension },
+        {
+          dimensions: formData.outputDimension,
+          signal: abortController.signal,
+        },
       )
+      if (!mountedRef.current || abortController.signal.aborted) return
 
       if (!Array.isArray(embeddingResult) || embeddingResult.length === 0) {
         throw new Error('Embedding model returned an invalid result')
@@ -107,10 +143,12 @@ function AddEmbeddingModelModalComponent({
         if (!confirmed) {
           return
         }
+        if (!mountedRef.current || abortController.signal.aborted) return
       }
 
       const embeddingModel: EmbeddingModel = {
         ...formData,
+        providerType: provider.type,
         dimension,
       }
 
@@ -122,16 +160,38 @@ function AddEmbeddingModelModalComponent({
         )
       }
 
-      await plugin.setSettings({
-        ...plugin.settings,
-        embeddingModels: [...plugin.settings.embeddingModels, embeddingModel],
+      if (!mountedRef.current || abortController.signal.aborted) return
+      await plugin.setSettings((currentSettings) => {
+        if (
+          currentSettings.embeddingModels.some(
+            (model) => model.id === embeddingModel.id,
+          )
+        ) {
+          throw new Error('Model with this ID already exists')
+        }
+        return {
+          ...currentSettings,
+          embeddingModels: [...currentSettings.embeddingModels, embeddingModel],
+        }
       })
 
-      onClose()
+      handleClose()
     } catch (error) {
+      if (
+        abortController.signal.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
+        return
+      }
       new Notice(
         error instanceof Error ? error.message : 'An unknown error occurred',
       )
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null
+      }
+      isSubmittingRef.current = false
+      if (mountedRef.current) setIsSubmitting(false)
     }
   }
 
@@ -151,32 +211,26 @@ function AddEmbeddingModelModalComponent({
         />
       </ObsidianSetting>
 
-      <ObsidianSetting name="Provider ID" required>
-        <ObsidianDropdown
-          value={formData.providerId}
-          options={Object.fromEntries(
-            plugin.settings.providers
-              .filter(
-                (provider) =>
-                  PROVIDER_TYPES_INFO[provider.type].supportEmbedding,
-              )
-              .map((provider) => [provider.id, provider.id]),
-          )}
-          onChange={(value: string) => {
-            const provider = plugin.settings.providers.find(
-              (p) => p.id === value,
-            )
-            if (!provider) {
-              new Notice(`Provider with ID ${value} not found`)
-              return
+      <ObsidianSetting
+        name="Provider ID"
+        desc={
+          embeddingProviders.length === 0
+            ? 'Add an embedding-capable provider before creating an embedding model.'
+            : undefined
+        }
+        required
+      >
+        {embeddingProviders.length > 0 && (
+          <ObsidianDropdown
+            value={formData.providerId}
+            options={Object.fromEntries(
+              embeddingProviders.map((provider) => [provider.id, provider.id]),
+            )}
+            onChange={(value: string) =>
+              setFormData((prev) => ({ ...prev, providerId: value }))
             }
-            setFormData((prev) => ({
-              ...prev,
-              providerId: value,
-              providerType: provider.type,
-            }))
-          }}
-        />
+          />
+        )}
       </ObsidianSetting>
 
       <ObsidianSetting name="Model Name" required>
@@ -208,8 +262,13 @@ function AddEmbeddingModelModalComponent({
       </ObsidianSetting>
 
       <ObsidianSetting>
-        <ObsidianButton text="Add" onClick={handleSubmit} cta />
-        <ObsidianButton text="Cancel" onClick={onClose} />
+        <ObsidianButton
+          text={isSubmitting ? 'Adding…' : 'Add'}
+          onClick={handleSubmit}
+          disabled={embeddingProviders.length === 0 || isSubmitting}
+          cta
+        />
+        <ObsidianButton text="Cancel" onClick={handleClose} />
       </ObsidianSetting>
     </>
   )

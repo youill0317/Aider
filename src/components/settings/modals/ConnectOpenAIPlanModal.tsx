@@ -91,9 +91,9 @@ function ConnectOpenAIPlanModalComponent({
     ) {
       throw new Error('OpenAI Plan provider not found.')
     }
-    await plugin.setSettings({
-      ...plugin.settings,
-      providers: plugin.settings.providers.map((p) => {
+    await plugin.setSettings((currentSettings) => ({
+      ...currentSettings,
+      providers: currentSettings.providers.map((p) => {
         if (p.type === 'openai-plan' && p.id === OPENAI_PLAN_PROVIDER_ID) {
           return {
             ...p,
@@ -107,7 +107,7 @@ function ConnectOpenAIPlanModalComponent({
         }
         return p
       }),
-    })
+    }))
   }
 
   const ensureAuthContext = async () => {
@@ -235,7 +235,7 @@ function ConnectOpenAIPlanModalComponent({
         <ObsidianButton
           text="Login to OpenAI"
           disabled={isBusy}
-          onClick={() => void openLogin()}
+          onClick={openLogin}
           cta
         />
         {isWaitingForCallback && (
@@ -279,7 +279,7 @@ function ConnectOpenAIPlanModalComponent({
             <ObsidianButton
               text="Connect with URL"
               disabled={!redirectCode || isBusy}
-              onClick={() => void connectWithRedirectUrl()}
+              onClick={connectWithRedirectUrl}
             />
             {manualError && (
               <div className="smtcmp-plan-connect-error">{manualError}</div>

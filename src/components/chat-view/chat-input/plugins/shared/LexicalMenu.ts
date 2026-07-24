@@ -154,7 +154,7 @@ function $splitNodeContainingQuery(match: MenuTextMatch): TextNode | null {
 }
 
 // Got from https://stackoverflow.com/a/42543908/2013580
-export function getScrollParent(
+function getScrollParent(
   element: HTMLElement,
   includeHidden: boolean,
 ): HTMLElement | HTMLBodyElement {
@@ -192,7 +192,7 @@ function isTriggerVisibleInNearestScrollContainer(
 }
 
 // Reposition the menu on scroll, window resize, and element resize.
-export function useDynamicPositioning(
+function useDynamicPositioning(
   resolution: MenuResolution | null,
   targetElement: HTMLElement | null,
   onReposition: () => void,
@@ -246,7 +246,7 @@ export function useDynamicPositioning(
   }, [targetElement, editor, onVisibilityChange, onReposition, resolution])
 }
 
-export const SCROLL_TYPEAHEAD_OPTION_INTO_VIEW_COMMAND: LexicalCommand<{
+const SCROLL_TYPEAHEAD_OPTION_INTO_VIEW_COMMAND: LexicalCommand<{
   index: number
   option: MenuOption
 }> = createCommand('SCROLL_TYPEAHEAD_OPTION_INTO_VIEW_COMMAND')

@@ -91,9 +91,9 @@ function ConnectClaudePlanModalComponent({
       ) {
         throw new Error('Claude Plan provider not found.')
       }
-      await plugin.setSettings({
-        ...plugin.settings,
-        providers: plugin.settings.providers.map((p) => {
+      await plugin.setSettings((currentSettings) => ({
+        ...currentSettings,
+        providers: currentSettings.providers.map((p) => {
           if (p.type === 'anthropic-plan' && p.id === CLAUDE_PLAN_PROVIDER_ID) {
             return {
               ...p,
@@ -106,7 +106,7 @@ function ConnectClaudePlanModalComponent({
           }
           return p
         }),
-      })
+      }))
 
       new Notice('Claude Plan connected')
       onClose()
@@ -158,7 +158,7 @@ function ConnectClaudePlanModalComponent({
       <ObsidianSetting>
         <ObsidianButton
           text="Connect"
-          onClick={() => void connect()}
+          onClick={connect}
           disabled={isConnecting}
           cta
         />

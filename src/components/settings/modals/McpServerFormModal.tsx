@@ -103,35 +103,50 @@ function McpServerFormComponent({
         .strict()
         .parse(parsedParameters)
 
-      const newSettings = {
-        ...plugin.settings,
-        mcp: {
-          ...plugin.settings.mcp,
-          servers: existingServer
-            ? plugin.settings.mcp.servers.map((server) =>
-                server.id === existingServer.id
-                  ? {
-                      ...server,
-                      id: serverName,
-                      parameters: validatedParameters,
-                    }
-                  : server,
-              )
-            : [
-                ...plugin.settings.mcp.servers,
-                {
-                  id: serverName,
-                  parameters: validatedParameters,
-                  toolOptions: {},
-                  enabled: true,
-                },
-              ],
-        },
-      }
-
-      await plugin.setSettings(newSettings)
-      if (existingServer && existingServer.id !== serverName) {
-        await plugin.revokeMcpServerTrust(existingServer.id)
+      await plugin.setSettings((currentSettings) => {
+        const currentExistingServer = serverId
+          ? currentSettings.mcp.servers.find((server) => server.id === serverId)
+          : undefined
+        if (serverId && !currentExistingServer) {
+          throw new Error('MCP server no longer exists')
+        }
+        if (
+          currentSettings.mcp.servers.some(
+            (server) =>
+              server.id === serverName &&
+              server.id !== currentExistingServer?.id,
+          )
+        ) {
+          throw new Error('Server with same name already exists')
+        }
+        return {
+          ...currentSettings,
+          mcp: {
+            ...currentSettings.mcp,
+            servers: currentExistingServer
+              ? currentSettings.mcp.servers.map((server) =>
+                  server.id === currentExistingServer.id
+                    ? {
+                        ...server,
+                        id: serverName,
+                        parameters: validatedParameters,
+                      }
+                    : server,
+                )
+              : [
+                  ...currentSettings.mcp.servers,
+                  {
+                    id: serverName,
+                    parameters: validatedParameters,
+                    toolOptions: {},
+                    enabled: true,
+                  },
+                ],
+          },
+        }
+      })
+      if (serverId && serverId !== serverName) {
+        await plugin.revokeMcpServerTrust(serverId)
       }
       await plugin.trustMcpServer(serverName)
 

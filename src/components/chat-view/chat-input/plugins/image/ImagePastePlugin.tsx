@@ -1,12 +1,13 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { COMMAND_PRIORITY_HIGH, PASTE_COMMAND, PasteCommandType } from 'lexical'
-import { useEffect } from 'react'
+import { Notice } from 'obsidian'
+import { useEffect, useRef } from 'react'
 
 import {
   MAX_MENTIONABLE_IMAGES,
   MentionableImage,
 } from '../../../../../types/mentionable'
-import { filesToMentionableImages } from '../../../../../utils/llm/image'
+import { convertFilesToMentionableImages } from '../../../../../utils/llm/image'
 
 export default function ImagePastePlugin({
   onCreateImageMentionables,
@@ -14,8 +15,11 @@ export default function ImagePastePlugin({
   onCreateImageMentionables?: (mentionables: MentionableImage[]) => void
 }) {
   const [editor] = useLexicalComposerContext()
+  const onCreateRef = useRef(onCreateImageMentionables)
+  onCreateRef.current = onCreateImageMentionables
 
   useEffect(() => {
+    let active = true
     const handlePaste = (event: PasteCommandType) => {
       const clipboardData =
         event instanceof ClipboardEvent ? event.clipboardData : null
@@ -26,22 +30,30 @@ export default function ImagePastePlugin({
         .slice(0, MAX_MENTIONABLE_IMAGES)
       if (images.length === 0) return false
 
-      filesToMentionableImages(images)
-        .then((mentionableImages) => {
-          onCreateImageMentionables?.(mentionableImages)
+      convertFilesToMentionableImages(images)
+        .then(({ images: mentionableImages, rejected }) => {
+          if (!active) return
+          if (rejected.length > 0) {
+            new Notice('One or more images could not be attached')
+          }
+          onCreateRef.current?.(mentionableImages)
         })
         .catch(() => {
-          console.warn('Unable to attach one or more images')
+          if (active) new Notice('Unable to attach images')
         })
       return true
     }
 
-    return editor.registerCommand(
+    const unregister = editor.registerCommand(
       PASTE_COMMAND,
       handlePaste,
       COMMAND_PRIORITY_HIGH,
     )
-  }, [editor, onCreateImageMentionables])
+    return () => {
+      active = false
+      unregister()
+    }
+  }, [editor])
 
   return null
 }

@@ -7,8 +7,10 @@ import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
   reasoning,
+  isStreaming = false,
 }: {
   reasoning: string
+  isStreaming?: boolean
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [showLoader, setShowLoader] = useState(false)
@@ -16,10 +18,9 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
   const hasUserInteracted = useRef(false)
 
   useEffect(() => {
-    if (
-      previousReasoning.current !== reasoning &&
-      previousReasoning.current !== ''
-    ) {
+    const previous = previousReasoning.current
+    previousReasoning.current = reasoning
+    if (previous !== reasoning && previous !== '') {
       setShowLoader(true)
       if (!hasUserInteracted.current) {
         setIsExpanded(true)
@@ -29,7 +30,6 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
       }, 1000)
       return () => clearTimeout(timer)
     }
-    previousReasoning.current = reasoning
   }, [reasoning])
 
   const handleToggle = () => {
@@ -54,7 +54,11 @@ const AssistantMessageReasoning = memo(function AssistantMessageReasoning({
       </button>
       {isExpanded && (
         <div className="smtcmp-assistant-message-metadata-content">
-          <UntrustedMarkdown content={reasoning} scale="xs" />
+          {isStreaming ? (
+            <pre className="smtcmp-streaming-response">{reasoning}</pre>
+          ) : (
+            <UntrustedMarkdown content={reasoning} scale="xs" />
+          )}
         </div>
       )}
     </div>

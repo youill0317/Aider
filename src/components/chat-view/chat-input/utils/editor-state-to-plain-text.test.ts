@@ -106,4 +106,30 @@ describe('editorStateToPlainText', () => {
 
     expect(editorStateToPlainText(editorState)).toBe('First\nSecond')
   })
+
+  it('treats Lexical empty paragraphs as empty content', () => {
+    const editorState: SerializedEditorState = {
+      root: {
+        children: [
+          {
+            children: [],
+            direction: null,
+            format: '',
+            indent: 0,
+            type: 'paragraph',
+            version: 1,
+            textFormat: 0,
+            textStyle: '',
+          } as SerializedParagraphNode,
+        ],
+        direction: null,
+        format: '',
+        indent: 0,
+        type: 'root',
+        version: 1,
+      },
+    }
+
+    expect(editorStateToPlainText(editorState).trim()).toBe('')
+  })
 })

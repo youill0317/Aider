@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ItemView, WorkspaceLeaf } from 'obsidian'
+import { ItemView, Notice, WorkspaceLeaf } from 'obsidian'
 import React from 'react'
 import { Root, createRoot } from 'react-dom/client'
 
@@ -8,7 +8,6 @@ import { CHAT_VIEW_TYPE } from './constants'
 import { AppProvider } from './contexts/app-context'
 import { ChatViewProvider } from './contexts/chat-view-context'
 import { DarkModeProvider } from './contexts/dark-mode-context'
-import { DialogContainerProvider } from './contexts/dialog-container-context'
 import { McpProvider } from './contexts/mcp-context'
 import { PluginProvider } from './contexts/plugin-context'
 import { RAGProvider } from './contexts/rag-context'
@@ -16,6 +15,7 @@ import { SettingsProvider } from './contexts/settings-context'
 import { ToolDispatcherProvider } from './contexts/tool-dispatcher-context'
 import SmartComposerPlugin from './main'
 import { MentionableBlockData } from './types/mentionable'
+import { redactSecrets } from './utils/security/redact-secrets'
 
 export class ChatView extends ItemView {
   private root: Root | null = null
@@ -28,6 +28,7 @@ export class ChatView extends ItemView {
   ) {
     super(leaf)
     this.initialChatProps = plugin.initialChatProps
+    plugin.initialChatProps = undefined
   }
 
   getViewType() {
@@ -50,10 +51,26 @@ export class ChatView extends ItemView {
   }
 
   async onClose() {
-    await this.chatRef.current?.abortActiveWork()
-    await this.chatRef.current?.flushPendingSave()
-    this.root?.unmount()
-    this.root = null
+    const errors: unknown[] = []
+    try {
+      try {
+        await this.chatRef.current?.abortActiveWork()
+      } catch (error) {
+        errors.push(error)
+      }
+      try {
+        await this.chatRef.current?.flushPendingSave()
+      } catch (error) {
+        errors.push(error)
+      }
+      if (errors.length > 0) {
+        new Notice('Failed to finish saving chat history while closing')
+        console.error('Failed to close chat cleanly', redactSecrets(errors))
+      }
+    } finally {
+      this.root?.unmount()
+      this.root = null
+    }
   }
 
   async render() {
@@ -96,16 +113,7 @@ export class ChatView extends ItemView {
                     >
                       <QueryClientProvider client={queryClient}>
                         <React.StrictMode>
-                          <DialogContainerProvider
-                            container={
-                              this.containerEl.children[1] as HTMLElement
-                            }
-                          >
-                            <Chat
-                              ref={this.chatRef}
-                              {...this.initialChatProps}
-                            />
-                          </DialogContainerProvider>
+                          <Chat ref={this.chatRef} {...this.initialChatProps} />
                         </React.StrictMode>
                       </QueryClientProvider>
                     </ToolDispatcherProvider>

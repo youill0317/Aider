@@ -22,24 +22,33 @@ export type AssistantToolMessageGroupItemProps = {
   messages: AssistantToolMessageGroup
   getContextMessages: () => ChatMessage[]
   conversationId: string
-  isApplying: boolean // TODO: isApplying should be a boolean for each assistant message
-  onApply: (blockToApply: string, chatMessages: ChatMessage[]) => void
+  applyingBlockId: string | null
+  onApply: (
+    blockToApply: string,
+    chatMessages: ChatMessage[],
+    applyId: string,
+  ) => void
   executeToolCall: ExecuteApprovedToolCall
   abortToolCall: AbortApprovedToolCall
   onToolCallResponseUpdate: ToolCallResponseUpdater
+  isStreaming: boolean
 }
 
 export default function AssistantToolMessageGroupItem({
   messages,
   getContextMessages,
   conversationId,
-  isApplying,
+  applyingBlockId,
   onApply,
   executeToolCall,
   abortToolCall,
   onToolCallResponseUpdate,
+  isStreaming,
 }: AssistantToolMessageGroupItemProps) {
   const messageBlocks = useMemo(() => getMessageBlocks(messages), [messages])
+  const lastAssistantMessageId = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant')?.id
 
   return (
     <div className="smtcmp-assistant-tool-message-group">
@@ -49,8 +58,11 @@ export default function AssistantToolMessageGroupItem({
             key={block.message.id}
             message={block.message}
             getContextMessages={getContextMessages}
-            isApplying={isApplying}
+            applyingBlockId={applyingBlockId}
             onApply={onApply}
+            isStreaming={
+              isStreaming && block.message.id === lastAssistantMessageId
+            }
           />
         ) : (
           <ToolActivityGroup
@@ -116,13 +128,19 @@ function getActivityBlockKey(messages: readonly ToolActivityMessage[]): string {
 function AssistantMessageBlock({
   message,
   getContextMessages,
-  isApplying,
+  applyingBlockId,
   onApply,
+  isStreaming,
 }: {
   message: ChatAssistantMessage
   getContextMessages: () => ChatMessage[]
-  isApplying: boolean
-  onApply: (blockToApply: string, chatMessages: ChatMessage[]) => void
+  applyingBlockId: string | null
+  onApply: (
+    blockToApply: string,
+    chatMessages: ChatMessage[],
+    applyId: string,
+  ) => void
+  isStreaming: boolean
 }) {
   if (!message.reasoning && !message.annotations && !message.content) {
     return null
@@ -131,16 +149,21 @@ function AssistantMessageBlock({
   return (
     <div className="smtcmp-chat-messages-assistant">
       {message.reasoning && (
-        <AssistantMessageReasoning reasoning={message.reasoning} />
+        <AssistantMessageReasoning
+          reasoning={message.reasoning}
+          isStreaming={isStreaming}
+        />
       )}
       {message.annotations && (
         <AssistantMessageAnnotations annotations={message.annotations} />
       )}
       <AssistantMessageContent
         content={message.content}
+        messageId={message.id}
         getContextMessages={getContextMessages}
         handleApply={onApply}
-        isApplying={isApplying}
+        applyingBlockId={applyingBlockId}
+        isStreaming={isStreaming}
       />
     </div>
   )

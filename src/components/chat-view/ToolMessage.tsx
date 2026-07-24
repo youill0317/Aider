@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
+import { Notice } from 'obsidian'
 import { memo, useCallback, useMemo, useState } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
@@ -13,6 +14,7 @@ import {
   ToolCallResponse,
   ToolCallResponseStatus,
 } from '../../types/tool-call.types'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 import { SplitButton } from '../common/SplitButton'
 
 import { ObsidianCodeBlock } from './ObsidianMarkdown'
@@ -169,6 +171,16 @@ function ToolCallItem({
       return request.arguments
     }
   }, [request.arguments])
+  const approveToolCall = (savePermission?: () => Promise<void>) => {
+    void (async () => {
+      await savePermission?.()
+      await handleToolCall()
+      setIsOpen(false)
+    })().catch((error) => {
+      new Notice('Unable to approve tool call')
+      console.error('Unable to approve tool call', redactSecrets(error))
+    })
+  }
 
   return (
     <div className="smtcmp-toolcall">
@@ -223,38 +235,26 @@ function ToolCallItem({
             <div className="smtcmp-toolcall-footer-actions">
               <SplitButton
                 primaryText="Allow"
-                onPrimaryClick={() => {
-                  handleToolCall()
-                  setIsOpen(false)
-                }}
+                onPrimaryClick={() => approveToolCall()}
                 menuOptions={
                   isCodexTool
                     ? [
                         {
                           label: 'Allow for this chat',
-                          onClick: () => {
-                            handleToolCall()
-                            handleAllowForConversation()
-                            setIsOpen(false)
-                          },
+                          onClick: () =>
+                            approveToolCall(handleAllowForConversation),
                         },
                       ]
                     : [
                         {
                           label: 'Always allow this tool',
-                          onClick: () => {
-                            handleToolCall()
-                            handleAllowAutoExecution()
-                            setIsOpen(false)
-                          },
+                          onClick: () =>
+                            approveToolCall(handleAllowAutoExecution),
                         },
                         {
                           label: 'Allow for this chat',
-                          onClick: () => {
-                            handleToolCall()
-                            handleAllowForConversation()
-                            setIsOpen(false)
-                          },
+                          onClick: () =>
+                            approveToolCall(handleAllowForConversation),
                         },
                       ]
                 }
@@ -290,7 +290,7 @@ function useToolCall(
   abortToolCall: AbortApprovedToolCall,
   onResponseUpdate: (response: ToolCallResponse) => void,
 ) {
-  const { settings, setSettings } = useSettings()
+  const { setSettings } = useSettings()
   const { getToolDispatcher } = useToolDispatcher()
 
   const handleToolCall = useCallback(async () => {
@@ -308,38 +308,33 @@ function useToolCall(
 
   const handleAllowAutoExecution = useCallback(async () => {
     const { serverName, toolName } = parseToolName(request.name)
-    const server = settings.mcp.servers.find((s) => s.id === serverName)
-    if (!server) {
-      throw new Error(`Server ${serverName} not found`)
-    }
-    const toolOptions = { ...server.toolOptions }
-    if (!toolOptions[toolName]) {
-      // If the tool is not in the toolOptions, add it with default values
-      toolOptions[toolName] = {
-        allowAutoExecution: false,
-        disabled: false,
+    await setSettings((currentSettings) => {
+      if (!currentSettings.mcp.servers.some((s) => s.id === serverName)) {
+        throw new Error(`Server ${serverName} not found`)
       }
-    }
-    toolOptions[toolName] = {
-      ...toolOptions[toolName],
-      allowAutoExecution: true,
-    }
-
-    setSettings({
-      ...settings,
-      mcp: {
-        ...settings.mcp,
-        servers: settings.mcp.servers.map((s) =>
-          s.id === server.id
-            ? {
-                ...s,
-                toolOptions: toolOptions,
-              }
-            : s,
-        ),
-      },
+      return {
+        ...currentSettings,
+        mcp: {
+          ...currentSettings.mcp,
+          servers: currentSettings.mcp.servers.map((server) =>
+            server.id === serverName
+              ? {
+                  ...server,
+                  toolOptions: {
+                    ...server.toolOptions,
+                    [toolName]: {
+                      disabled: false,
+                      ...server.toolOptions[toolName],
+                      allowAutoExecution: true,
+                    },
+                  },
+                }
+              : server,
+          ),
+        },
+      }
     })
-  }, [request, settings, setSettings])
+  }, [request, setSettings])
 
   const handleReject = useCallback(() => {
     abortToolCall(request.id, true)

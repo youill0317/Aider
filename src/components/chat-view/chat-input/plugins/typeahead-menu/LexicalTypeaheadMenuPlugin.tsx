@@ -29,7 +29,7 @@ import {
   useMenuAnchorRef,
 } from '../shared/LexicalMenu'
 
-export const PUNCTUATION =
+const PUNCTUATION =
   '\\.,\\+\\*\\?\\$\\@\\|#{}\\(\\)\\^\\-\\[\\]\\\\/!%\'"~=<>_:;'
 
 function getTextUpToAnchor(selection: RangeSelection): string | null {
@@ -217,7 +217,7 @@ export function LexicalTypeaheadMenuPlugin<TOption extends MenuOption>({
             range,
             editorWindow,
           )
-          if (isRangePositioned !== null) {
+          if (isRangePositioned) {
             startTransition(() =>
               openTypeahead({
                 getRect: () => range.getBoundingClientRect(),

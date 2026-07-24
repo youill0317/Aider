@@ -9,6 +9,7 @@ import { AppProvider } from '../../contexts/app-context'
 import { DuplicateTemplateException } from '../../database/json/exception'
 import { TemplateManager } from '../../database/json/template/TemplateManager'
 import LexicalContentEditable from '../chat-view/chat-input/LexicalContentEditable'
+import { editorStateToPlainText } from '../chat-view/chat-input/utils/editor-state-to-plain-text'
 import { ObsidianButton } from '../common/ObsidianButton'
 import { ObsidianSetting } from '../common/ObsidianSetting'
 import { ObsidianTextInput } from '../common/ObsidianTextInput'
@@ -122,7 +123,9 @@ function TemplateFormComponent({
       if (!editorRef.current) return
       const serializedEditorState = editorRef.current.toJSON()
       const nodes = serializedEditorState.editorState.root.children
-      if (nodes.length === 0) {
+      if (
+        editorStateToPlainText(serializedEditorState.editorState).trim() === ''
+      ) {
         new Notice('Please enter a content for your template')
         return
       }

@@ -15,9 +15,7 @@ export function parseImageDataUrl(dataUrl: string): {
   return { mimeType, base64Data }
 }
 
-export async function fileToMentionableImage(
-  file: File,
-): Promise<MentionableImage> {
+async function fileToMentionableImage(file: File): Promise<MentionableImage> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Only image files can be attached')
   }
@@ -33,16 +31,31 @@ export async function fileToMentionableImage(
   }
 }
 
-export async function filesToMentionableImages(
+export async function convertFilesToMentionableImages(
   files: readonly File[],
-): Promise<MentionableImage[]> {
+): Promise<{
+  images: MentionableImage[]
+  rejected: { name: string; reason: string }[]
+}> {
   const results = await Promise.allSettled(files.map(fileToMentionableImage))
-  if (results.some((result) => result.status === 'rejected')) {
-    console.warn('Unable to attach one or more images')
+  return {
+    images: results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    ),
+    rejected: results.flatMap((result, index) =>
+      result.status === 'rejected'
+        ? [
+            {
+              name: files[index]?.name ?? 'image',
+              reason:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : 'Unable to read image',
+            },
+          ]
+        : [],
+    ),
   }
-  return results.flatMap((result) =>
-    result.status === 'fulfilled' ? [result.value] : [],
-  )
 }
 
 function fileToBase64(file: File): Promise<string> {

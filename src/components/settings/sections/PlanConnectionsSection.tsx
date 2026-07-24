@@ -65,23 +65,23 @@ export function PlanConnectionsSection({
             : 'Disconnect Gemini from Aider?',
       ctaText: 'Disconnect',
       onConfirm: async () => {
-        await setSettings({
-          ...settings,
-          providers: settings.providers.map((p) => {
+        await setSettings((currentSettings) => ({
+          ...currentSettings,
+          providers: currentSettings.providers.map((p) => {
             if (p.id !== providerId || p.type !== providerType) return p
             return {
               ...p,
               oauth: undefined,
             }
           }),
-        })
+        }))
       },
     }).open()
   }
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Connect your subscription</div>
+      <h2 className="smtcmp-settings-header">Connect your subscription</h2>
 
       <div className="smtcmp-settings-desc">
         Use a subscription instead of API-key billing. Connected subscriptions

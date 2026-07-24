@@ -65,12 +65,9 @@ function ProviderFormComponent({
 
   const handleSubmit = async () => {
     if (provider) {
-      const newProviders = [...plugin.settings.providers]
-      const currentProviderIndex = newProviders.findIndex(
-        (v) => v.id === formData.id,
-      )
-
-      if (currentProviderIndex === -1) {
+      if (
+        !plugin.settings.providers.some((value) => value.id === provider.id)
+      ) {
         new Notice(`No provider found with this ID`)
         return
       }
@@ -85,13 +82,25 @@ function ProviderFormComponent({
 
       await plugin.setTrustedProviderSettings(
         formData,
-        {
-          ...plugin.settings,
-          providers: [
-            ...plugin.settings.providers.slice(0, currentProviderIndex),
-            formData,
-            ...plugin.settings.providers.slice(currentProviderIndex + 1),
-          ],
+        (currentSettings) => {
+          const currentProviderIndex = currentSettings.providers.findIndex(
+            (value) => value.id === provider.id,
+          )
+          if (currentProviderIndex === -1) {
+            throw new Error('Provider no longer exists')
+          }
+          if (
+            formData.id !== provider.id &&
+            currentSettings.providers.some((value) => value.id === formData.id)
+          ) {
+            throw new Error('Provider with this ID already exists')
+          }
+          return {
+            ...currentSettings,
+            providers: currentSettings.providers.map((value, index) =>
+              index === currentProviderIndex ? formData : value,
+            ),
+          }
         },
         provider,
       )
@@ -111,9 +120,16 @@ function ProviderFormComponent({
         return
       }
 
-      await plugin.setTrustedProviderSettings(formData, {
-        ...plugin.settings,
-        providers: [...plugin.settings.providers, formData],
+      await plugin.setTrustedProviderSettings(formData, (currentSettings) => {
+        if (
+          currentSettings.providers.some((value) => value.id === formData.id)
+        ) {
+          throw new Error('Provider with this ID already exists')
+        }
+        return {
+          ...currentSettings,
+          providers: [...currentSettings.providers, formData],
+        }
       })
     }
 

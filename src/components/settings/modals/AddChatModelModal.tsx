@@ -62,9 +62,16 @@ function AddChatModelModalComponent({
       return
     }
 
-    await plugin.setSettings({
-      ...plugin.settings,
-      chatModels: [...plugin.settings.chatModels, formData],
+    await plugin.setSettings((currentSettings) => {
+      if (
+        currentSettings.chatModels.some((model) => model.id === formData.id)
+      ) {
+        throw new Error('Model with this ID already exists')
+      }
+      return {
+        ...currentSettings,
+        chatModels: [...currentSettings.chatModels, formData],
+      }
     })
 
     onClose()

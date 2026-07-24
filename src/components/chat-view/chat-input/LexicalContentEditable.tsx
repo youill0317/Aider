@@ -10,11 +10,11 @@ import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { LexicalEditor, SerializedEditorState } from 'lexical'
-import { RefObject, useCallback, useEffect } from 'react'
+import { RefObject, useCallback, useEffect, useMemo } from 'react'
 
 import { useApp } from '../../../contexts/app-context'
 import { MentionableImage } from '../../../types/mentionable'
-import { fuzzySearch } from '../../../utils/fuzzy-search'
+import { createCachedFuzzySearch } from '../../../utils/fuzzy-search'
 
 import DragDropPaste from './plugins/image/DragDropPastePlugin'
 import ImagePastePlugin from './plugins/image/ImagePastePlugin'
@@ -85,9 +85,11 @@ export default function LexicalContentEditable({
     },
   }
 
+  const mentionSearch = useMemo(() => createCachedFuzzySearch(app), [app])
+  useEffect(() => () => mentionSearch.dispose(), [mentionSearch])
   const searchResultByQuery = useCallback(
-    (query: string) => fuzzySearch(app, query),
-    [app],
+    (query: string) => mentionSearch.search(query),
+    [mentionSearch],
   )
 
   /*

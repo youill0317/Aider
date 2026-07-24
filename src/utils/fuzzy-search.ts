@@ -1,5 +1,5 @@
 import fuzzysort from 'fuzzysort'
-import { App, TFile, TFolder } from 'obsidian'
+import { App, EventRef, TFile, TFolder } from 'obsidian'
 
 import {
   MentionableFile,
@@ -103,7 +103,7 @@ function getEmptyQueryResult(
   limit: number,
 ): SearchableMentionable[] {
   // Sort files based on a custom scoring function
-  const sortedFiles = searchItems.sort((a, b) => {
+  const sortedFiles = [...searchItems].sort((a, b) => {
     const scoreA = scoreFnWithBoost({
       searchItem: a,
       pathScore: 0.5, // Use 0.5 as a base score
@@ -123,9 +123,9 @@ function getEmptyQueryResult(
     .map((item) => searchItemToMentionable(item))
 }
 
-export function fuzzySearch(app: App, query: string): SearchableMentionable[] {
+function createSearchItems(app: App): SearchItem[] {
   const currentFile = app.workspace.getActiveFile()
-  const openFiles = getOpenFiles(app)
+  const openPaths = new Set(getOpenFiles(app).map((file) => file.path))
 
   const allSupportedFiles = app.vault.getFiles().filter((file) => {
     const extension = file.extension
@@ -137,7 +137,7 @@ export function fuzzySearch(app: App, query: string): SearchableMentionable[] {
     path: file.path,
     name: file.name,
     file,
-    opened: openFiles.some((f) => f.path === file.path),
+    opened: openPaths.has(file.path),
     distance: currentFile
       ? currentFile === file
         ? null
@@ -161,17 +161,18 @@ export function fuzzySearch(app: App, query: string): SearchableMentionable[] {
     path: 'vault',
   }
 
-  const searchItems: SearchItem[] = [
-    ...allFilesWithMetadata,
-    ...allFoldersWithMetadata,
-    vaultItem,
-  ]
+  return [...allFilesWithMetadata, ...allFoldersWithMetadata, vaultItem]
+}
 
+function searchItems(
+  items: SearchItem[],
+  query: string,
+): SearchableMentionable[] {
   if (!query) {
-    return getEmptyQueryResult(searchItems, 20)
+    return getEmptyQueryResult(items, 20)
   }
 
-  const results = fuzzysort.go(query, searchItems, {
+  const results = fuzzysort.go(query, items, {
     keys: ['path', 'name'],
     threshold: 0.2,
     limit: 20,
@@ -185,6 +186,37 @@ export function fuzzySearch(app: App, query: string): SearchableMentionable[] {
   })
 
   return results.map((result) => searchItemToMentionable(result.obj))
+}
+
+export function createCachedFuzzySearch(app: App): {
+  search: (query: string) => SearchableMentionable[]
+  dispose: () => void
+} {
+  let cachedItems: SearchItem[] | null = null
+  const invalidate = () => {
+    cachedItems = null
+  }
+  const vaultEventRefs: EventRef[] = [
+    app.vault.on('create', invalidate),
+    app.vault.on('delete', invalidate),
+    app.vault.on('modify', invalidate),
+    app.vault.on('rename', invalidate),
+  ]
+  const workspaceEventRefs: EventRef[] = [
+    app.workspace.on('active-leaf-change', invalidate),
+    app.workspace.on('layout-change', invalidate),
+  ]
+
+  return {
+    search: (query) => {
+      cachedItems ??= createSearchItems(app)
+      return searchItems(cachedItems, query)
+    },
+    dispose: () => {
+      vaultEventRefs.forEach((eventRef) => app.vault.offref(eventRef))
+      workspaceEventRefs.forEach((eventRef) => app.workspace.offref(eventRef))
+    },
+  }
 }
 
 function searchItemToMentionable(item: SearchItem): SearchableMentionable {

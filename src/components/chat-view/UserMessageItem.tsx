@@ -24,7 +24,8 @@ export type UserMessageItemProps = {
     content: SerializedEditorState,
     mentionables: Mentionable[],
     mode?: ChatSubmitMode,
-  ) => void
+  ) => Promise<boolean>
+  onStop: () => void
   onFocus: () => void
   onEditEnd: () => void
 }
@@ -33,10 +34,12 @@ export default function UserMessageItem({
   message,
   chatUserInputRef,
   onSubmit,
+  onStop,
   onFocus,
   onEditEnd,
 }: UserMessageItemProps) {
   const [isEditing, setIsEditing] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [draftContent, setDraftContent] = useState(message.content)
   const [draftMentionables, setDraftMentionables] = useState(
     message.mentionables,
@@ -54,9 +57,15 @@ export default function UserMessageItem({
           initialSerializedEditorState={draftContent}
           onChange={setDraftContent}
           onSubmit={(content, mode) => {
-            setIsEditing(false)
-            onSubmit(content, draftMentionables, mode)
-            onEditEnd()
+            if (isSubmitting) return
+            setIsSubmitting(true)
+            void onSubmit(content, draftMentionables, mode)
+              .then((submitted) => {
+                if (!submitted) return
+                setIsEditing(false)
+                onEditEnd()
+              })
+              .finally(() => setIsSubmitting(false))
           }}
           onFocus={onFocus}
           mentionables={draftMentionables}
@@ -65,6 +74,8 @@ export default function UserMessageItem({
             setIsEditing(false)
             onEditEnd()
           }}
+          isWorking={isSubmitting}
+          onStop={onStop}
           autoFocus
         />
       ) : (

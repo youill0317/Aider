@@ -57,6 +57,7 @@ export class ResponseGenerator {
 
   private responseMessages: ChatMessage[] = [] // Response messages that are generated after the initial messages
   private subscribers: ((messages: ChatMessage[]) => void)[] = []
+  private pendingAnnotationTitleFetches = new Set<Promise<void>>()
 
   constructor(params: ResponseGeneratorParams) {
     this.providerClient = params.providerClient
@@ -269,6 +270,9 @@ export class ResponseGenerator {
           : message,
       ),
     )
+    if (!this.abortSignal?.aborted) {
+      await Promise.allSettled([...this.pendingAnnotationTitleFetches])
+    }
     return {
       toolCallRequests: toolCallRequests,
     }
@@ -297,7 +301,7 @@ export class ResponseGenerator {
 
     if (annotations) {
       // For annotations with empty titles, fetch the title of the URL and update the chat messages
-      fetchAnnotationTitles(annotations, (url, title) => {
+      const titleFetch = fetchAnnotationTitles(annotations, (url, title) => {
         this.updateResponseMessages((messages) =>
           messages.map((message) =>
             message.id === responseMessageId && message.role === 'assistant'
@@ -318,6 +322,10 @@ export class ResponseGenerator {
               : message,
           ),
         )
+      })
+      this.pendingAnnotationTitleFetches.add(titleFetch)
+      void titleFetch.finally(() => {
+        this.pendingAnnotationTitleFetches.delete(titleFetch)
       })
     }
 

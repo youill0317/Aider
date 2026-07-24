@@ -68,7 +68,7 @@ export function TemplateSection({ app }: TemplateSectionProps) {
             fetchTemplateList()
           } catch (error) {
             console.error('Failed to delete template:', error)
-            new Notice('Failed to delete template. Please try again.')
+            throw new Error('Failed to delete template. Please try again.')
           }
         },
       }).open()
@@ -82,7 +82,7 @@ export function TemplateSection({ app }: TemplateSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Prompt Templates</div>
+      <h2 className="smtcmp-settings-header">Prompt Templates</h2>
 
       <div className="smtcmp-settings-desc smtcmp-settings-callout">
         <strong>How to use:</strong> Create templates with reusable content that
@@ -93,7 +93,7 @@ export function TemplateSection({ app }: TemplateSectionProps) {
       </div>
 
       <div className="smtcmp-settings-sub-header-container">
-        <div className="smtcmp-settings-sub-header">Saved Templates</div>
+        <h3 className="smtcmp-settings-sub-header">Saved Templates</h3>
         <ObsidianButton text="Add Prompt Template" onClick={handleCreate} />
       </div>
 

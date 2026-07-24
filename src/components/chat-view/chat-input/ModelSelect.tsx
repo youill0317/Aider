@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 
 import { useSettings } from '../../../contexts/settings-context'
+import { runAsyncAction } from '../../../utils/async-action'
 
 export function ModelSelect() {
   const { settings, setSettings } = useSettings()
@@ -27,10 +28,12 @@ export function ModelSelect() {
                 <DropdownMenu.Item
                   key={chatModelOption.id}
                   onSelect={() => {
-                    setSettings({
-                      ...settings,
-                      chatModelId: chatModelOption.id,
-                    })
+                    runAsyncAction(() =>
+                      setSettings((currentSettings) => ({
+                        ...currentSettings,
+                        chatModelId: chatModelOption.id,
+                      })),
+                    )
                   }}
                   asChild
                 >

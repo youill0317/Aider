@@ -4,9 +4,21 @@ import type { LLMResponseStreaming } from '../../types/llm/response'
 import type { LLMProvider } from '../../types/provider.types'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
+import { fetchAnnotationTitles } from './fetch-annotation-titles'
 import type { PromptGenerator } from './promptGenerator'
 import { ResponseGenerator } from './responseGenerator'
 import type { ToolDispatcher } from './tool-dispatcher'
+
+jest.mock('./fetch-annotation-titles', () => ({
+  fetchAnnotationTitles: jest.fn().mockResolvedValue(undefined),
+}))
+
+const mockFetchAnnotationTitles = jest.mocked(fetchAnnotationTitles)
+
+beforeEach(() => {
+  mockFetchAnnotationTitles.mockReset()
+  mockFetchAnnotationTitles.mockResolvedValue(undefined)
+})
 
 describe('ResponseGenerator tool-call gating', () => {
   it('ignores provider tool calls when tools are disabled', async () => {
@@ -135,6 +147,48 @@ describe('ResponseGenerator auto tool call limit', () => {
 })
 
 describe('ResponseGenerator response bounds', () => {
+  it('publishes late citation titles before the response completes', async () => {
+    let finishTitleFetch: (() => void) | undefined
+    mockFetchAnnotationTitles.mockImplementation((annotations, onTitle) => {
+      return new Promise<void>((resolve) => {
+        finishTitleFetch = () => {
+          const citation = annotations[0]
+          if (citation?.type === 'url_citation') {
+            citation.url_citation.title = 'Resolved title'
+            onTitle(citation.url_citation.url, 'Resolved title')
+          }
+          resolve()
+        }
+      })
+    })
+    const chunk = contentChunk('response')
+    chunk.choices[0].delta.annotations = [
+      {
+        type: 'url_citation',
+        url_citation: { url: 'https://example.com/source' },
+      },
+    ]
+    const { generator, latestMessages } = createGenerator([[chunk]])
+    let completed = false
+    const run = generator.run().then(() => {
+      completed = true
+    })
+
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(completed).toBe(false)
+    expect(finishTitleFetch).toBeDefined()
+    finishTitleFetch?.()
+    await run
+
+    expect(latestMessages()[0]).toMatchObject({
+      annotations: [
+        {
+          url_citation: { title: 'Resolved title' },
+        },
+      ],
+    })
+  })
+
   it('accumulates streamed DeepSeek reasoning metadata', async () => {
     const { generator, latestMessages } = createGenerator([
       [reasoningChunk('think '), reasoningChunk('hard'), reasoningChunk('!')],

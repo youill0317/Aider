@@ -7,7 +7,7 @@ const MAX_CACHED_TITLES = 100
 // global cache for URL titles
 const urlTitleCache = new Map<
   string,
-  | { status: 'pending' }
+  | { status: 'pending'; promise: Promise<string | null | undefined> }
   | { status: 'fetched'; title: string | null }
   | { status: 'error' }
 >()
@@ -16,7 +16,8 @@ const urlTitleCache = new Map<
 export function fetchAnnotationTitles(
   annotations: Annotation[],
   onFetchUrlTitle: (url: string, title: string | null) => void,
-) {
+): Promise<void> {
+  const pending: Promise<void>[] = []
   annotations
     .filter(
       (annotation) =>
@@ -27,21 +28,36 @@ export function fetchAnnotationTitles(
     .slice(0, MAX_TITLE_FETCHES_PER_BATCH)
     .forEach((annotation) => {
       const url = annotation.url_citation.url
-      if (urlTitleCache.has(url)) {
-        const cached = urlTitleCache.get(url)
-        if (cached?.status === 'fetched') {
-          annotation.url_citation.title = cached.title ?? undefined
-        }
-      } else if (urlTitleCache.size < MAX_CACHED_TITLES) {
-        urlTitleCache.set(url, { status: 'pending' })
-        fetchUrlTitle(url)
+      const cached = urlTitleCache.get(url)
+      if (cached?.status === 'fetched') {
+        annotation.url_citation.title = cached.title ?? undefined
+        return
+      }
+      if (cached?.status === 'error') return
+
+      let titlePromise = cached?.promise
+      if (!titlePromise && urlTitleCache.size < MAX_CACHED_TITLES) {
+        titlePromise = fetchUrlTitle(url)
           .then((title) => {
             urlTitleCache.set(url, { status: 'fetched', title })
-            onFetchUrlTitle(url, title)
+            return title
           })
           .catch(() => {
             urlTitleCache.set(url, { status: 'error' })
+            return undefined
           })
+        urlTitleCache.set(url, { status: 'pending', promise: titlePromise })
       }
+      if (!titlePromise) return
+
+      pending.push(
+        titlePromise.then((title) => {
+          if (title === undefined) return
+          annotation.url_citation.title = title ?? undefined
+          onFetchUrlTitle(url, title)
+        }),
+      )
     })
+
+  return Promise.allSettled(pending).then(() => undefined)
 }

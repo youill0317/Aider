@@ -61,6 +61,40 @@ describe('settings UX contract', () => {
     expect(source).toContain('Connect')
     expect(source).toContain('Disconnect')
   })
+
+  it('starts custom embedding models with a configured embedding provider', () => {
+    const source = readProjectFile(
+      'src/components/settings/modals/AddEmbeddingModelModal.tsx',
+    )
+
+    expect(source).toContain("providerId: embeddingProviders[0]?.id ?? ''")
+    expect(source).toContain(
+      'disabled={embeddingProviders.length === 0 || isSubmitting}',
+    )
+    expect(source).not.toContain('providerId: DEFAULT_PROVIDERS[0].id')
+  })
+
+  it('shows an MCP command before allowing trust', () => {
+    const source = readProjectFile(
+      'src/components/settings/sections/McpSection.tsx',
+    )
+
+    expect(source).toContain(
+      'onClick={isOpen ? handleTrust : () => setIsOpen(true)}',
+    )
+    expect(source).toContain("'Trust reviewed server command'")
+    expect(source).toContain("'Review server command'")
+  })
+
+  it('confirms and locks destructive embedding-index removal per model', () => {
+    const source = readProjectFile(
+      'src/components/settings/modals/EmbeddingDbManageModal.tsx',
+    )
+
+    expect(source).toContain('new ConfirmModal(app, {')
+    expect(source).toContain('removingModelIds.has(stat.model)')
+    expect(source).toContain("ctaText: 'Remove'")
+  })
 })
 
 function readProjectFile(relativePath: string): string {

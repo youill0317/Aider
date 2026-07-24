@@ -148,6 +148,7 @@ export const applyChangesToFile = async ({
   chatMessages,
   providerClient,
   model,
+  signal,
 }: {
   blockToApply: string
   currentFile: TFile
@@ -155,6 +156,7 @@ export const applyChangesToFile = async ({
   chatMessages: ChatMessage[]
   providerClient: BaseLLMProvider<LLMProvider>
   model: ChatModel
+  signal?: AbortSignal
 }): Promise<string | null> => {
   const requestMessages: RequestMessage[] = [
     {
@@ -172,38 +174,60 @@ export const applyChangesToFile = async ({
     },
   ]
 
-  const response = await providerClient.generateResponse(model, {
-    model: model.model,
-    messages: requestMessages,
-    stream: false,
-    ...(supportsPredictedOutputs(model.model) && {
-      prediction: {
-        type: 'content',
-        content: [
-          {
-            type: 'text',
-            text: currentFileContent,
-          },
-          {
-            type: 'text',
-            text: blockToApply,
-          },
-        ],
-      },
-    }),
-  })
+  const response = await providerClient.generateResponse(
+    model,
+    {
+      model: model.model,
+      messages: requestMessages,
+      stream: false,
+      ...(supportsPredictedOutputs(model.model) && {
+        prediction: {
+          type: 'content',
+          content: [
+            {
+              type: 'text',
+              text: currentFileContent,
+            },
+            {
+              type: 'text',
+              text: blockToApply,
+            },
+          ],
+        },
+      }),
+    },
+    { signal },
+  )
 
   const responseContent = response.choices[0].message.content
   return responseContent ? extractApplyResponseContent(responseContent) : null
 }
 
 const extractApplyResponseContent = (response: string) => {
-  const lines = response.split('\n')
-  if (lines[0].startsWith('```')) {
-    lines.shift()
+  const fencedResponse = response.trimStart()
+  const openingFence = fencedResponse.match(/^(`{3,})[^\r\n]*(?:\r\n|\n|\r)/)
+  if (!openingFence) return response
+
+  const responseWithoutTrailingWhitespace = fencedResponse.trimEnd()
+  const closingLineBreak = Math.max(
+    responseWithoutTrailingWhitespace.lastIndexOf('\n'),
+    responseWithoutTrailingWhitespace.lastIndexOf('\r'),
+  )
+  if (closingLineBreak < openingFence[0].length - 1) return response
+
+  const closingFence = responseWithoutTrailingWhitespace.slice(
+    closingLineBreak + 1,
+  )
+  const minimumFence = openingFence[1]
+  if (
+    !closingFence.startsWith(minimumFence) ||
+    !/^`+[ \t]*$/.test(closingFence)
+  ) {
+    return response
   }
-  if (lines[lines.length - 1].startsWith('```')) {
-    lines.pop()
-  }
-  return lines.join('\n')
+
+  return responseWithoutTrailingWhitespace.slice(
+    openingFence[0].length,
+    closingLineBreak + 1,
+  )
 }

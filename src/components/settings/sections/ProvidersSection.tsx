@@ -9,6 +9,7 @@ import {
 import { useSettings } from '../../../contexts/settings-context'
 import SmartComposerPlugin from '../../../main'
 import { LLMProvider } from '../../../types/provider.types'
+import { redactSecrets } from '../../../utils/security/redact-secrets'
 import { ConfirmModal } from '../../modals/ConfirmModal'
 import {
   AddProviderModal,
@@ -47,68 +48,75 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        const chatModels = settings.chatModels.filter(
-          (model) => model.providerId !== provider.id,
-        )
-        const enabledChatModels = chatModels.filter(
-          (model) => model.enable !== false,
-        )
-        const embeddingModels = settings.embeddingModels.filter(
-          (model) => model.providerId !== provider.id,
-        )
-        const fallbackChatModel = enabledChatModels[0]
-        const fallbackEmbeddingModel = embeddingModels[0]
-        if (!fallbackChatModel || !fallbackEmbeddingModel) {
-          new Notice('Cannot delete the last available model provider')
-          return
-        }
-
-        const vectorManager = (await plugin.getDbManager()).getVectorManager()
-        const embeddingStats = await vectorManager.getEmbeddingStats()
-
-        // Clear embeddings for each associated embedding model
-        for (const embeddingModel of associatedEmbeddingModels) {
-          const embeddingStat = embeddingStats.find(
-            (v) => v.model === embeddingModel.id,
-          )
-
-          if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
-            // only clear when there's data
-            await vectorManager.clearAllVectors(embeddingModel.id)
-          }
-        }
-
-        await setSettings({
-          ...settings,
-          providers: [...settings.providers].filter(
-            (v) => v.id !== provider.id,
-          ),
-          chatModels,
-          embeddingModels,
-          chatModelId: enabledChatModels.some(
-            ({ id }) => id === settings.chatModelId,
-          )
-            ? settings.chatModelId
-            : fallbackChatModel.id,
-          applyModelId: enabledChatModels.some(
-            ({ id }) => id === settings.applyModelId,
-          )
-            ? settings.applyModelId
-            : fallbackChatModel.id,
-          embeddingModelId: embeddingModels.some(
-            ({ id }) => id === settings.embeddingModelId,
-          )
-            ? settings.embeddingModelId
-            : fallbackEmbeddingModel.id,
-        })
+        let removedEmbeddingModelIds: string[] = []
         await plugin.revokeProviderRouteTrust(provider)
+        await setSettings((currentSettings) => {
+          const currentChatModels = currentSettings.chatModels.filter(
+            (model) => model.providerId !== provider.id,
+          )
+          const currentEnabledChatModels = currentChatModels.filter(
+            (model) => model.enable !== false,
+          )
+          const currentEmbeddingModels = currentSettings.embeddingModels.filter(
+            (model) => model.providerId !== provider.id,
+          )
+          const currentFallbackChatModel = currentEnabledChatModels[0]
+          const currentFallbackEmbeddingModel = currentEmbeddingModels[0]
+          if (!currentFallbackChatModel || !currentFallbackEmbeddingModel) {
+            throw new Error('Cannot delete the last available model provider')
+          }
+          removedEmbeddingModelIds = currentSettings.embeddingModels
+            .filter((model) => model.providerId === provider.id)
+            .map((model) => model.id)
+          return {
+            ...currentSettings,
+            providers: currentSettings.providers.filter(
+              (value) => value.id !== provider.id,
+            ),
+            chatModels: currentChatModels,
+            embeddingModels: currentEmbeddingModels,
+            chatModelId: currentEnabledChatModels.some(
+              ({ id }) => id === currentSettings.chatModelId,
+            )
+              ? currentSettings.chatModelId
+              : currentFallbackChatModel.id,
+            applyModelId: currentEnabledChatModels.some(
+              ({ id }) => id === currentSettings.applyModelId,
+            )
+              ? currentSettings.applyModelId
+              : currentFallbackChatModel.id,
+            embeddingModelId: currentEmbeddingModels.some(
+              ({ id }) => id === currentSettings.embeddingModelId,
+            )
+              ? currentSettings.embeddingModelId
+              : currentFallbackEmbeddingModel.id,
+          }
+        })
+        try {
+          const vectorManager = (await plugin.getDbManager()).getVectorManager()
+          const embeddingStats = await vectorManager.getEmbeddingStats()
+          const modelsWithData = removedEmbeddingModelIds.filter((modelId) =>
+            embeddingStats.some(
+              (stat) => stat.model === modelId && stat.rowCount > 0,
+            ),
+          )
+          await vectorManager.clearAllVectorsForModels(modelsWithData)
+        } catch (error) {
+          new Notice(
+            'Provider was removed, but its cached embeddings could not be cleared',
+          )
+          console.error(
+            'Failed to clear embeddings for removed provider',
+            redactSecrets(error),
+          )
+        }
       },
     }).open()
   }
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Providers</div>
+      <h2 className="smtcmp-settings-header">Providers</h2>
 
       <div className="smtcmp-settings-desc">
         <span>Configure API providers (usage-based billing).</span>
@@ -143,28 +151,36 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
               <tr key={provider.id}>
                 <td>{provider.id}</td>
                 <td>{PROVIDER_TYPES_INFO[provider.type].label}</td>
-                <td
-                  className="smtcmp-settings-table-api-key"
-                  onClick={() => {
-                    new EditProviderModal(app, plugin, provider).open()
-                  }}
-                >
-                  {provider.apiKey ? '••••••••' : 'Set API key'}
+                <td>
+                  <button
+                    type="button"
+                    className="smtcmp-settings-table-api-key"
+                    aria-label={`Edit API key for ${provider.id}`}
+                    onClick={() => {
+                      new EditProviderModal(app, plugin, provider).open()
+                    }}
+                  >
+                    {provider.apiKey ? '••••••••' : 'Set API key'}
+                  </button>
                 </td>
                 <td>
                   <div className="smtcmp-settings-actions">
                     <button
+                      type="button"
                       onClick={() => {
                         new EditProviderModal(app, plugin, provider).open()
                       }}
                       className="clickable-icon"
+                      aria-label={`Edit provider ${provider.id}`}
                     >
                       <Settings />
                     </button>
                     {!DEFAULT_PROVIDERS.some((v) => v.id === provider.id) && (
                       <button
+                        type="button"
                         onClick={() => handleDeleteProvider(provider)}
                         className="clickable-icon"
+                        aria-label={`Delete provider ${provider.id}`}
                       >
                         <Trash2 />
                       </button>
@@ -178,6 +194,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
             <tr>
               <td colSpan={4}>
                 <button
+                  type="button"
                   onClick={() => {
                     new AddProviderModal(app, plugin).open()
                   }}

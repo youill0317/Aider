@@ -7,6 +7,7 @@ import { useMcp } from '../../../contexts/mcp-context'
 import { usePlugin } from '../../../contexts/plugin-context'
 import { useSettings } from '../../../contexts/settings-context'
 import { McpManager } from '../../../core/mcp/mcpManager'
+import { runAsyncAction } from '../../../utils/async-action'
 import { McpSectionModal } from '../../modals/McpSectionModal'
 
 export default function ToolBadge() {
@@ -25,36 +26,58 @@ export default function ToolBadge() {
   const handleToolToggle = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation()
-      setSettings({
-        ...settings,
-        chatOptions: {
-          ...settings.chatOptions,
-          enableTools: !settings.chatOptions.enableTools,
-        },
-      })
+      runAsyncAction(() =>
+        setSettings((currentSettings) => ({
+          ...currentSettings,
+          chatOptions: {
+            ...currentSettings.chatOptions,
+            enableTools: !currentSettings.chatOptions.enableTools,
+          },
+        })),
+      )
     },
-    [settings, setSettings],
+    [setSettings],
   )
 
   useEffect(() => {
-    const initMCPManager = async () => {
-      const mcpManager = await getMcpManager()
-      setMcpManager(mcpManager)
-
-      const tools = await mcpManager.listAvailableTools()
-      setToolCount(tools.length)
+    if (!settings.chatOptions.enableTools) {
+      setMcpManager(null)
+      setToolCount(0)
+      return
     }
-    initMCPManager()
-  }, [getMcpManager])
+
+    let cancelled = false
+    setToolCount(null)
+    void getMcpManager()
+      .then(async (manager) => {
+        const tools = await manager.listAvailableTools()
+        if (cancelled) return
+        setMcpManager(manager)
+        setToolCount(tools.length)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setMcpManager(null)
+        setToolCount(0)
+        console.error('Failed to initialize MCP tools')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [getMcpManager, settings.chatOptions.enableTools])
 
   useEffect(() => {
     if (mcpManager) {
-      const unsubscribe = mcpManager.subscribeServersChange(
-        async (_servers) => {
-          const tools = await mcpManager.listAvailableTools()
-          setToolCount(tools.length)
-        },
-      )
+      const unsubscribe = mcpManager.subscribeServersChange((_servers) => {
+        void mcpManager
+          .listAvailableTools()
+          .then((tools) => setToolCount(tools.length))
+          .catch(() => {
+            setToolCount(0)
+            console.error('Failed to refresh MCP tools')
+          })
+      })
       return () => {
         unsubscribe()
       }

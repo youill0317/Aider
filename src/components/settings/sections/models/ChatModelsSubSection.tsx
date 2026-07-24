@@ -40,9 +40,19 @@ export function ChatModelsSubSection({
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        await setSettings({
-          ...settings,
-          chatModels: [...settings.chatModels].filter((v) => v.id !== modelId),
+        await setSettings((currentSettings) => {
+          if (
+            modelId === currentSettings.chatModelId ||
+            modelId === currentSettings.applyModelId
+          ) {
+            throw new Error('Cannot remove a model that is currently selected')
+          }
+          return {
+            ...currentSettings,
+            chatModels: currentSettings.chatModels.filter(
+              (v) => v.id !== modelId,
+            ),
+          }
         })
       },
     }).open()
@@ -61,26 +71,26 @@ export function ChatModelsSubSection({
       )
 
       // to trigger re-render
-      await setSettings({
-        ...settings,
-        chatModels: [...settings.chatModels].map((v) =>
+      await setSettings((currentSettings) => ({
+        ...currentSettings,
+        chatModels: currentSettings.chatModels.map((v) =>
           v.id === modelId ? { ...v, enable: true } : v,
         ),
-      })
+      }))
       return
     }
 
-    await setSettings({
-      ...settings,
-      chatModels: [...settings.chatModels].map((v) =>
+    await setSettings((currentSettings) => ({
+      ...currentSettings,
+      chatModels: currentSettings.chatModels.map((v) =>
         v.id === modelId ? { ...v, enable: value } : v,
       ),
-    })
+    }))
   }
 
   return (
     <div>
-      <div className="smtcmp-settings-sub-header">Chat Models</div>
+      <h3 className="smtcmp-settings-sub-header">Chat Models</h3>
       <div className="smtcmp-settings-desc">Models used for chat and apply</div>
 
       <div className="smtcmp-settings-table-container">
@@ -109,6 +119,7 @@ export function ChatModelsSubSection({
                 <td>{chatModel.model}</td>
                 <td>
                   <ObsidianToggle
+                    ariaLabel={`Enable chat model ${chatModel.id}`}
                     value={isEnabled(chatModel.enable)}
                     onChange={(value) =>
                       handleToggleEnableChatModel(chatModel.id, value)
@@ -119,6 +130,7 @@ export function ChatModelsSubSection({
                   <div className="smtcmp-settings-actions">
                     {hasChatModelSettings(chatModel) && (
                       <button
+                        type="button"
                         onClick={() => {
                           new ChatModelSettingsModal(
                             chatModel,
@@ -127,6 +139,7 @@ export function ChatModelsSubSection({
                           ).open()
                         }}
                         className="clickable-icon"
+                        aria-label={`Configure chat model ${chatModel.id}`}
                       >
                         <Settings />
                       </button>
@@ -135,8 +148,10 @@ export function ChatModelsSubSection({
                       (v) => v.id === chatModel.id,
                     ) && (
                       <button
+                        type="button"
                         onClick={() => handleDeleteChatModel(chatModel.id)}
                         className="clickable-icon"
+                        aria-label={`Delete chat model ${chatModel.id}`}
                       >
                         <Trash2 />
                       </button>
@@ -150,6 +165,7 @@ export function ChatModelsSubSection({
             <tr>
               <td colSpan={5}>
                 <button
+                  type="button"
                   onClick={() => {
                     new AddChatModelModal(app, plugin).open()
                   }}

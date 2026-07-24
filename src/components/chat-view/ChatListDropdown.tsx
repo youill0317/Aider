@@ -1,5 +1,6 @@
 import * as Popover from '@radix-ui/react-popover'
 import { Pencil, Trash2 } from 'lucide-react'
+import { Notice } from 'obsidian'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ChatConversationMetadata } from '../../database/json/chat/types'
@@ -12,7 +13,21 @@ function TitleInput({
   onSubmit: (title: string) => Promise<void>
 }) {
   const [value, setValue] = useState(title)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const submit = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await onSubmit(value.trim() || title)
+    } catch (error) {
+      new Notice('Failed to rename conversation')
+      console.error('Failed to rename conversation', error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     if (inputRef.current) {
@@ -27,6 +42,7 @@ function TitleInput({
       type="text"
       aria-label="Conversation title"
       value={value}
+      disabled={isSubmitting}
       className="smtcmp-chat-list-dropdown-item-title-input"
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setValue(e.target.value)}
@@ -34,7 +50,7 @@ function TitleInput({
         e.stopPropagation()
         if (e.nativeEvent.isComposing) return
         if (e.key === 'Enter') {
-          void onSubmit(value.trim() || title)
+          void submit()
         }
       }}
       autoFocus
@@ -112,6 +128,7 @@ function ChatListItem({
 
 export function ChatListDropdown({
   chatList,
+  status,
   currentConversationId,
   onSelect,
   onDelete,
@@ -119,6 +136,7 @@ export function ChatListDropdown({
   children,
 }: {
   chatList: ChatConversationMetadata[]
+  status: 'loading' | 'ready' | 'error'
   currentConversationId: string
   onSelect: (conversationId: string) => Promise<void>
   onDelete: (conversationId: string) => Promise<void>
@@ -197,9 +215,13 @@ export function ChatListDropdown({
           }}
         >
           <ul aria-label="Chat history">
-            {chatList.length === 0 ? (
+            {status !== 'ready' || chatList.length === 0 ? (
               <li className="smtcmp-chat-list-dropdown-empty">
-                No conversations
+                {status === 'loading'
+                  ? 'Loading conversations…'
+                  : status === 'error'
+                    ? 'Unable to load conversations'
+                    : 'No conversations'}
               </li>
             ) : (
               chatList.map((chat, index) => (

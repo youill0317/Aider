@@ -24,7 +24,11 @@ export default function LLMResponseInfoPopover({
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <button className="clickable-icon">
+        <button
+          type="button"
+          className="clickable-icon"
+          aria-label="View response details"
+        >
           <Info size={12} />
         </button>
       </Popover.Trigger>

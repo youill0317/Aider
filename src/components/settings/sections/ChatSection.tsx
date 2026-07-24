@@ -14,7 +14,7 @@ export function ChatSection() {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">Chat</div>
+      <h2 className="smtcmp-settings-header">Chat</h2>
 
       <ObsidianSetting
         name="Chat model"
@@ -31,10 +31,10 @@ export function ChatSection() {
               ]),
           )}
           onChange={async (value) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               chatModelId: value,
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -54,10 +54,10 @@ export function ChatSection() {
               ]),
           )}
           onChange={async (value) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               applyModelId: value,
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -72,10 +72,10 @@ export function ChatSection() {
         <ObsidianTextArea
           value={settings.systemPrompt}
           onChange={async (value: string) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               systemPrompt: value,
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -87,13 +87,13 @@ export function ChatSection() {
         <ObsidianToggle
           value={settings.chatOptions.includeCurrentFileContent}
           onChange={async (value) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               chatOptions: {
-                ...settings.chatOptions,
+                ...currentSettings.chatOptions,
                 includeCurrentFileContent: value,
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -105,13 +105,13 @@ export function ChatSection() {
         <ObsidianToggle
           value={settings.chatOptions.enableTools}
           onChange={async (value) => {
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               chatOptions: {
-                ...settings.chatOptions,
+                ...currentSettings.chatOptions,
                 enableTools: value,
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>
@@ -123,17 +123,21 @@ export function ChatSection() {
         <ObsidianTextInput
           value={settings.chatOptions.maxAutoIterations.toString()}
           onChange={async (value) => {
-            const parsedValue = parseInt(value)
-            if (isNaN(parsedValue) || parsedValue < 1) {
+            const parsedValue = Number(value)
+            if (
+              !Number.isInteger(parsedValue) ||
+              parsedValue < 1 ||
+              parsedValue > 20
+            ) {
               return
             }
-            await setSettings({
-              ...settings,
+            await setSettings((currentSettings) => ({
+              ...currentSettings,
               chatOptions: {
-                ...settings.chatOptions,
+                ...currentSettings.chatOptions,
                 maxAutoIterations: parsedValue,
               },
-            })
+            }))
           }}
         />
       </ObsidianSetting>

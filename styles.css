@@ -149,6 +149,12 @@
     flex-direction: column;
   }
 
+  .smtcmp-streaming-response {
+    margin: 0;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
   .smtcmp-assistant-tool-message-group {
     padding-bottom: var(--size-4-2);
     display: flex;
@@ -793,12 +799,18 @@ input[type='text'].smtcmp-chat-list-dropdown-item-title-input {
   }
 }
 
-.smtcmp-code-block-content {
-  margin: 0;
-}
-
 .smtcmp-code-block-obsidian-markdown {
   padding: var(--size-4-3);
+}
+
+.smtcmp-code-block-plain {
+  margin: 0;
+  padding: var(--size-4-2);
+  overflow: auto;
+  border-radius: 0 0 var(--radius-s) var(--radius-s);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  white-space: pre;
 }
 
 #smtcmp-apply-view {
@@ -904,6 +916,20 @@ input[type='text'].smtcmp-chat-list-dropdown-item-title-input {
     gap: var(--size-4-1);
     color: var(--text-normal);
     line-height: var(--line-height-normal);
+  }
+
+  .smtcmp-diff-block-label {
+    flex: 0 0 auto;
+    min-width: 5.5rem;
+    padding: 0 var(--size-4-1);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-medium);
+  }
+
+  .smtcmp-diff-block-content {
+    min-width: 0;
+    width: 100%;
   }
 
   .smtcmp-diff-block.added {
@@ -1090,10 +1116,6 @@ button.smtcmp-chat-input-model-select {
   border-top: none;
   padding: 0;
 
-  .smtcmp-item-control {
-    width: 100%;
-  }
-
   .setting-item-control {
     padding-bottom: var(--size-4-3);
   }
@@ -1111,135 +1133,18 @@ button.smtcmp-chat-input-model-select {
   border-top: 1px solid var(--background-modifier-border) !important;
 }
 
-.smtcmp-settings-model-container {
-  margin: var(--size-4-2) 0;
-  padding: var(--size-4-2) var(--size-4-4);
-  border-left: 2px solid var(--interactive-accent);
-  background-color: var(--background-secondary);
-  border-radius: var(--radius-s);
-
-  .setting-item {
-    border-top: none;
-
-    &:first-child {
-      margin-top: var(--size-4-2);
-    }
-  }
-}
-
-.smtcmp-dialog-content {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  z-index: 50;
-  display: grid;
-  width: calc(100% - var(--size-4-8));
-  max-width: 32rem;
-  transform: translate(-50%, -50%);
-  gap: var(--size-4-2);
-  border: var(--border-width) solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  padding: var(--size-4-5);
-  transition-duration: 200ms;
-  border-radius: var(--radius-m);
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
-  margin: 0;
-
-  .smtcmp-dialog-header {
-    margin-bottom: var(--size-4-2);
-    display: grid;
-    gap: var(--size-2-3);
-  }
-
-  .smtcmp-dialog-title {
-    font-size: var(--font-ui-medium);
-    font-weight: var(--font-semibold);
-    line-height: var(--line-height-tight);
-    margin: 0;
-  }
-
-  .smtcmp-dialog-input {
-    display: grid;
-    gap: var(--size-4-1);
-
-    & label {
-      font-size: var(--font-ui-smaller);
-    }
-  }
-
-  .smtcmp-dialog-description {
-    font-size: var(--font-ui-small);
-    color: var(--text-muted);
-    margin: 0;
-  }
-
-  .smtcmp-dialog-footer {
-    margin-top: var(--size-4-2);
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .smtcmp-dialog-close {
-    position: absolute;
-    right: var(--size-4-4);
-    top: var(--size-4-4);
-    cursor: var(--cursor);
-    opacity: 0.7;
-    transition: opacity 0.2s;
-
-    &:hover {
-      opacity: 1;
-    }
-  }
-}
-
 .smtcmp-template-menu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--size-4-1);
   width: 100%;
-
-  .smtcmp-template-menu-item-delete {
-    display: flex;
-    align-items: center;
-    padding: var(--size-4-1);
-    margin: calc(var(--size-4-1) * -1);
-    opacity: 0.7;
-    transition: opacity 0.2s;
-
-    &:hover {
-      opacity: 1;
-    }
-  }
 }
 
 .smtcmp-assistant-message-actions {
   display: flex;
   align-items: center;
   justify-content: end;
-
-  /* button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 20px;
-    width: 20px;
-    padding: 0;
-    background-color: transparent;
-    border-color: transparent;
-    box-shadow: none;
-    color: var(--text-faint);
-    cursor: pointer;
-
-    &:hover {
-      background-color: var(--background-modifier-hover);
-    }
-  }
-
-  .smtcmp-assistant-message-actions-icon--copied {
-    color: var(--text-muted);
-  } */
 }
 
 .smtcmp-popover-content {
@@ -1693,18 +1598,20 @@ button.smtcmp-chat-input-model-select {
   }
 }
 
-.smtcmp-settings-table-api-key {
+button.smtcmp-settings-table-api-key {
   cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
+  font: inherit;
   font-size: var(--font-ui-small);
 }
 
-.smtcmp-settings-table-api-key:hover {
+button.smtcmp-settings-table-api-key:hover,
+button.smtcmp-settings-table-api-key:focus-visible {
   text-decoration: underline;
-}
-
-.smtcmp-error-modal {
-  min-width: 60vw;
 }
 
 .smtcmp-error-modal-content {
@@ -1727,10 +1634,6 @@ button.smtcmp-chat-input-model-select {
   user-select: text;
   cursor: text;
   font-size: var(--font-ui-small);
-}
-
-.smtcmp-error-modal-buttons {
-  margin-top: 1rem;
 }
 
 .smtcmp-assistant-message-metadata {

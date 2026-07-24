@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { CheckIcon, ChevronDown, ChevronUp, Loader2, X } from 'lucide-react'
 import { Notice } from 'obsidian'
 import {
   forwardRef,
@@ -11,7 +11,12 @@ import {
 
 import { ApplyViewState } from '../../ApplyView'
 import { useApp } from '../../contexts/app-context'
-import { DiffBlock, createDiffBlocks } from '../../utils/chat/diff'
+import {
+  DiffBlock,
+  combineDiffValues,
+  createDiffBlocks,
+} from '../../utils/chat/diff'
+import { redactSecrets } from '../../utils/security/redact-secrets'
 
 import { applyFileChangeIfCurrent } from './apply-file-change'
 
@@ -23,8 +28,11 @@ export default function ApplyViewRoot({
   close: () => void
 }) {
   const [currentDiffIndex, setCurrentDiffIndex] = useState(0)
+  const [isApplying, setIsApplying] = useState(false)
   const diffBlockRefs = useRef<(HTMLDivElement | null)[]>([])
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const scrollFrameRef = useRef<number | null>(null)
+  const isApplyingRef = useRef(false)
 
   const app = useApp()
 
@@ -64,6 +72,9 @@ export default function ApplyViewRoot({
   }, [currentDiffIndex, scrollToDiffBlock])
 
   const handleAccept = async () => {
+    if (isApplyingRef.current) return
+    isApplyingRef.current = true
+
     const newContent = diff
       .map((diffBlock) => {
         if (diffBlock.type === 'modified') {
@@ -72,13 +83,28 @@ export default function ApplyViewRoot({
           return diffBlock.value
         }
       })
-      .join('\n')
-    const applied = await applyFileChangeIfCurrent(
-      app.vault,
-      state.file,
-      state.originalContent,
-      newContent,
-    )
+      .join('')
+    let applied: boolean
+    setIsApplying(true)
+    try {
+      applied = await applyFileChangeIfCurrent(
+        app.vault,
+        state.file,
+        state.originalContent,
+        newContent,
+      )
+    } catch (error) {
+      const message = redactSecrets(
+        error instanceof Error ? error.message : String(error),
+      )
+      new Notice(`Failed to apply changes: ${message}`)
+      console.error('Failed to apply reviewed changes', redactSecrets(error))
+      return
+    } finally {
+      isApplyingRef.current = false
+      setIsApplying(false)
+    }
+
     if (!applied) {
       new Notice(
         'The note changed during review. Generate the suggestion again to avoid overwriting newer edits.',
@@ -161,9 +187,10 @@ export default function ApplyViewRoot({
 
       const newPart: DiffBlock = {
         type: 'unchanged',
-        value: [currentPart.originalValue, currentPart.modifiedValue]
-          .filter(Boolean)
-          .join('\n'),
+        value: combineDiffValues(
+          currentPart.originalValue,
+          currentPart.modifiedValue,
+        ),
       }
 
       return [
@@ -209,11 +236,21 @@ export default function ApplyViewRoot({
     if (!scroller) return
 
     const handleScroll = () => {
-      updateCurrentDiffFromScroll()
+      if (scrollFrameRef.current !== null) return
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        scrollFrameRef.current = null
+        updateCurrentDiffFromScroll()
+      })
     }
 
     scroller.addEventListener('scroll', handleScroll)
-    return () => scroller.removeEventListener('scroll', handleScroll)
+    return () => {
+      scroller.removeEventListener('scroll', handleScroll)
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+    }
   }, [updateCurrentDiffFromScroll])
 
   useEffect(() => {
@@ -224,7 +261,7 @@ export default function ApplyViewRoot({
   }, [])
 
   return (
-    <div id="smtcmp-apply-view">
+    <div id="smtcmp-apply-view" aria-busy={isApplying}>
       <div className="view-header">
         <div className="view-header-title-container mod-at-start">
           <div className="view-header-title" role="heading" aria-level={1}>
@@ -244,7 +281,7 @@ export default function ApplyViewRoot({
                 type="button"
                 className="clickable-icon"
                 onClick={handlePrevDiff}
-                disabled={currentDiffIndex <= 0}
+                disabled={isApplying || currentDiffIndex <= 0}
                 aria-label="Previous change"
               >
                 <ChevronUp size={14} />
@@ -258,7 +295,10 @@ export default function ApplyViewRoot({
                 type="button"
                 className="clickable-icon"
                 onClick={handleNextDiff}
-                disabled={currentDiffIndex >= modifiedBlockIndices.length - 1}
+                disabled={
+                  isApplying ||
+                  currentDiffIndex >= modifiedBlockIndices.length - 1
+                }
                 aria-label="Next change"
               >
                 <ChevronDown size={14} />
@@ -269,15 +309,21 @@ export default function ApplyViewRoot({
               className="clickable-icon view-action"
               aria-label="Apply changes"
               onClick={handleAccept}
+              disabled={isApplying}
             >
-              <CheckIcon size={14} />
-              Apply changes
+              {isApplying ? (
+                <Loader2 className="spinner" size={14} />
+              ) : (
+                <CheckIcon size={14} />
+              )}
+              {isApplying ? 'Applying...' : 'Apply changes'}
             </button>
             <button
               type="button"
               className="clickable-icon view-action"
               aria-label="Cancel review"
               onClick={handleReject}
+              disabled={isApplying}
             >
               <X size={14} />
               Cancel
@@ -300,6 +346,7 @@ export default function ApplyViewRoot({
                     onAcceptIncoming={() => acceptIncomingBlock(index)}
                     onAcceptCurrent={() => acceptCurrentBlock(index)}
                     onAcceptBoth={() => acceptBothBlocks(index)}
+                    disabled={isApplying}
                     ref={(el) => {
                       diffBlockRefs.current[index] = el
                     }}
@@ -321,53 +368,73 @@ const DiffBlockView = forwardRef<
     onAcceptIncoming: () => void
     onAcceptCurrent: () => void
     onAcceptBoth: () => void
+    disabled: boolean
   }
->(({ block: part, onAcceptIncoming, onAcceptCurrent, onAcceptBoth }, ref) => {
-  if (part.type === 'unchanged') {
-    return (
-      <div className="smtcmp-diff-block">
-        <div style={{ width: '100%' }}>{part.value}</div>
-      </div>
-    )
-  } else if (part.type === 'modified') {
-    return (
-      <div className="smtcmp-diff-block-container" ref={ref}>
-        {part.originalValue && part.originalValue.length > 0 && (
-          <div className="smtcmp-diff-block removed">
-            <div style={{ width: '100%' }}>{part.originalValue}</div>
-          </div>
-        )}
-        {part.modifiedValue && part.modifiedValue.length > 0 && (
-          <div className="smtcmp-diff-block added">
-            <div style={{ width: '100%' }}>{part.modifiedValue}</div>
-          </div>
-        )}
-        <div
-          className="smtcmp-diff-block-actions"
-          role="group"
-          aria-label="Choose this change"
-        >
-          <button
-            type="button"
-            onClick={onAcceptIncoming}
-            className="smtcmp-accept"
-          >
-            Use suggestion
-          </button>
-          <button
-            type="button"
-            onClick={onAcceptCurrent}
-            className="smtcmp-exclude"
-          >
-            Keep original
-          </button>
-          <button type="button" onClick={onAcceptBoth}>
-            Keep both
-          </button>
+>(
+  (
+    { block: part, onAcceptIncoming, onAcceptCurrent, onAcceptBoth, disabled },
+    ref,
+  ) => {
+    if (part.type === 'unchanged') {
+      return (
+        <div className="smtcmp-diff-block">
+          <div style={{ width: '100%' }}>{part.value}</div>
         </div>
-      </div>
-    )
-  }
-})
+      )
+    } else if (part.type === 'modified') {
+      return (
+        <div className="smtcmp-diff-block-container" ref={ref}>
+          {part.originalValue && part.originalValue.length > 0 && (
+            <div
+              className="smtcmp-diff-block removed"
+              aria-label="Original content"
+            >
+              <div className="smtcmp-diff-block-label">Original</div>
+              <div className="smtcmp-diff-block-content">
+                {part.originalValue}
+              </div>
+            </div>
+          )}
+          {part.modifiedValue && part.modifiedValue.length > 0 && (
+            <div
+              className="smtcmp-diff-block added"
+              aria-label="Suggested content"
+            >
+              <div className="smtcmp-diff-block-label">Suggestion</div>
+              <div className="smtcmp-diff-block-content">
+                {part.modifiedValue}
+              </div>
+            </div>
+          )}
+          <div
+            className="smtcmp-diff-block-actions"
+            role="group"
+            aria-label="Choose this change"
+          >
+            <button
+              type="button"
+              onClick={onAcceptIncoming}
+              className="smtcmp-accept"
+              disabled={disabled}
+            >
+              Use suggestion
+            </button>
+            <button
+              type="button"
+              onClick={onAcceptCurrent}
+              className="smtcmp-exclude"
+              disabled={disabled}
+            >
+              Keep original
+            </button>
+            <button type="button" onClick={onAcceptBoth} disabled={disabled}>
+              Keep both
+            </button>
+          </div>
+        </div>
+      )
+    }
+  },
+)
 
 DiffBlockView.displayName = 'DiffBlockView'

@@ -88,9 +88,9 @@ function ConnectGeminiPlanModalComponent({
     ) {
       throw new Error('Gemini Plan provider not found.')
     }
-    await plugin.setSettings({
-      ...plugin.settings,
-      providers: plugin.settings.providers.map((p) => {
+    await plugin.setSettings((currentSettings) => ({
+      ...currentSettings,
+      providers: currentSettings.providers.map((p) => {
         if (p.type === 'gemini-plan' && p.id === GEMINI_PLAN_PROVIDER_ID) {
           return {
             ...p,
@@ -104,7 +104,7 @@ function ConnectGeminiPlanModalComponent({
         }
         return p
       }),
-    })
+    }))
   }
 
   const ensureAuthContext = async () => {
@@ -239,7 +239,7 @@ function ConnectGeminiPlanModalComponent({
         <ObsidianButton
           text="Login to Google"
           disabled={isBusy}
-          onClick={() => void openLogin()}
+          onClick={openLogin}
           cta
         />
         {isWaitingForCallback && (
@@ -283,7 +283,7 @@ function ConnectGeminiPlanModalComponent({
             <ObsidianButton
               text="Connect with URL"
               disabled={!redirectCode || isBusy}
-              onClick={() => void connectWithRedirectUrl()}
+              onClick={connectWithRedirectUrl}
             />
             {manualError && (
               <div className="smtcmp-plan-connect-error">{manualError}</div>

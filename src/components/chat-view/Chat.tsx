@@ -146,6 +146,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     getChatMessagesById,
     updateConversationTitle,
     chatList,
+    chatListStatus,
   } = useChatHistory()
   const promptGenerator = useMemo(() => {
     return new PromptGenerator(getRAGEngine, app, settings)
@@ -179,6 +180,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     type: 'idle',
   })
   const [activeAgentToolCallCount, setActiveAgentToolCallCount] = useState(0)
+  const [isPreparingMessage, setIsPreparingMessage] = useState(false)
 
   const chatMessageRows = useMemo(
     () => buildChatMessageRows(chatMessages),
@@ -192,6 +194,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const activeApprovedToolCallsRef = useRef<ActiveApprovedToolCall[]>([])
   const activeApprovedToolTasksRef = useRef(new Set<Promise<void>>())
   const activePromptCompilationRef = useRef<AbortController | null>(null)
+  const activeApplyControllerRef = useRef<AbortController | null>(null)
+  const activeApplyTaskRef = useRef<Promise<void> | null>(null)
+  const loadingConversationIdRef = useRef<string | null>(null)
   const latestChatMessagesRef = useRef(chatMessages)
   const currentConversationIdRef = useRef(currentConversationId)
   const workGenerationRef = useRef(0)
@@ -318,22 +323,42 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     ])
   }, [getToolDispatcher])
 
+  const flushPendingSave = useCallback(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const messages = latestChatMessagesRef.current
+    if (messages.length > 0) {
+      createOrUpdateConversation(currentConversationIdRef.current, messages)
+    }
+    await flushPendingChatSave()
+  }, [createOrUpdateConversation, flushPendingChatSave])
+
   const invalidateActiveWork = useCallback(() => {
     const generation = ++workGenerationRef.current
     readyWorkGenerationRef.current = -1
     activePromptCompilationRef.current?.abort()
     activePromptCompilationRef.current = null
+    activeApplyControllerRef.current?.abort()
+    const activeApplyTask = activeApplyTaskRef.current
     const settled = Promise.all([
       abortActiveStreams(),
       abortActiveAgentToolCalls(latestChatMessagesRef.current),
       abortActiveApprovedToolCalls(),
-    ]).then(
-      () => undefined,
-      (error) => {
-        console.error('Failed to settle active chat work', redactSecrets(error))
-      },
-    )
-    readyWorkGenerationRef.current = generation
+      activeApplyTask?.catch(() => undefined),
+    ])
+      .then(
+        () => undefined,
+        (error) => {
+          console.error(
+            'Failed to settle active chat work',
+            redactSecrets(error),
+          )
+        },
+      )
+      .then(() => {
+        if (generation === workGenerationRef.current) {
+          readyWorkGenerationRef.current = generation
+        }
+      })
     return { generation, settled }
   }, [
     abortActiveStreams,
@@ -342,10 +367,13 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   ])
 
   const abortActiveWork = useCallback(async () => {
-    const { settled } = invalidateActiveWork()
+    const { generation, settled } = invalidateActiveWork()
     await settled
+    if (generation !== workGenerationRef.current) return
     setQueryProgress({ type: 'idle' })
-  }, [invalidateActiveWork])
+    setIsPreparingMessage(false)
+    await flushPendingSave()
+  }, [flushPendingSave, invalidateActiveWork])
 
   const isCurrentWork = useCallback(
     (generation: number, conversationId: string) =>
@@ -428,15 +456,6 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     [getToolDispatcher, isCurrentWork],
   )
 
-  const flushPendingSave = useCallback(async () => {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    const messages = latestChatMessagesRef.current
-    if (messages.length > 0) {
-      createOrUpdateConversation(currentConversationIdRef.current, messages)
-    }
-    await flushPendingChatSave()
-  }, [createOrUpdateConversation, flushPendingChatSave])
-
   const registerChatUserInputRef = (
     id: string,
     ref: ChatUserInputRef | null,
@@ -449,8 +468,19 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }
 
   const handleLoadConversation = async (conversationId: string) => {
+    if (
+      conversationId === loadingConversationIdRef.current ||
+      (conversationId === currentConversationIdRef.current &&
+        loadingConversationIdRef.current === null)
+    ) {
+      return
+    }
+    loadingConversationIdRef.current = conversationId
     try {
-      const { generation } = invalidateActiveWork()
+      const { generation, settled } = invalidateActiveWork()
+      await settled
+      if (generation !== workGenerationRef.current) return
+      await flushPendingSave()
       if (generation !== workGenerationRef.current) return
       const conversation = await getChatMessagesById(conversationId)
       if (generation !== workGenerationRef.current) return
@@ -468,36 +498,51 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     } catch (error) {
       new Notice('Failed to load conversation')
       console.error('Failed to load conversation', error)
+    } finally {
+      if (loadingConversationIdRef.current === conversationId) {
+        loadingConversationIdRef.current = null
+      }
     }
   }
 
   const handleNewChat = useCallback(
     (selectedBlock?: MentionableBlockData) => {
-      const { generation } = invalidateActiveWork()
-      if (generation !== workGenerationRef.current) return
-      setCurrentConversationId(uuidv4())
-      setChatMessages([])
-      const newInputMessage = getNewInputMessage(app)
-      if (selectedBlock) {
-        const mentionableBlock: MentionableBlock = {
-          type: 'block',
-          ...selectedBlock,
+      void (async () => {
+        const { generation, settled } = invalidateActiveWork()
+        await settled
+        if (generation !== workGenerationRef.current) return
+        await flushPendingSave()
+        if (generation !== workGenerationRef.current) return
+        setCurrentConversationId(uuidv4())
+        setChatMessages([])
+        const newInputMessage = getNewInputMessage(app)
+        if (selectedBlock) {
+          const mentionableBlock: MentionableBlock = {
+            type: 'block',
+            ...selectedBlock,
+          }
+          newInputMessage.mentionables = [
+            ...newInputMessage.mentionables,
+            mentionableBlock,
+          ]
+          setAddedBlockKey(
+            getMentionableKey(serializeMentionable(mentionableBlock)),
+          )
         }
-        newInputMessage.mentionables = [
-          ...newInputMessage.mentionables,
-          mentionableBlock,
-        ]
-        setAddedBlockKey(
-          getMentionableKey(serializeMentionable(mentionableBlock)),
+        setInputMessage(newInputMessage)
+        setFocusedMessageId(newInputMessage.id)
+        setQueryProgress({
+          type: 'idle',
+        })
+      })().catch((error) => {
+        new Notice('Failed to start a new conversation')
+        console.error(
+          'Failed to start a new conversation',
+          redactSecrets(error),
         )
-      }
-      setInputMessage(newInputMessage)
-      setFocusedMessageId(newInputMessage.id)
-      setQueryProgress({
-        type: 'idle',
       })
     },
-    [invalidateActiveWork, app],
+    [app, flushPendingSave, invalidateActiveWork],
   )
 
   const handleUserMessageSubmit = useCallback(
@@ -508,155 +553,180 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       inputChatMessages: ChatMessage[]
       mode?: ChatSubmitMode
     }) => {
-      const { generation } = invalidateActiveWork()
-      if (generation !== workGenerationRef.current) return
-      const conversationId = currentConversationIdRef.current
-      const submittedMessages = markRunningToolCallsAborted(inputChatMessages)
-      setQueryProgress({
-        type: 'idle',
-      })
-
-      // Update the chat history to show the new user message
-      setChatMessages(submittedMessages)
-      requestAnimationFrame(() => {
-        forceScrollToBottom()
-      })
-
-      const lastMessage = submittedMessages.at(-1)
-      if (lastMessage?.role !== 'user') {
-        throw new Error('Last message is not a user message')
-      }
-      const activeFile = app.workspace.getActiveFile()
-      const messagesWithCurrentFile =
-        mode === 'agent'
-          ? submittedMessages.map((message) =>
-              message.id === lastMessage.id && message.role === 'user'
-                ? withCurrentFileMentionable(message, activeFile)
-                : message,
-            )
-          : submittedMessages
-
-      const messageToCompile = messagesWithCurrentFile.at(-1)
-      if (messageToCompile?.role !== 'user') {
-        throw new Error('Last message is not a user message')
-      }
-      const abortController = new AbortController()
-      activePromptCompilationRef.current = abortController
-      let compiledMessages: ChatMessage[]
+      const { generation, settled } = invalidateActiveWork()
+      setIsPreparingMessage(true)
       try {
-        const { promptContent, similaritySearchResults } =
-          await promptGenerator.compileUserMessagePrompt({
-            message: messageToCompile,
-            useVaultSearch: mode === 'vault',
-            signal: abortController.signal,
-            onQueryProgressChange: (progress) => {
-              if (isCurrentWork(generation, conversationId)) {
-                setQueryProgress(progress)
-              }
-            },
-          })
-        compiledMessages = [
-          ...messagesWithCurrentFile.slice(0, -1),
-          {
-            ...messageToCompile,
-            promptContent,
-            similaritySearchResults,
-          },
-        ]
-      } catch (error) {
-        if (abortController.signal.aborted) return
-        throw error
-      } finally {
-        if (activePromptCompilationRef.current === abortController) {
-          activePromptCompilationRef.current = null
-        }
-        if (isCurrentWork(generation, conversationId)) {
-          setQueryProgress({ type: 'idle' })
-        }
-      }
+        await settled
+        if (generation !== workGenerationRef.current) return false
+        const conversationId = currentConversationIdRef.current
+        const submittedMessages = markRunningToolCallsAborted(inputChatMessages)
+        setQueryProgress({
+          type: 'idle',
+        })
 
-      if (!isCurrentWork(generation, conversationId)) return
-      setChatMessages(compiledMessages)
-      if (mode === 'agent') {
-        const toolDispatcher = await getToolDispatcher()
-        if (!isCurrentWork(generation, conversationId)) return
-        const compiledLastMessage = compiledMessages.at(-1)
-        if (compiledLastMessage?.role !== 'user') {
-          throw new Error('Last compiled message is not a user message')
+        const lastMessage = submittedMessages.at(-1)
+        if (lastMessage?.role !== 'user') {
+          throw new Error('Last message is not a user message')
         }
-        const agentPrompt =
-          typeof compiledLastMessage.promptContent === 'string'
-            ? compiledLastMessage.promptContent
-            : compiledLastMessage.content
-              ? editorStateToPlainText(compiledLastMessage.content)
-              : ''
-        const toolCallId = uuidv4()
+        const activeFile = app.workspace.getActiveFile()
+        const messagesWithCurrentFile =
+          mode === 'agent'
+            ? submittedMessages.map((message) =>
+                message.id === lastMessage.id && message.role === 'user'
+                  ? withCurrentFileMentionable(message, activeFile)
+                  : message,
+              )
+            : submittedMessages
+
+        const messageToCompile = messagesWithCurrentFile.at(-1)
+        if (messageToCompile?.role !== 'user') {
+          throw new Error('Last message is not a user message')
+        }
         const abortController = new AbortController()
-        registerActiveAgentToolCall(toolCallId, abortController)
-        const agentTask = (async () => {
-          try {
-            const response = await toolDispatcher.callTool({
-              name: CODEX_TOOL_NAME,
-              args: buildAgentChatRequestArgs(
-                buildAgentPrompt({
-                  messages: compiledMessages,
-                  prompt: agentPrompt,
-                  userMessage: compiledLastMessage,
-                }),
-              ),
-              id: toolCallId,
-              onEvent: (event) => {
-                if (!isCurrentWork(generation, conversationId)) return
-                const commandMessage = buildAgentCommandMessageFromEvent(event)
-                if (!commandMessage) {
-                  return
-                }
-                setChatMessages((prevMessages) =>
-                  upsertAgentCommandMessage(prevMessages, commandMessage),
-                )
-              },
-              signal: abortController.signal,
-            })
-            if (!isCurrentWork(generation, conversationId)) return
-            const content =
-              response.status === ToolCallResponseStatus.Success
-                ? response.data.text
-                : response.status === ToolCallResponseStatus.Aborted
-                  ? 'Agent Chat was stopped.'
-                  : response.status === ToolCallResponseStatus.Error
-                    ? response.error
-                    : `Agent Chat ended with status: ${response.status}`
-            setChatMessages((prevMessages) => [
-              ...prevMessages,
-              buildAgentAssistantMessage(content),
-            ])
-          } catch (error) {
-            if (!isCurrentWork(generation, conversationId)) return
-            setChatMessages((prevMessages) => [
-              ...prevMessages,
-              buildAgentAssistantMessage(
-                redactSecrets(
-                  error instanceof Error ? error.message : String(error),
-                ),
-              ),
-            ])
-          } finally {
-            unregisterActiveAgentToolCall(toolCallId)
-          }
-        })()
-        activeAgentTasksRef.current.add(agentTask)
+        activePromptCompilationRef.current = abortController
+        let compiledMessages: ChatMessage[]
         try {
-          await agentTask
+          const { promptContent, similaritySearchResults } =
+            await promptGenerator.compileUserMessagePrompt({
+              message: messageToCompile,
+              useVaultSearch: mode === 'vault',
+              signal: abortController.signal,
+              onQueryProgressChange: (progress) => {
+                if (isCurrentWork(generation, conversationId)) {
+                  setQueryProgress(progress)
+                }
+              },
+            })
+          compiledMessages = [
+            ...messagesWithCurrentFile.slice(0, -1),
+            {
+              ...messageToCompile,
+              promptContent,
+              similaritySearchResults,
+            },
+          ]
+        } catch (error) {
+          if (abortController.signal.aborted) return false
+          throw error
         } finally {
-          activeAgentTasksRef.current.delete(agentTask)
+          if (activePromptCompilationRef.current === abortController) {
+            activePromptCompilationRef.current = null
+          }
+          if (isCurrentWork(generation, conversationId)) {
+            setQueryProgress({ type: 'idle' })
+          }
         }
-        return
+
+        if (!isCurrentWork(generation, conversationId)) return false
+        if (mode === 'agent') {
+          const toolDispatcher = await getToolDispatcher()
+          if (!isCurrentWork(generation, conversationId)) return false
+          createOrUpdateConversation(conversationId, compiledMessages)
+          await flushPendingChatSave()
+          if (!isCurrentWork(generation, conversationId)) return false
+          latestChatMessagesRef.current = compiledMessages
+          setChatMessages(compiledMessages)
+          requestAnimationFrame(() => {
+            forceScrollToBottom()
+          })
+          const compiledLastMessage = compiledMessages.at(-1)
+          if (compiledLastMessage?.role !== 'user') {
+            throw new Error('Last compiled message is not a user message')
+          }
+          const agentPrompt =
+            typeof compiledLastMessage.promptContent === 'string'
+              ? compiledLastMessage.promptContent
+              : compiledLastMessage.content
+                ? editorStateToPlainText(compiledLastMessage.content)
+                : ''
+          const toolCallId = uuidv4()
+          const abortController = new AbortController()
+          registerActiveAgentToolCall(toolCallId, abortController)
+          const agentTask = (async () => {
+            try {
+              const response = await toolDispatcher.callTool({
+                name: CODEX_TOOL_NAME,
+                args: buildAgentChatRequestArgs(
+                  buildAgentPrompt({
+                    messages: compiledMessages,
+                    prompt: agentPrompt,
+                    userMessage: compiledLastMessage,
+                  }),
+                ),
+                id: toolCallId,
+                onEvent: (event) => {
+                  if (!isCurrentWork(generation, conversationId)) return
+                  const commandMessage =
+                    buildAgentCommandMessageFromEvent(event)
+                  if (!commandMessage) {
+                    return
+                  }
+                  setChatMessages((prevMessages) =>
+                    upsertAgentCommandMessage(prevMessages, commandMessage),
+                  )
+                },
+                signal: abortController.signal,
+              })
+              if (!isCurrentWork(generation, conversationId)) return
+              const content =
+                response.status === ToolCallResponseStatus.Success
+                  ? response.data.text
+                  : response.status === ToolCallResponseStatus.Aborted
+                    ? 'Agent Chat was stopped.'
+                    : response.status === ToolCallResponseStatus.Error
+                      ? response.error
+                      : `Agent Chat ended with status: ${response.status}`
+              setChatMessages((prevMessages) => [
+                ...prevMessages,
+                buildAgentAssistantMessage(content),
+              ])
+            } catch (error) {
+              if (!isCurrentWork(generation, conversationId)) return
+              setChatMessages((prevMessages) => [
+                ...prevMessages,
+                buildAgentAssistantMessage(
+                  redactSecrets(
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                ),
+              ])
+            } finally {
+              unregisterActiveAgentToolCall(toolCallId)
+            }
+          })()
+          activeAgentTasksRef.current.add(agentTask)
+          void agentTask.finally(() => {
+            activeAgentTasksRef.current.delete(agentTask)
+          })
+          return true
+        }
+        if (!isCurrentWork(generation, conversationId)) return false
+        createOrUpdateConversation(conversationId, compiledMessages)
+        await flushPendingChatSave()
+        if (!isCurrentWork(generation, conversationId)) return false
+        latestChatMessagesRef.current = compiledMessages
+        setChatMessages(compiledMessages)
+        requestAnimationFrame(() => {
+          forceScrollToBottom()
+        })
+        submitChatMutation.mutate({
+          chatMessages: compiledMessages,
+          conversationId,
+        })
+        return true
+      } catch (error) {
+        if (generation !== workGenerationRef.current) return false
+        const message = redactSecrets(
+          error instanceof Error ? error.message : String(error),
+        )
+        new Notice(`Failed to send message: ${message}`)
+        console.error('Failed to send message', redactSecrets(error))
+        return false
+      } finally {
+        if (generation === workGenerationRef.current) {
+          setIsPreparingMessage(false)
+        }
       }
-      if (!isCurrentWork(generation, conversationId)) return
-      submitChatMutation.mutate({
-        chatMessages: compiledMessages,
-        conversationId,
-      })
     },
     [
       submitChatMutation,
@@ -666,6 +736,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       isCurrentWork,
       app.workspace,
       forceScrollToBottom,
+      createOrUpdateConversation,
+      flushPendingChatSave,
       registerActiveAgentToolCall,
       unregisterActiveAgentToolCall,
     ],
@@ -675,48 +747,81 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     mutationFn: async ({
       blockToApply,
       chatMessages,
+      abortController,
+      generation,
+      conversationId,
     }: {
       blockToApply: string
       chatMessages: ChatMessage[]
+      applyId: string
+      abortController: AbortController
+      generation: number
+      conversationId: string
     }) => {
-      const activeFile = app.workspace.getActiveFile()
-      if (!activeFile) {
-        throw new Error(
-          'No file is currently open to apply changes. Please open a file and try again.',
-        )
+      try {
+        const activeFile = app.workspace.getActiveFile()
+        if (!activeFile) {
+          throw new Error(
+            'No file is currently open to apply changes. Please open a file and try again.',
+          )
+        }
+        const activeFileContent = await readTFileContent(activeFile, app.vault)
+        if (
+          abortController.signal.aborted ||
+          !isCurrentWork(generation, conversationId)
+        ) {
+          return
+        }
+
+        const { providerClient, model } = getChatModelClient({
+          modelId: settings.applyModelId,
+          settings,
+          setSettings,
+          getSettings,
+        })
+
+        const updatedFileContent = await applyChangesToFile({
+          blockToApply,
+          currentFile: activeFile,
+          currentFileContent: activeFileContent,
+          chatMessages,
+          providerClient,
+          model,
+          signal: abortController.signal,
+        })
+        if (
+          abortController.signal.aborted ||
+          !isCurrentWork(generation, conversationId)
+        ) {
+          return
+        }
+        if (updatedFileContent === null) {
+          throw new Error('Failed to apply changes')
+        }
+
+        await app.workspace.getLeaf(true).setViewState({
+          type: APPLY_VIEW_TYPE,
+          active: true,
+          state: {
+            file: activeFile,
+            originalContent: activeFileContent,
+            newContent: updatedFileContent,
+          } satisfies ApplyViewState,
+        })
+      } finally {
+        if (activeApplyControllerRef.current === abortController) {
+          activeApplyControllerRef.current = null
+        }
       }
-      const activeFileContent = await readTFileContent(activeFile, app.vault)
-
-      const { providerClient, model } = getChatModelClient({
-        modelId: settings.applyModelId,
-        settings,
-        setSettings,
-        getSettings,
-      })
-
-      const updatedFileContent = await applyChangesToFile({
-        blockToApply,
-        currentFile: activeFile,
-        currentFileContent: activeFileContent,
-        chatMessages,
-        providerClient,
-        model,
-      })
-      if (!updatedFileContent) {
-        throw new Error('Failed to apply changes')
-      }
-
-      await app.workspace.getLeaf(true).setViewState({
-        type: APPLY_VIEW_TYPE,
-        active: true,
-        state: {
-          file: activeFile,
-          originalContent: activeFileContent,
-          newContent: updatedFileContent,
-        } satisfies ApplyViewState,
-      })
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (
+        variables.abortController.signal.aborted ||
+        variables.generation !== workGenerationRef.current ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
+        return
+      }
       if (
         error instanceof LLMAPIKeyNotSetException ||
         error instanceof LLMAPIKeyInvalidException ||
@@ -733,8 +838,29 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   })
 
   const handleApply = useCallback(
-    (blockToApply: string, chatMessages: ChatMessage[]) => {
-      applyMutation.mutate({ blockToApply, chatMessages })
+    (blockToApply: string, chatMessages: ChatMessage[], applyId: string) => {
+      if (activeApplyControllerRef.current) return
+      const abortController = new AbortController()
+      activeApplyControllerRef.current = abortController
+      const task = applyMutation
+        .mutateAsync({
+          blockToApply,
+          chatMessages,
+          applyId,
+          abortController,
+          generation: workGenerationRef.current,
+          conversationId: currentConversationIdRef.current,
+        })
+        .then(
+          () => undefined,
+          () => undefined,
+        )
+      activeApplyTaskRef.current = task
+      void task.finally(() => {
+        if (activeApplyTaskRef.current === task) {
+          activeApplyTaskRef.current = null
+        }
+      })
     },
     [applyMutation],
   )
@@ -854,16 +980,28 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }, [])
 
   useEffect(() => {
-    if (chatMessages.length > 0) {
+    const hasActiveWork =
+      isPreparingMessage ||
+      submitChatMutation.isPending ||
+      activeAgentToolCallCount > 0 ||
+      queryProgress.type !== 'idle'
+    if (chatMessages.length > 0 && !hasActiveWork) {
       createOrUpdateConversation(currentConversationId, chatMessages)
     }
-  }, [currentConversationId, chatMessages, createOrUpdateConversation])
+  }, [
+    activeAgentToolCallCount,
+    chatMessages,
+    createOrUpdateConversation,
+    currentConversationId,
+    isPreparingMessage,
+    queryProgress.type,
+    submitChatMutation.isPending,
+  ])
 
   // Updates the currentFile of the focused message (input or chat history)
   // This happens when active file changes or focused message changes
   const handleActiveLeafChange = useCallback(() => {
     const activeFile = app.workspace.getActiveFile()
-    if (!activeFile) return
 
     const mentionable: Omit<MentionableCurrentFile, 'id'> = {
       type: 'current-file',
@@ -889,6 +1027,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   }, [app.workspace, focusedMessageId, inputMessage.id])
 
   useEffect(() => {
+    handleActiveLeafChange()
     app.workspace.on('active-leaf-change', handleActiveLeafChange)
     return () => {
       app.workspace.off('active-leaf-change', handleActiveLeafChange)
@@ -959,9 +1098,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           </button>
           <ChatListDropdown
             chatList={chatList}
+            status={chatListStatus}
             currentConversationId={currentConversationId}
             onSelect={async (conversationId) => {
-              if (conversationId === currentConversationId) return
               await handleLoadConversation(conversationId)
             }}
             onDelete={async (conversationId) => {
@@ -1006,7 +1145,19 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         </div>
       </div>
       <>
-        <div className="smtcmp-chat-messages" ref={chatMessagesRef}>
+        <div
+          className="smtcmp-chat-messages"
+          ref={chatMessagesRef}
+          role="log"
+          aria-label="Chat messages"
+          aria-relevant="additions"
+          aria-busy={
+            isPreparingMessage ||
+            submitChatMutation.isPending ||
+            activeAgentToolCallCount > 0 ||
+            queryProgress.type !== 'idle'
+          }
+        >
           {chatMessageRows.map(({ messageOrGroup, endIndex }) =>
             !Array.isArray(messageOrGroup) ? (
               <UserMessageItem
@@ -1015,9 +1166,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                 chatUserInputRef={(ref) =>
                   registerChatUserInputRef(messageOrGroup.id, ref)
                 }
-                onSubmit={(content, mentionables, mode) => {
-                  if (!hasSubmittableContent(content, mentionables)) return
-                  handleUserMessageSubmit({
+                onSubmit={async (content, mentionables, mode) => {
+                  if (!hasSubmittableContent(content, mentionables))
+                    return false
+                  return handleUserMessageSubmit({
                     inputChatMessages: [
                       ...chatMessages.slice(0, endIndex - 1),
                       {
@@ -1030,6 +1182,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                     ],
                     mode,
                   })
+                }}
+                onStop={() => {
+                  void abortActiveWork()
                 }}
                 onFocus={() => {
                   setFocusedMessageId(messageOrGroup.id)
@@ -1047,7 +1202,11 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                 messages={messageOrGroup}
                 getContextMessages={() => chatMessages.slice(0, endIndex)}
                 conversationId={currentConversationId}
-                isApplying={applyMutation.isPending}
+                applyingBlockId={
+                  applyMutation.isPending
+                    ? (applyMutation.variables?.applyId ?? null)
+                    : null
+                }
                 onApply={handleApply}
                 executeToolCall={(request, onResponseUpdate) =>
                   executeApprovedToolCall(
@@ -1066,6 +1225,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                     toolCallId,
                     response,
                   )
+                }
+                isStreaming={
+                  submitChatMutation.isPending &&
+                  endIndex === chatMessages.length
                 }
               />
             ),
@@ -1096,14 +1259,17 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           onSubmit={(content, mode) => {
             if (!hasSubmittableContent(content, inputMessage.mentionables))
               return
-            handleUserMessageSubmit({
+            void handleUserMessageSubmit({
               inputChatMessages: [
                 ...chatMessages,
                 { ...inputMessage, content },
               ],
               mode,
+            }).then((submitted) => {
+              if (submitted) {
+                setInputMessage(getNewInputMessage(app))
+              }
             })
-            setInputMessage(getNewInputMessage(app))
           }}
           onFocus={() => {
             setFocusedMessageId(inputMessage.id)
@@ -1118,6 +1284,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           autoFocus
           addedBlockKey={addedBlockKey}
           isWorking={
+            isPreparingMessage ||
             submitChatMutation.isPending ||
             activeAgentToolCallCount > 0 ||
             queryProgress.type !== 'idle'

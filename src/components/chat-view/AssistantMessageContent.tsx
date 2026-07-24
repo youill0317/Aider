@@ -13,42 +13,63 @@ import { UntrustedMarkdown } from './UntrustedMarkdown'
 
 export default function AssistantMessageContent({
   content,
+  messageId,
   getContextMessages,
   handleApply,
-  isApplying,
+  applyingBlockId,
+  isStreaming = false,
 }: {
   content: ChatAssistantMessage['content']
+  messageId: ChatAssistantMessage['id']
   getContextMessages: () => ChatMessage[]
-  handleApply: (blockToApply: string, chatMessages: ChatMessage[]) => void
-  isApplying: boolean
+  handleApply: (
+    blockToApply: string,
+    chatMessages: ChatMessage[],
+    applyId: string,
+  ) => void
+  applyingBlockId: string | null
+  isStreaming?: boolean
 }) {
   const onApply = useCallback(
-    (blockToApply: string) => {
-      handleApply(blockToApply, getContextMessages())
+    (blockToApply: string, applyId: string) => {
+      handleApply(blockToApply, getContextMessages(), applyId)
     },
     [getContextMessages, handleApply],
   )
 
   return (
-    <AssistantTextRenderer onApply={onApply} isApplying={isApplying}>
+    <AssistantTextRenderer
+      messageId={messageId}
+      onApply={onApply}
+      applyingBlockId={applyingBlockId}
+      isStreaming={isStreaming}
+    >
       {content}
     </AssistantTextRenderer>
   )
 }
 
 const AssistantTextRenderer = React.memo(function AssistantTextRenderer({
+  messageId,
   onApply,
-  isApplying,
+  applyingBlockId,
+  isStreaming,
   children,
 }: {
-  onApply: (blockToApply: string) => void
+  messageId: string
+  onApply: (blockToApply: string, applyId: string) => void
   children: string
-  isApplying: boolean
+  applyingBlockId: string | null
+  isStreaming: boolean
 }) {
   const blocks: ParsedTagContent[] = useMemo(
-    () => parseTagContents(children),
-    [children],
+    () => (isStreaming ? [] : parseTagContents(children)),
+    [children, isStreaming],
   )
+
+  if (isStreaming) {
+    return <pre className="smtcmp-streaming-response">{children}</pre>
+  }
 
   return (
     <>
@@ -69,8 +90,9 @@ const AssistantTextRenderer = React.memo(function AssistantTextRenderer({
         ) : (
           <MarkdownCodeComponent
             key={index}
+            applyId={`${messageId}:${index}`}
             onApply={onApply}
-            isApplying={isApplying}
+            applyingBlockId={applyingBlockId}
             language={block.language}
             filename={block.filename}
           >

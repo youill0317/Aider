@@ -20,6 +20,7 @@ import {
   McpServerStatus,
   McpTool,
 } from '../../../types/mcp.types'
+import { runAsyncAction } from '../../../utils/async-action'
 import { ObsidianButton } from '../../common/ObsidianButton'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 import { ConfirmModal } from '../../modals/ConfirmModal'
@@ -43,7 +44,7 @@ export function McpSection({ app, plugin }: McpSectionProps) {
       setMcpManager(mcpManager)
       setMcpServers(mcpManager.getServers())
     }
-    initMCPManager()
+    runAsyncAction(initMCPManager)
   }, [plugin])
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export function McpSection({ app, plugin }: McpSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <div className="smtcmp-settings-header">MCP (Model Context Protocol)</div>
+      <h2 className="smtcmp-settings-header">MCP (Model Context Protocol)</h2>
 
       <div className="smtcmp-settings-desc smtcmp-settings-callout">
         <strong>Security:</strong> A new or changed server must be reviewed on
@@ -79,7 +80,7 @@ export function McpSection({ app, plugin }: McpSectionProps) {
       ) : (
         <>
           <div className="smtcmp-settings-sub-header-container">
-            <div className="smtcmp-settings-sub-header">MCP Servers</div>
+            <h3 className="smtcmp-settings-sub-header">MCP Servers</h3>
             <ObsidianButton
               text="Add MCP Server"
               onClick={() => new AddMcpServerModal(app, plugin).open()}
@@ -123,7 +124,7 @@ function McpServerComponent({
   app: App
   plugin: SmartComposerPlugin
 }) {
-  const { settings, setSettings } = useSettings()
+  const { setSettings } = useSettings()
   const [isOpen, setIsOpen] = useState(false)
   const [isTrusting, setIsTrusting] = useState(false)
 
@@ -138,31 +139,35 @@ function McpServerComponent({
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        await setSettings({
-          ...settings,
-          mcp: {
-            ...settings.mcp,
-            servers: settings.mcp.servers.filter((s) => s.id !== server.name),
-          },
-        })
         await plugin.revokeMcpServerTrust(server.name)
+        await setSettings((currentSettings) => ({
+          ...currentSettings,
+          mcp: {
+            ...currentSettings.mcp,
+            servers: currentSettings.mcp.servers.filter(
+              (s) => s.id !== server.name,
+            ),
+          },
+        }))
       },
     }).open()
-  }, [server.name, settings, setSettings, app, plugin])
+  }, [server.name, setSettings, app, plugin])
 
   const handleToggleEnabled = useCallback(
     (enabled: boolean) => {
-      setSettings({
-        ...settings,
-        mcp: {
-          ...settings.mcp,
-          servers: settings.mcp.servers.map((s) =>
-            s.id === server.name ? { ...s, enabled } : s,
-          ),
-        },
-      })
+      runAsyncAction(() =>
+        setSettings((currentSettings) => ({
+          ...currentSettings,
+          mcp: {
+            ...currentSettings.mcp,
+            servers: currentSettings.mcp.servers.map((s) =>
+              s.id === server.name ? { ...s, enabled } : s,
+            ),
+          },
+        })),
+      )
     },
-    [settings, setSettings, server.name],
+    [setSettings, server.name],
   )
 
   const handleTrust = useCallback(async () => {
@@ -188,16 +193,25 @@ function McpServerComponent({
           <ObsidianToggle
             value={server.config.enabled}
             onChange={handleToggleEnabled}
+            ariaLabel={`Enable MCP server ${server.name}`}
           />
         </div>
         <div className="smtcmp-mcp-server-actions">
           {server.status === McpServerStatus.ApprovalRequired && (
             <button
               type="button"
-              onClick={handleTrust}
+              onClick={isOpen ? handleTrust : () => setIsOpen(true)}
               className="clickable-icon"
-              aria-label="Review and trust server command"
-              title="Trust this exact command, arguments, and environment"
+              aria-label={
+                isOpen
+                  ? 'Trust reviewed server command'
+                  : 'Review server command'
+              }
+              title={
+                isOpen
+                  ? 'Trust the command shown below'
+                  : 'Show the exact command, arguments, and environment'
+              }
               disabled={isTrusting}
             >
               {isTrusting ? (
@@ -335,54 +349,62 @@ function McpToolComponent({
   tool: McpTool
   server: McpServerState
 }) {
-  const { settings, setSettings } = useSettings()
+  const { setSettings } = useSettings()
 
   const toolOption = server.config.toolOptions[tool.name]
   const disabled = toolOption?.disabled ?? false
   const allowAutoExecution = toolOption?.allowAutoExecution ?? false
 
   const handleToggleEnabled = (enabled: boolean) => {
-    const toolOptions = server.config.toolOptions
-    toolOptions[tool.name] = {
-      disabled: !enabled,
-      allowAutoExecution: allowAutoExecution,
-    }
-    setSettings({
-      ...settings,
-      mcp: {
-        ...settings.mcp,
-        servers: settings.mcp.servers.map((s) =>
-          s.id === server.name
-            ? {
-                ...s,
-                toolOptions: toolOptions,
-              }
-            : s,
-        ),
-      },
-    })
+    runAsyncAction(() =>
+      setSettings((currentSettings) => ({
+        ...currentSettings,
+        mcp: {
+          ...currentSettings.mcp,
+          servers: currentSettings.mcp.servers.map((s) =>
+            s.id === server.name
+              ? {
+                  ...s,
+                  toolOptions: {
+                    ...s.toolOptions,
+                    [tool.name]: {
+                      disabled: !enabled,
+                      allowAutoExecution:
+                        s.toolOptions[tool.name]?.allowAutoExecution ?? false,
+                    },
+                  },
+                }
+              : s,
+          ),
+        },
+      })),
+    )
   }
 
   const handleToggleAutoExecution = (autoExecution: boolean) => {
-    const toolOptions = { ...server.config.toolOptions }
-    toolOptions[tool.name] = {
-      ...toolOptions[tool.name],
-      allowAutoExecution: autoExecution,
-    }
-    setSettings({
-      ...settings,
-      mcp: {
-        ...settings.mcp,
-        servers: settings.mcp.servers.map((s) =>
-          s.id === server.name
-            ? {
-                ...s,
-                toolOptions: toolOptions,
-              }
-            : s,
-        ),
-      },
-    })
+    runAsyncAction(() =>
+      setSettings((currentSettings) => ({
+        ...currentSettings,
+        mcp: {
+          ...currentSettings.mcp,
+          servers: currentSettings.mcp.servers.map((s) =>
+            s.id === server.name
+              ? {
+                  ...s,
+                  toolOptions: {
+                    ...s.toolOptions,
+                    [tool.name]: {
+                      disabled: s.toolOptions[tool.name]?.disabled ?? false,
+                      ...s.toolOptions[tool.name],
+                      allowAutoExecution: autoExecution,
+                    },
+                  },
+                }
+              : s,
+          ),
+        },
+      })),
+    )
   }
 
   return (
@@ -396,6 +418,7 @@ function McpToolComponent({
         <ObsidianToggle
           value={!disabled}
           onChange={(value) => handleToggleEnabled(value)}
+          ariaLabel={`Enable MCP tool ${server.name}:${tool.name}`}
         />
       </div>
       <div className="smtcmp-mcp-tool-toggle">
@@ -408,6 +431,7 @@ function McpToolComponent({
         <ObsidianToggle
           value={allowAutoExecution}
           onChange={(value) => handleToggleAutoExecution(value)}
+          ariaLabel={`Allow MCP tool ${server.name}:${tool.name} without approval`}
         />
       </div>
     </div>

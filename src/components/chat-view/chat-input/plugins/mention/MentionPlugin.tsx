@@ -9,7 +9,7 @@
 
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $createTextNode, COMMAND_PRIORITY_NORMAL, TextNode } from 'lexical'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { Mentionable } from '../../../../../types/mentionable'
@@ -177,11 +177,12 @@ export default function NewMentionsPlugin({
   const [editor] = useLexicalComposerContext()
 
   const [queryString, setQueryString] = useState<string | null>(null)
+  const deferredQueryString = useDeferredValue(queryString)
 
   const results = useMemo(() => {
-    if (queryString == null) return []
-    return searchResultByQuery(queryString)
-  }, [queryString, searchResultByQuery])
+    if (deferredQueryString == null) return []
+    return searchResultByQuery(deferredQueryString)
+  }, [deferredQueryString, searchResultByQuery])
 
   const checkForSlashTriggerMatch = useBasicTypeaheadTriggerMatch('/', {
     minLength: 0,

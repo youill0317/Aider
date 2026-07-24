@@ -1,4 +1,5 @@
 import { Check, CopyIcon, Eye, Loader2, Play } from 'lucide-react'
+import { Notice } from 'obsidian'
 import { PropsWithChildren, useMemo, useState } from 'react'
 
 import { useApp } from '../../contexts/app-context'
@@ -8,15 +9,19 @@ import { openMarkdownFile } from '../../utils/obsidian'
 import { MemoizedSyntaxHighlighterWrapper } from './SyntaxHighlighterWrapper'
 import { UntrustedMarkdown } from './UntrustedMarkdown'
 
+const MAX_HIGHLIGHTED_CODE_CHARS = 128 * 1024
+
 export default function MarkdownCodeComponent({
+  applyId,
   onApply,
-  isApplying,
+  applyingBlockId,
   language,
   filename,
   children,
 }: PropsWithChildren<{
-  onApply: (blockToApply: string) => void
-  isApplying: boolean
+  applyId: string
+  onApply: (blockToApply: string, applyId: string) => void
+  applyingBlockId: string | null
   language?: string
   filename?: string
 }>) {
@@ -25,6 +30,10 @@ export default function MarkdownCodeComponent({
 
   const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [copied, setCopied] = useState(false)
+  const isAnyBlockApplying = applyingBlockId !== null
+  const isThisBlockApplying = applyingBlockId === applyId
+  const code = String(children)
+  const shouldHighlight = code.length <= MAX_HIGHLIGHTED_CODE_CHARS
 
   const wrapLines = useMemo(() => {
     return !language || ['markdown'].includes(language)
@@ -32,10 +41,11 @@ export default function MarkdownCodeComponent({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(String(children))
+      await navigator.clipboard.writeText(code)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
+      new Notice('Failed to copy the code block to the clipboard')
       console.error('Failed to copy text: ', err)
     }
   }
@@ -91,10 +101,10 @@ export default function MarkdownCodeComponent({
           <button
             type="button"
             className="clickable-icon smtcmp-code-block-header-button"
-            onClick={() => onApply(String(children))}
-            disabled={isApplying}
+            onClick={() => onApply(code, applyId)}
+            disabled={isAnyBlockApplying}
           >
-            {isApplying ? (
+            {isThisBlockApplying ? (
               <>
                 <Loader2 className="spinner" size={14} />
                 <span>Applying...</span>
@@ -110,8 +120,12 @@ export default function MarkdownCodeComponent({
       </div>
       {isPreviewMode ? (
         <div className="smtcmp-code-block-obsidian-markdown">
-          <UntrustedMarkdown content={String(children)} scale="sm" />
+          <UntrustedMarkdown content={code} scale="sm" />
         </div>
+      ) : !shouldHighlight ? (
+        <pre className="smtcmp-code-block-plain">
+          <code>{code}</code>
+        </pre>
       ) : (
         <MemoizedSyntaxHighlighterWrapper
           isDarkMode={isDarkMode}
@@ -119,7 +133,7 @@ export default function MarkdownCodeComponent({
           hasFilename={!!filename}
           wrapLines={wrapLines}
         >
-          {String(children)}
+          {code}
         </MemoizedSyntaxHighlighterWrapper>
       )}
     </div>

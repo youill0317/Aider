@@ -13,8 +13,10 @@ import {
 } from '../../core/llm/exception'
 import { getChatModelClient } from '../../core/llm/manager'
 import { ChatMessage } from '../../types/chat'
+import { runAsyncAction } from '../../utils/async-action'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { ResponseGenerator } from '../../utils/chat/responseGenerator'
+import { resolveToolDispatcher } from '../../utils/chat/tool-dispatcher'
 import { redactSecrets } from '../../utils/security/redact-secrets'
 import { ErrorModal } from '../modals/ErrorModal'
 
@@ -84,18 +86,20 @@ export function useChatStreamManager({
         }
         // Fallback to the first chat model if the selected chat model is not found
         const firstChatModel = settings.chatModels[0]
-        setSettings({
-          ...settings,
-          chatModelId: firstChatModel.id,
-          chatModels: settings.chatModels.map((model) =>
-            model.id === firstChatModel.id
-              ? {
-                  ...model,
-                  enable: true,
-                }
-              : model,
-          ),
-        })
+        runAsyncAction(() =>
+          setSettings((currentSettings) => ({
+            ...currentSettings,
+            chatModelId: firstChatModel.id,
+            chatModels: currentSettings.chatModels.map((model) =>
+              model.id === firstChatModel.id
+                ? {
+                    ...model,
+                    enable: true,
+                  }
+                : model,
+            ),
+          })),
+        )
         return getChatModelClient({
           modelId: firstChatModel.id,
           settings,
@@ -130,7 +134,10 @@ export function useChatStreamManager({
       let unsubscribeResponseGenerator: (() => void) | undefined
 
       try {
-        const toolDispatcher = await getToolDispatcher()
+        const toolDispatcher = await resolveToolDispatcher(
+          settings.chatOptions.enableTools,
+          getToolDispatcher,
+        )
         if (
           abortController.signal.aborted ||
           generation !== streamGenerationRef.current

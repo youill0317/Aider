@@ -4,6 +4,7 @@ import { App, Notice } from 'obsidian'
 import { DEFAULT_EMBEDDING_MODELS } from '../../../../constants'
 import { useSettings } from '../../../../contexts/settings-context'
 import SmartComposerPlugin from '../../../../main'
+import { redactSecrets } from '../../../../utils/security/redact-secrets'
 import { ConfirmModal } from '../../../modals/ConfirmModal'
 import { AddEmbeddingModelModal } from '../../modals/AddEmbeddingModelModal'
 
@@ -35,28 +36,42 @@ export function EmbeddingModelsSubSection({
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        const vectorManager = (await plugin.getDbManager()).getVectorManager()
-        const embeddingStats = await vectorManager.getEmbeddingStats()
-        const embeddingStat = embeddingStats.find((v) => v.model === modelId)
-
-        if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
-          // only clear when there's data
-          await vectorManager.clearAllVectors(modelId)
-        }
-
-        await setSettings({
-          ...settings,
-          embeddingModels: [...settings.embeddingModels].filter(
-            (v) => v.id !== modelId,
-          ),
+        await setSettings((currentSettings) => {
+          if (modelId === currentSettings.embeddingModelId) {
+            throw new Error('Cannot remove a model that is currently selected')
+          }
+          return {
+            ...currentSettings,
+            embeddingModels: currentSettings.embeddingModels.filter(
+              (v) => v.id !== modelId,
+            ),
+          }
         })
+        try {
+          const vectorManager = (await plugin.getDbManager()).getVectorManager()
+          const embeddingStats = await vectorManager.getEmbeddingStats()
+          const embeddingStat = embeddingStats.find(
+            (value) => value.model === modelId,
+          )
+          if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
+            await vectorManager.clearAllVectors(modelId)
+          }
+        } catch (error) {
+          new Notice(
+            'Model was removed, but its cached embeddings could not be cleared',
+          )
+          console.error(
+            'Failed to clear embeddings for removed model',
+            redactSecrets(error),
+          )
+        }
       },
     }).open()
   }
 
   return (
     <div>
-      <div className="smtcmp-settings-sub-header">Embedding Models</div>
+      <h3 className="smtcmp-settings-sub-header">Embedding Models</h3>
       <div className="smtcmp-settings-desc">
         Models used for generating embeddings for RAG
       </div>
@@ -85,10 +100,12 @@ export function EmbeddingModelsSubSection({
                       (v) => v.id === embeddingModel.id,
                     ) && (
                       <button
+                        type="button"
                         onClick={() =>
                           handleDeleteEmbeddingModel(embeddingModel.id)
                         }
                         className="clickable-icon"
+                        aria-label={`Delete embedding model ${embeddingModel.id}`}
                       >
                         <Trash2 />
                       </button>
@@ -102,6 +119,7 @@ export function EmbeddingModelsSubSection({
             <tr>
               <td colSpan={5}>
                 <button
+                  type="button"
                   onClick={() => {
                     new AddEmbeddingModelModal(app, plugin).open()
                   }}

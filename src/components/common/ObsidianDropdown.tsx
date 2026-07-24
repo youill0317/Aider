@@ -1,12 +1,14 @@
 import { DropdownComponent } from 'obsidian'
 import { useEffect, useRef, useState } from 'react'
 
+import { runAsyncAction } from '../../utils/async-action'
+
 import { useObsidianSetting } from './ObsidianSetting'
 
 type ObsidianDropdownProps = {
   value: string
   options: Record<string, string>
-  onChange: (value: string) => void
+  onChange: (value: string) => void | Promise<void>
 }
 
 export function ObsidianDropdown({
@@ -19,6 +21,8 @@ export function ObsidianDropdown({
   const [dropdownComponent, setDropdownComponent] =
     useState<DropdownComponent | null>(null)
   const onChangeRef = useRef(onChange)
+  const valueRef = useRef(value)
+  valueRef.current = value
 
   useEffect(() => {
     if (setting) {
@@ -47,7 +51,13 @@ export function ObsidianDropdown({
 
   useEffect(() => {
     if (!dropdownComponent) return
-    dropdownComponent.onChange((v) => onChangeRef.current(v))
+    dropdownComponent.onChange((nextValue) => {
+      void runAsyncAction(() => onChangeRef.current(nextValue)).then(
+        (succeeded) => {
+          if (!succeeded) dropdownComponent.setValue(valueRef.current)
+        },
+      )
+    })
   }, [dropdownComponent])
 
   useEffect(() => {

@@ -1,13 +1,15 @@
 import { ButtonComponent } from 'obsidian'
 import { useEffect, useRef, useState } from 'react'
 
+import { runAsyncAction } from '../../utils/async-action'
+
 import { useObsidianSetting } from './ObsidianSetting'
 
 type ObsidianButtonProps = {
   text?: string
   icon?: string
   tooltip?: string
-  onClick: () => void
+  onClick: () => unknown
   cta?: boolean
   warning?: boolean
   disabled?: boolean
@@ -55,7 +57,9 @@ export function ObsidianButton({
 
   useEffect(() => {
     if (!buttonComponent) return
-    buttonComponent.onClick(() => onClickRef.current())
+    buttonComponent.onClick(() => {
+      runAsyncAction(() => onClickRef.current())
+    })
   }, [buttonComponent])
 
   useEffect(() => {

@@ -1,13 +1,14 @@
-export type CodexSandboxMode =
-  | 'read-only'
-  | 'workspace-write'
-  | 'danger-full-access'
+import type {
+  CodexApprovalPolicy,
+  CodexResumeContext,
+  CodexSandboxMode,
+} from '../../types/codex'
 
-export type CodexApprovalPolicy =
-  | 'default'
-  | 'never'
-  | 'on-request'
-  | 'untrusted'
+export type {
+  CodexApprovalPolicy,
+  CodexResumeContext,
+  CodexSandboxMode,
+} from '../../types/codex'
 
 type CodexThreadStartedEvent = {
   readonly kind: 'thread.started'
@@ -48,13 +49,6 @@ export type CodexAgentEvent =
   | CodexErrorEvent
   | CodexUnknownEvent
 
-export type CodexResumeContext = {
-  readonly threadId: string
-  readonly cwd: string
-  readonly sandboxMode: CodexSandboxMode
-  readonly approvalPolicy: CodexApprovalPolicy
-}
-
 export type CodexExecRequest = {
   readonly command?: string
   readonly model?: string
@@ -62,6 +56,11 @@ export type CodexExecRequest = {
   readonly cwd: string
   readonly sandboxMode: CodexSandboxMode
   readonly approvalPolicy: CodexApprovalPolicy
+  readonly resume?: CodexResumeContext
+}
+
+export type CodexSessionRequest = {
+  readonly initialPrompt: string
   readonly resume?: CodexResumeContext
 }
 
@@ -80,16 +79,24 @@ export type CodexRunHandle = {
   abort: () => void
 }
 
-type CodexPermissionOption = {
+export type CodexPermissionOption = {
   readonly id: string
   readonly kind: string
   readonly name: string
 }
 
-type CodexPermissionRequest = {
+export type CodexPermissionDecision =
+  | 'accept'
+  | 'acceptForSession'
+  | 'decline'
+  | 'cancel'
+
+export type CodexPermissionRequest = {
+  readonly details: Readonly<Record<string, unknown>>
   readonly id: string
   readonly options: readonly CodexPermissionOption[]
   readonly sessionId: string
+  readonly signal: AbortSignal
   readonly title: string
   readonly toolCallId: string
 }
@@ -99,7 +106,7 @@ export type CodexRuntimeHandlers = {
   readonly onEvent: (event: CodexAgentEvent) => void
   readonly onPermissionRequest?: (
     request: CodexPermissionRequest,
-  ) => Promise<string | null>
+  ) => Promise<CodexPermissionDecision | null>
 }
 
 export type CodexRuntime = {
@@ -107,4 +114,5 @@ export type CodexRuntime = {
     request: CodexExecRequest,
     handlers: CodexRuntimeHandlers,
   ) => CodexRunHandle
+  dispose?: () => Promise<void> | void
 }

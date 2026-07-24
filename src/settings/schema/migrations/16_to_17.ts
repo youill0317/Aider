@@ -4,7 +4,7 @@ const DEFAULT_CODEX_AGENT_SETTINGS = {
   enabled: true,
   command: 'codex',
   defaultSandbox: 'workspace-write',
-  approvalPolicy: 'never',
+  approvalPolicy: 'on-request',
   cwdMode: 'vault',
   customCwd: '',
   resume: true,
@@ -31,6 +31,11 @@ export const migrateFrom16To17: SettingMigration['migrate'] = (data) => {
     codex: {
       ...DEFAULT_CODEX_AGENT_SETTINGS,
       ...supportedCodex,
+      approvalPolicy:
+        supportedCodex.approvalPolicy === 'default'
+          ? 'on-request'
+          : (supportedCodex.approvalPolicy ??
+            DEFAULT_CODEX_AGENT_SETTINGS.approvalPolicy),
       cwdMode: supportedCodex.cwdMode === 'custom' ? 'custom' : 'vault',
     },
   }

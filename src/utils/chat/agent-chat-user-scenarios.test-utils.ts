@@ -123,7 +123,7 @@ function createSettings(): SmartComposerSettings {
   return {
     agent: {
       codex: {
-        approvalPolicy: 'default',
+        approvalPolicy: 'on-request',
         command: 'codex',
         customCwd: '',
         cwdMode: 'vault',

@@ -79,9 +79,24 @@ const responseUsageSchema = z.object({
   total_tokens: z.number().finite().nonnegative(),
 })
 
+const codexResumeContextSchema = z.object({
+  threadId: z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  cwd: boundedPathSchema,
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
+  approvalPolicy: z.preprocess(
+    (value) => (value === 'default' ? 'on-request' : value),
+    z.enum(['never', 'on-request', 'untrusted']),
+  ),
+})
+
 const assistantMetadataSchema = z.object({
   usage: responseUsageSchema.optional(),
   model: z.record(z.unknown()).optional(),
+  agentSession: codexResumeContextSchema.nullable().optional(),
 })
 
 const providerMetadataSchema = z.object({
@@ -149,6 +164,7 @@ const toolCallResponseSchema = z.union([
     data: z.object({
       type: z.literal('text'),
       text: z.string().max(MAX_MESSAGE_CHARS),
+      codexSession: codexResumeContextSchema.optional(),
     }),
   }),
   z.object({

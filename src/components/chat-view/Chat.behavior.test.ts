@@ -27,10 +27,25 @@ describe('Chat behavior contract', () => {
       source.match(
         /createOrUpdateConversation\(conversationId, compiledMessages\)/g,
       ),
-    ).toHaveLength(2)
+    ).toHaveLength(1)
+    expect(source).toContain(
+      'const runningMessages = invalidateAgentSessions(compiledMessages)',
+    )
+    expect(source).toContain(
+      'createOrUpdateConversation(conversationId, runningMessages)',
+    )
     expect(
       source.match(/await flushPendingChatSave\(\)/g)?.length,
     ).toBeGreaterThanOrEqual(2)
+    const agentSaveIndex = source.indexOf(
+      'createOrUpdateConversation(conversationId, runningMessages)',
+    )
+    expect(agentSaveIndex).toBeLessThan(
+      source.indexOf(
+        'const response = await toolDispatcher.callTool',
+        agentSaveIndex,
+      ),
+    )
   })
 
   it('keeps idle current selection inert but lets it cancel another load', () => {
@@ -57,5 +72,22 @@ describe('Chat behavior contract', () => {
   it('refreshes current-file context when edit focus changes', () => {
     expect(source).toContain('handleActiveLeafChange()')
     expect(source).not.toContain('if (!activeFile) return')
+  })
+
+  it('keeps Codex permission prompts ephemeral and cancels them with active work', () => {
+    expect(source).toContain('pendingCodexPermissionsRef')
+    expect(source).toContain('cancelPendingCodexPermissions()')
+    expect(source).toContain(
+      'onPermissionRequest: handleCodexPermissionRequest',
+    )
+    expect(source).toContain(
+      'approvalActionAdapter={handleCodexApprovalAction}',
+    )
+    expect(source).toContain(
+      'requestAnimationFrame(() => autoScrollToBottom())',
+    )
+    expect(source).not.toContain(
+      'setChatMessages((messages) => [...messages, ...codexPermissionMessages])',
+    )
   })
 })

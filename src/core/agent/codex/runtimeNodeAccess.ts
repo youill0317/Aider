@@ -52,3 +52,20 @@ export function createRuntimeNodeAccess(): RuntimeNodeAccess {
     },
   }
 }
+
+export async function withLoginShellPath(
+  options: CodexSpawnSpecResolverOptions,
+): Promise<CodexSpawnSpecResolverOptions> {
+  try {
+    const { shellEnv } = await import('shell-env')
+    const loginShellPath = (await shellEnv()).PATH
+    return loginShellPath
+      ? {
+          ...options,
+          env: { ...options.env, PATH: loginShellPath },
+        }
+      : options
+  } catch {
+    return options
+  }
+}

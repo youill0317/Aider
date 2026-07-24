@@ -3,6 +3,7 @@ import { SerializedEditorState } from 'lexical'
 import { SelectEmbedding } from '../database/schema'
 
 import { ChatModel } from './chat-model.types'
+import type { CodexResumeContext } from './codex'
 import { ContentPart, RequestProviderMetadata } from './llm/request'
 import { Annotation, ResponseUsage } from './llm/response'
 import { Mentionable, SerializedMentionable } from './mentionable'
@@ -28,6 +29,7 @@ export type ChatAssistantMessage = {
   metadata?: {
     usage?: ResponseUsage
     model?: ChatModel // TODO: migrate legacy data to new model type
+    agentSession?: CodexResumeContext | null
   }
   providerMetadata?: RequestProviderMetadata
 }
@@ -83,6 +85,7 @@ type SerializedChatAssistantMessage = {
   metadata?: {
     usage?: ResponseUsage
     model?: ChatModel // TODO: migrate legacy data to new model type
+    agentSession?: CodexResumeContext | null
   }
   providerMetadata?: RequestProviderMetadata
 }

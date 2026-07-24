@@ -1,3 +1,7 @@
+import type {
+  CodexPermissionDecision,
+  CodexPermissionRequest,
+} from '../../core/agent/types'
 import type { BaseLLMProvider } from '../../core/llm/base'
 import type { ChatMessage } from '../../types/chat'
 import type { LLMResponseStreaming } from '../../types/llm/response'
@@ -100,6 +104,20 @@ describe('ResponseGenerator tool-call gating', () => {
 })
 
 describe('ResponseGenerator auto tool call limit', () => {
+  it('passes Codex permission handling to automatic tool calls', async () => {
+    const onPermissionRequest = jest.fn()
+    const { callTool, generator } = createGenerator(
+      [[toolChunk('call-1', 0)]],
+      { onPermissionRequest },
+    )
+
+    await generator.run()
+
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({ onPermissionRequest }),
+    )
+  })
+
   it('limits a single model batch by actual tool call count', async () => {
     const { callTool, generator, latestMessages } = createGenerator([
       [toolChunk('call-1', 0), toolChunk('call-2', 1)],
@@ -265,12 +283,16 @@ function createGenerator(
     enableTools = true,
     isToolsEnabled,
     onListAvailableTools,
+    onPermissionRequest,
     onStream,
   }: {
     advertisedToolNames?: string[]
     enableTools?: boolean
     isToolsEnabled?: () => boolean
     onListAvailableTools?: () => void
+    onPermissionRequest?: (
+      request: CodexPermissionRequest,
+    ) => Promise<CodexPermissionDecision | null>
     onStream?: () => void
   } = {},
 ) {
@@ -323,6 +345,7 @@ function createGenerator(
       streamResponse,
     } as unknown as BaseLLMProvider<LLMProvider>,
     toolDispatcher,
+    onPermissionRequest,
   })
   generator.subscribe((messages) => {
     latestMessages = messages

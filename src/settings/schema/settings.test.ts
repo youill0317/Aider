@@ -54,7 +54,7 @@ describe('parseSmartComposerSettings', () => {
           enabled: true,
           command: 'codex',
           defaultSandbox: 'workspace-write',
-          approvalPolicy: 'never',
+          approvalPolicy: 'on-request',
           cwdMode: 'vault',
           customCwd: '',
           resume: true,
@@ -238,6 +238,58 @@ describe('parseSmartComposerSettings', () => {
 
     expect(result.safeToPersist).toBe(false)
     expect(result.settings.providers).toEqual(DEFAULT_PROVIDERS)
+  })
+
+  it('fails safe for invalid Codex permission settings', () => {
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      agent: {
+        codex: {
+          ...defaults.agent.codex,
+          approvalPolicy: 'invalid',
+          defaultSandbox: 'invalid',
+        },
+      },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.agent.codex).toMatchObject({
+      approvalPolicy: 'on-request',
+      defaultSandbox: 'read-only',
+      enabled: true,
+    })
+  })
+
+  it('disables Codex when its stored settings object is corrupt', () => {
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      agent: { codex: 'corrupt' },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.agent.codex).toMatchObject({
+      approvalPolicy: 'on-request',
+      defaultSandbox: 'read-only',
+      enabled: false,
+    })
+  })
+
+  it('normalizes the removed default Codex approval policy', () => {
+    const defaults = parseSmartComposerSettings({})
+    const result = parseSmartComposerSettingsResult({
+      ...defaults,
+      agent: {
+        codex: {
+          ...defaults.agent.codex,
+          approvalPolicy: 'default',
+        },
+      },
+    })
+
+    expect(result.safeToPersist).toBe(false)
+    expect(result.settings.agent.codex.approvalPolicy).toBe('on-request')
   })
 
   it('bounds settings that control indexing and automatic tool loops', () => {

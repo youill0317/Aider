@@ -1,6 +1,11 @@
 import type { CodexToolRunner } from '../../core/agent/CodexToolRunner'
 import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
-import type { CodexAgentEvent } from '../../core/agent/types'
+import type {
+  CodexAgentEvent,
+  CodexPermissionDecision,
+  CodexPermissionRequest,
+  CodexSessionRequest,
+} from '../../core/agent/types'
 import { McpManager } from '../../core/mcp/mcpManager'
 import type { RequestTool } from '../../types/llm/request'
 import type { McpTool } from '../../types/mcp.types'
@@ -25,7 +30,11 @@ export type ToolDispatcher = {
     readonly name: string
     readonly args?: string
     readonly id: string
+    readonly codexSession?: CodexSessionRequest
     readonly onEvent?: (event: CodexAgentEvent) => void
+    readonly onPermissionRequest?: (
+      request: CodexPermissionRequest,
+    ) => Promise<CodexPermissionDecision | null>
     readonly signal?: AbortSignal
   }) => Promise<ToolCallResponse>
   abortToolCall: (id: string) => boolean
@@ -93,7 +102,15 @@ export function createToolDispatcher({
       mcpManager?.allowToolForConversation(requestToolName, conversationId)
     },
 
-    callTool({ name, args, id, onEvent, signal }) {
+    callTool({
+      name,
+      args,
+      id,
+      codexSession,
+      onEvent,
+      onPermissionRequest,
+      signal,
+    }) {
       if (name === CODEX_TOOL_NAME) {
         if (!codexToolRunner) {
           return Promise.resolve({
@@ -101,7 +118,14 @@ export function createToolDispatcher({
             error: 'Codex tool is not available.',
           })
         }
-        return codexToolRunner.callTool({ args, id, onEvent, signal })
+        return codexToolRunner.callTool({
+          args,
+          id,
+          codexSession,
+          onEvent,
+          onPermissionRequest,
+          signal,
+        })
       }
       return mcpManager
         ? mcpManager.callTool({ name, args, id, signal })

@@ -28,7 +28,7 @@ type CodexAgentSettingsDefaults = {
   enabled: boolean
   command: string
   defaultSandbox: 'read-only' | 'workspace-write' | 'danger-full-access'
-  approvalPolicy: 'default' | 'untrusted' | 'on-request' | 'never'
+  approvalPolicy: 'untrusted' | 'on-request' | 'never'
   cwdMode: 'vault' | 'custom'
   customCwd: string
   resume: boolean
@@ -38,34 +38,51 @@ const defaultCodexAgentSettings: CodexAgentSettingsDefaults = {
   enabled: true,
   command: 'codex',
   defaultSandbox: 'workspace-write',
-  approvalPolicy: 'never',
+  approvalPolicy: 'on-request',
   cwdMode: 'vault',
   customCwd: '',
   resume: true,
 }
 
+const invalidCodexAgentSettings: CodexAgentSettingsDefaults = {
+  ...defaultCodexAgentSettings,
+  enabled: false,
+  defaultSandbox: 'read-only',
+}
+
 export const MAX_MCP_SERVERS = 32
 
-const codexAgentSettingsSchema = z.object({
-  enabled: z.boolean().catch(true),
-  command: z.string().min(1).max(4_096).catch('codex'),
-  defaultSandbox: z
-    .enum(['read-only', 'workspace-write', 'danger-full-access'])
-    .catch('workspace-write'),
-  approvalPolicy: z
-    .enum(['default', 'untrusted', 'on-request', 'never'])
-    .catch('never'),
-  cwdMode: z.enum(['vault', 'custom']).catch('vault'),
-  customCwd: z.string().max(4_096).catch(''),
-  resume: z.boolean().catch(true),
-})
+const codexAgentSettingsSchema = z
+  .object({
+    enabled: z.boolean().default(true).catch(false),
+    command: z.string().min(1).max(4_096).default('codex').catch('codex'),
+    defaultSandbox: z
+      .enum(['read-only', 'workspace-write', 'danger-full-access'])
+      .default('workspace-write')
+      .catch('read-only'),
+    approvalPolicy: z.preprocess(
+      (value) => (value === 'default' ? 'on-request' : value),
+      z
+        .enum(['untrusted', 'on-request', 'never'])
+        .default('on-request')
+        .catch('on-request'),
+    ),
+    cwdMode: z.enum(['vault', 'custom']).default('vault').catch('vault'),
+    customCwd: z.string().max(4_096).default('').catch(''),
+    resume: z.boolean().default(true).catch(true),
+  })
+  .default(defaultCodexAgentSettings)
+  .catch(invalidCodexAgentSettings)
 
 const agentSettingsSchema = z
   .object({
-    codex: codexAgentSettingsSchema.catch(defaultCodexAgentSettings),
+    codex: codexAgentSettingsSchema,
+  })
+  .default({
+    codex: defaultCodexAgentSettings,
   })
   .catch({
-    codex: defaultCodexAgentSettings,
+    codex: invalidCodexAgentSettings,
   })
 
 type SettingsWithIds = {

@@ -23,7 +23,7 @@ describe('Migration from v16 to v17', () => {
         enabled: true,
         command: 'codex',
         defaultSandbox: 'workspace-write',
-        approvalPolicy: 'never',
+        approvalPolicy: 'on-request',
         cwdMode: 'vault',
         customCwd: '',
         resume: true,
@@ -62,6 +62,22 @@ describe('Migration from v16 to v17', () => {
         resume: false,
       },
     })
+  })
+
+  it('should normalize legacy default approval to on-request', () => {
+    const result = migrateFrom16To17({
+      version: 16,
+      agent: {
+        codex: {
+          approvalPolicy: 'default',
+        },
+      },
+    })
+
+    expect(
+      (result.agent as { codex: { approvalPolicy: unknown } }).codex
+        .approvalPolicy,
+    ).toBe('on-request')
   })
 
   it('should preserve provider, chat, and MCP values', () => {

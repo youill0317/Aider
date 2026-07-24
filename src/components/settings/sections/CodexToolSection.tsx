@@ -11,13 +11,12 @@ import { ObsidianTextInput } from '../../common/ObsidianTextInput'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 
 const SANDBOX_OPTIONS: Record<CodexSandboxMode, string> = {
-  'danger-full-access': 'Full access (no sandbox)',
+  'danger-full-access': 'Full access (filesystem and network)',
   'read-only': 'Read only',
   'workspace-write': 'Workspace write',
 }
 
 const APPROVAL_OPTIONS: Record<CodexApprovalPolicy, string> = {
-  default: 'Codex default',
   never: 'Never ask',
   'on-request': 'Ask as needed',
   untrusted: 'Ask for untrusted commands',
@@ -85,8 +84,8 @@ export function CodexToolSection() {
       </ObsidianSetting>
 
       <ObsidianSetting
-        name="Default sandbox"
-        desc="Controls Codex access during approved runs. Full access disables sandbox protections."
+        name="Sandbox"
+        desc="Controls access during approved runs. Full access removes filesystem and network sandbox protections."
       >
         <ObsidianDropdown
           value={codexSettings.defaultSandbox}
@@ -107,8 +106,8 @@ export function CodexToolSection() {
       </ObsidianSetting>
 
       <ObsidianSetting
-        name="Default approval"
-        desc="Controls whether Codex asks again after Aider approves a run. Never ask skips Codex confirmation; sandbox restrictions still apply."
+        name="Approval policy"
+        desc="Controls whether Codex asks again after Aider approves a run. Never ask runs commands without another Codex prompt; the selected sandbox still applies."
       >
         <ObsidianDropdown
           value={codexSettings.approvalPolicy}

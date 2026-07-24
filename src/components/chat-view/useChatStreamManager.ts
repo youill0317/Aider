@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../contexts/app-context'
 import { useSettings } from '../../contexts/settings-context'
 import { useToolDispatcher } from '../../contexts/tool-dispatcher-context'
+import type {
+  CodexPermissionDecision,
+  CodexPermissionRequest,
+} from '../../core/agent/types'
 import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
@@ -24,6 +28,9 @@ type UseChatStreamManagerParams = {
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
   autoScrollToBottom: () => void
   promptGenerator: PromptGenerator
+  onPermissionRequest?: (
+    request: CodexPermissionRequest,
+  ) => Promise<CodexPermissionDecision | null>
 }
 
 export type UseChatStreamManager = {
@@ -39,6 +46,7 @@ export function useChatStreamManager({
   setChatMessages,
   autoScrollToBottom,
   promptGenerator,
+  onPermissionRequest,
 }: UseChatStreamManagerParams): UseChatStreamManager {
   const app = useApp()
   const { settings, setSettings, getSettings } = useSettings()
@@ -155,6 +163,7 @@ export function useChatStreamManager({
           promptGenerator,
           toolDispatcher,
           abortSignal: abortController.signal,
+          onPermissionRequest,
         })
 
         unsubscribeResponseGenerator = responseGenerator.subscribe(

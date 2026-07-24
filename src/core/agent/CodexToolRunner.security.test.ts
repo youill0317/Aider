@@ -1,12 +1,28 @@
+import { FileSystemAdapter } from 'obsidian'
+
 import { smartComposerSettingsSchema } from '../../settings/schema/setting.types'
+import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
 import { CodexToolRunner } from './CodexToolRunner'
 import type {
   CodexExecRequest,
+  CodexPermissionDecision,
   CodexRunResult,
   CodexRuntime,
+  CodexRuntimeHandlers,
   CodexSandboxMode,
 } from './types'
+
+jest.mock('obsidian', () => ({
+  FileSystemAdapter: class {
+    constructor(private readonly basePath: string) {}
+
+    getBasePath() {
+      return this.basePath
+    }
+  },
+  Platform: { isDesktop: true },
+}))
 
 type CodexSettingsOverride = {
   readonly customCwd?: string
@@ -64,6 +80,124 @@ describe('CodexToolRunner security boundaries', () => {
       cwd: '/configured-vault',
       sandboxMode: 'read-only',
     })
+  })
+
+  it('forwards permission requests only through the caller-provided handler', async () => {
+    let runtimeHandlers: CodexRuntimeHandlers | undefined
+    const onPermissionRequest = jest.fn(
+      async (): Promise<CodexPermissionDecision> => 'accept',
+    )
+    const runner = createRunner({
+      runtime: {
+        execute: (_request, handlers) => {
+          runtimeHandlers = handlers
+          return {
+            abort: jest.fn(),
+            done: Promise.resolve(createRunResult('completed')),
+          }
+        },
+      },
+    })
+
+    await runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+      onPermissionRequest,
+    })
+
+    expect(runtimeHandlers?.onPermissionRequest).toBe(onPermissionRequest)
+  })
+
+  it('disposes its runtime to release an active run during cleanup', async () => {
+    let resolveRun: ((result: CodexRunResult) => void) | undefined
+    const done = new Promise<CodexRunResult>((resolve) => {
+      resolveRun = resolve
+    })
+    const dispose = jest.fn(() => {
+      resolveRun?.(createRunResult('cancelled'))
+    })
+    const abort = jest.fn()
+    const execute = jest.fn(() => ({
+      abort,
+      done,
+    }))
+    const runner = createRunner({ runtime: { dispose, execute } })
+    const call = runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await Promise.all([call, runner.cleanup()])
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['', 'relative/path'])(
+    'rejects unsafe custom cwd %p without executing',
+    async (customCwd) => {
+      const execute = jest.fn()
+      const runner = createRunner({
+        runtime: { execute },
+        settingsOverrides: {
+          agent: { codex: { customCwd, cwdMode: 'custom' } },
+        },
+      })
+      const requestArgs = JSON.stringify({ prompt: 'Inspect the project' })
+
+      runner.allowToolForConversation(requestArgs, 'conversation-1')
+      const response = await runner.callTool({
+        args: requestArgs,
+        id: 'tool-call-1',
+      })
+
+      expect(
+        runner.isExecutionAllowed({
+          conversationId: 'conversation-1',
+          requestArgs,
+        }),
+      ).toBe(false)
+      expect(response).toMatchObject({
+        status: ToolCallResponseStatus.Error,
+        error: expect.stringContaining('non-empty absolute path'),
+      })
+      expect(execute).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['a non-local vault', {}, 'local filesystem vault'],
+    [
+      'an empty local vault path',
+      createFileSystemAdapter(''),
+      'non-empty absolute path',
+    ],
+    [
+      'a relative local vault path',
+      createFileSystemAdapter('relative/vault'),
+      'non-empty absolute path',
+    ],
+  ])('rejects %s without executing', async (_label, adapter, errorText) => {
+    const execute = jest.fn()
+    const runner = createRunner({
+      app: { vault: { adapter } },
+      runtime: { execute },
+      settingsOverrides: {
+        agent: { codex: { cwdMode: 'vault' } },
+      },
+    })
+
+    const response = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Inspect the project' }),
+      id: 'tool-call-1',
+    })
+
+    expect(response).toMatchObject({
+      status: ToolCallResponseStatus.Error,
+      error: expect.stringContaining(errorText),
+    })
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it('scopes chat approval to the normalized prompt and model', () => {
@@ -187,9 +321,11 @@ describe('CodexToolRunner security boundaries', () => {
 })
 
 function createRunner({
+  app = {},
   runtime = createCompletedRuntime(),
   settingsOverrides = {},
 }: {
+  readonly app?: unknown
   readonly runtime?: CodexRuntime
   readonly settingsOverrides?: {
     readonly agent?: {
@@ -208,7 +344,7 @@ function createRunner({
   })
 
   return new CodexToolRunner({
-    app: {} as never,
+    app: app as never,
     settings,
     registerSettingsListener: () => () => undefined,
     runtime,
@@ -222,6 +358,12 @@ function createCompletedRuntime(): CodexRuntime {
       done: Promise.resolve(createRunResult('completed')),
     }),
   }
+}
+
+function createFileSystemAdapter(basePath: string): FileSystemAdapter {
+  const adapter = new FileSystemAdapter()
+  jest.spyOn(adapter, 'getBasePath').mockReturnValue(basePath)
+  return adapter
 }
 
 function createRunResult(status: CodexRunResult['status']): CodexRunResult {

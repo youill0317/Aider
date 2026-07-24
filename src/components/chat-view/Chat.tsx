@@ -19,6 +19,10 @@ import { useRAG } from '../../contexts/rag-context'
 import { useSettings } from '../../contexts/settings-context'
 import { useToolDispatcher } from '../../contexts/tool-dispatcher-context'
 import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
+import type {
+  CodexPermissionDecision,
+  CodexPermissionRequest,
+} from '../../core/agent/types'
 import {
   LLMAPIKeyInvalidException,
   LLMAPIKeyNotSetException,
@@ -38,11 +42,12 @@ import {
   ToolCallResponseStatus,
 } from '../../types/tool-call.types'
 import {
-  buildAgentAssistantMessage,
+  appendAgentAssistantMessage,
   buildAgentChatRequestArgs,
   buildAgentCommandMessageFromEvent,
-  buildAgentPrompt,
+  buildAgentSessionPrompts,
   getRunningAgentChatToolCallIds,
+  invalidateAgentSessions,
   isAgentChatTerminalMessage,
   upsertAgentCommandMessage,
   withCurrentFileMentionable,
@@ -71,6 +76,7 @@ import {
 } from './chat-input/utils/editor-state-to-plain-text'
 import { ChatListDropdown } from './ChatListDropdown'
 import QueryProgress, { QueryProgressState } from './QueryProgress'
+import ToolMessage, { ToolApprovalAction } from './ToolMessage'
 import { useAutoScroll } from './useAutoScroll'
 import { useChatStreamManager } from './useChatStreamManager'
 import UserMessageItem from './UserMessageItem'
@@ -132,6 +138,22 @@ type ActiveApprovedToolCall = {
   readonly toolCallId: string
 }
 
+type PendingCodexPermission = {
+  readonly onAbort: () => void
+  readonly request: CodexPermissionRequest
+  readonly resolve: (decision: CodexPermissionDecision | null) => void
+}
+
+const CODEX_APPROVAL_ACTIONS: Record<
+  CodexPermissionDecision,
+  ToolApprovalAction
+> = {
+  accept: 'allow',
+  acceptForSession: 'allow-for-conversation',
+  cancel: 'cancel',
+  decline: 'reject',
+}
+
 const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const { selectedBlock } = props
   const app = useApp()
@@ -180,6 +202,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     type: 'idle',
   })
   const [activeAgentToolCallCount, setActiveAgentToolCallCount] = useState(0)
+  const [pendingCodexPermissions, setPendingCodexPermissions] = useState<
+    CodexPermissionRequest[]
+  >([])
   const [isPreparingMessage, setIsPreparingMessage] = useState(false)
 
   const chatMessageRows = useMemo(
@@ -193,6 +218,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const activeAgentTasksRef = useRef(new Set<Promise<void>>())
   const activeApprovedToolCallsRef = useRef<ActiveApprovedToolCall[]>([])
   const activeApprovedToolTasksRef = useRef(new Set<Promise<void>>())
+  const pendingCodexPermissionsRef = useRef(
+    new Map<string, PendingCodexPermission>(),
+  )
   const activePromptCompilationRef = useRef<AbortController | null>(null)
   const activeApplyControllerRef = useRef<AbortController | null>(null)
   const activeApplyTaskRef = useRef<Promise<void> | null>(null)
@@ -208,10 +236,107 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     scrollContainerRef: chatMessagesRef,
   })
 
+  const settleCodexPermission = useCallback(
+    (requestId: string, decision: CodexPermissionDecision | null) => {
+      const pending = pendingCodexPermissionsRef.current.get(requestId)
+      if (!pending) return
+      pendingCodexPermissionsRef.current.delete(requestId)
+      pending.request.signal.removeEventListener('abort', pending.onAbort)
+      setPendingCodexPermissions((requests) =>
+        requests.filter((request) => request.id !== requestId),
+      )
+      pending.resolve(decision)
+    },
+    [],
+  )
+
+  const handleCodexPermissionRequest = useCallback(
+    (
+      request: CodexPermissionRequest,
+    ): Promise<CodexPermissionDecision | null> => {
+      if (request.signal.aborted) return Promise.resolve(null)
+      return new Promise((resolve) => {
+        settleCodexPermission(request.id, null)
+        const onAbort = () => settleCodexPermission(request.id, null)
+        pendingCodexPermissionsRef.current.set(request.id, {
+          onAbort,
+          request,
+          resolve,
+        })
+        setPendingCodexPermissions((requests) => [
+          ...requests.filter(({ id }) => id !== request.id),
+          request,
+        ])
+        requestAnimationFrame(() => autoScrollToBottom())
+        request.signal.addEventListener('abort', onAbort, { once: true })
+        if (request.signal.aborted) onAbort()
+      })
+    },
+    [autoScrollToBottom, settleCodexPermission],
+  )
+
+  const cancelPendingCodexPermissions = useCallback(() => {
+    for (const requestId of pendingCodexPermissionsRef.current.keys()) {
+      settleCodexPermission(requestId, 'cancel')
+    }
+  }, [settleCodexPermission])
+
+  const handleCodexApprovalAction = useCallback(
+    (action: ToolApprovalAction, request: ToolCallRequest) => {
+      const decisions: Record<ToolApprovalAction, CodexPermissionDecision> = {
+        allow: 'accept',
+        'allow-for-conversation': 'acceptForSession',
+        reject: 'decline',
+        cancel: 'cancel',
+      }
+      settleCodexPermission(request.id, decisions[action])
+    },
+    [settleCodexPermission],
+  )
+
+  const codexPermissionMessages = useMemo(
+    () =>
+      pendingCodexPermissions.map((request) => {
+        const approvalActions = request.options
+          .map(
+            ({ id }) => CODEX_APPROVAL_ACTIONS[id as CodexPermissionDecision],
+          )
+          .filter(
+            (action): action is ToolApprovalAction => action !== undefined,
+          )
+        return {
+          approvalActions,
+          message: {
+            id: `codex-permission:${request.id}`,
+            role: 'tool' as const,
+            toolCalls: [
+              {
+                request: {
+                  arguments: redactSecrets(
+                    JSON.stringify({
+                      request: request.title,
+                      ...request.details,
+                    }),
+                  ),
+                  id: request.id,
+                  name: CODEX_TOOL_NAME,
+                },
+                response: {
+                  status: ToolCallResponseStatus.PendingApproval as const,
+                },
+              },
+            ],
+          },
+        }
+      }),
+    [pendingCodexPermissions],
+  )
+
   const { abortActiveStreams, submitChatMutation } = useChatStreamManager({
     setChatMessages,
     autoScrollToBottom,
     promptGenerator,
+    onPermissionRequest: handleCodexPermissionRequest,
   })
 
   const registerActiveAgentToolCall = useCallback(
@@ -250,10 +375,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         abortController.abort()
       })
       if (activeToolCalls.length > 0) {
-        const updatedMessages = [
-          ...latestChatMessagesRef.current,
-          buildAgentAssistantMessage('Agent Chat was stopped.'),
-        ]
+        const updatedMessages = appendAgentAssistantMessage(
+          latestChatMessagesRef.current,
+          'Agent Chat was stopped.',
+        )
         latestChatMessagesRef.current = updatedMessages
         setChatMessages(updatedMessages)
       }
@@ -338,6 +463,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     activePromptCompilationRef.current?.abort()
     activePromptCompilationRef.current = null
     activeApplyControllerRef.current?.abort()
+    cancelPendingCodexPermissions()
     const activeApplyTask = activeApplyTaskRef.current
     const settled = Promise.all([
       abortActiveStreams(),
@@ -364,6 +490,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     abortActiveStreams,
     abortActiveAgentToolCalls,
     abortActiveApprovedToolCalls,
+    cancelPendingCodexPermissions,
   ])
 
   const abortActiveWork = useCallback(async () => {
@@ -419,6 +546,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             name: request.name,
             args: request.arguments,
             id: request.id,
+            onPermissionRequest: handleCodexPermissionRequest,
             signal: abortController.signal,
           })
           if (
@@ -453,7 +581,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         activeApprovedToolTasksRef.current.delete(toolTask)
       }
     },
-    [getToolDispatcher, isCurrentWork],
+    [getToolDispatcher, handleCodexPermissionRequest, isCurrentWork],
   )
 
   const registerChatUserInputRef = (
@@ -621,14 +749,6 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         if (mode === 'agent') {
           const toolDispatcher = await getToolDispatcher()
           if (!isCurrentWork(generation, conversationId)) return false
-          createOrUpdateConversation(conversationId, compiledMessages)
-          await flushPendingChatSave()
-          if (!isCurrentWork(generation, conversationId)) return false
-          latestChatMessagesRef.current = compiledMessages
-          setChatMessages(compiledMessages)
-          requestAnimationFrame(() => {
-            forceScrollToBottom()
-          })
           const compiledLastMessage = compiledMessages.at(-1)
           if (compiledLastMessage?.role !== 'user') {
             throw new Error('Last compiled message is not a user message')
@@ -639,6 +759,20 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
               : compiledLastMessage.content
                 ? editorStateToPlainText(compiledLastMessage.content)
                 : ''
+          const agentSessionPrompts = buildAgentSessionPrompts({
+            messages: compiledMessages,
+            prompt: agentPrompt,
+            userMessage: compiledLastMessage,
+          })
+          const runningMessages = invalidateAgentSessions(compiledMessages)
+          createOrUpdateConversation(conversationId, runningMessages)
+          await flushPendingChatSave()
+          if (!isCurrentWork(generation, conversationId)) return false
+          latestChatMessagesRef.current = runningMessages
+          setChatMessages(runningMessages)
+          requestAnimationFrame(() => {
+            forceScrollToBottom()
+          })
           const toolCallId = uuidv4()
           const abortController = new AbortController()
           registerActiveAgentToolCall(toolCallId, abortController)
@@ -646,14 +780,13 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             try {
               const response = await toolDispatcher.callTool({
                 name: CODEX_TOOL_NAME,
-                args: buildAgentChatRequestArgs(
-                  buildAgentPrompt({
-                    messages: compiledMessages,
-                    prompt: agentPrompt,
-                    userMessage: compiledLastMessage,
-                  }),
-                ),
+                args: buildAgentChatRequestArgs(agentSessionPrompts.prompt),
+                codexSession: {
+                  initialPrompt: agentSessionPrompts.initialPrompt,
+                  resume: agentSessionPrompts.resume,
+                },
                 id: toolCallId,
+                onPermissionRequest: handleCodexPermissionRequest,
                 onEvent: (event) => {
                   if (!isCurrentWork(generation, conversationId)) return
                   const commandMessage =
@@ -676,20 +809,25 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                     : response.status === ToolCallResponseStatus.Error
                       ? response.error
                       : `Agent Chat ended with status: ${response.status}`
-              setChatMessages((prevMessages) => [
-                ...prevMessages,
-                buildAgentAssistantMessage(content),
-              ])
+              setChatMessages((prevMessages) =>
+                appendAgentAssistantMessage(
+                  prevMessages,
+                  content,
+                  response.status === ToolCallResponseStatus.Success
+                    ? (response.data.codexSession ?? null)
+                    : null,
+                ),
+              )
             } catch (error) {
               if (!isCurrentWork(generation, conversationId)) return
-              setChatMessages((prevMessages) => [
-                ...prevMessages,
-                buildAgentAssistantMessage(
+              setChatMessages((prevMessages) =>
+                appendAgentAssistantMessage(
+                  prevMessages,
                   redactSecrets(
                     error instanceof Error ? error.message : String(error),
                   ),
                 ),
-              ])
+              )
             } finally {
               unregisterActiveAgentToolCall(toolCallId)
             }
@@ -740,6 +878,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       flushPendingChatSave,
       registerActiveAgentToolCall,
       unregisterActiveAgentToolCall,
+      handleCodexPermissionRequest,
     ],
   )
 
@@ -1233,6 +1372,18 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
               />
             ),
           )}
+          {codexPermissionMessages.map(({ approvalActions, message }) => (
+            <ToolMessage
+              key={message.id}
+              message={message}
+              conversationId={currentConversationId}
+              executeToolCall={async () => undefined}
+              abortToolCall={() => undefined}
+              onToolCallResponseUpdate={() => undefined}
+              approvalActionAdapter={handleCodexApprovalAction}
+              approvalActions={approvalActions}
+            />
+          ))}
           <QueryProgress state={queryProgress} />
           {showContinueResponseButton && (
             <div className="smtcmp-continue-response-button-container">

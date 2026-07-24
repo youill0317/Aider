@@ -76,7 +76,7 @@ export function createTestSettings(): SmartComposerSettings {
         enabled: true,
         command: 'codex',
         defaultSandbox: 'workspace-write',
-        approvalPolicy: 'default',
+        approvalPolicy: 'on-request',
         cwdMode: 'vault',
         customCwd: '',
         resume: true,

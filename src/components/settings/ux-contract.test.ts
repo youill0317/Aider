@@ -40,7 +40,7 @@ describe('settings UX contract', () => {
     const source = readProjectFile('src/components/chat-view/ToolMessage.tsx')
 
     // When/Then: existing labels remain present.
-    expect(source).toContain('primaryText="Allow"')
+    expect(source).toContain("'Allow' : 'Allow for this chat'")
     expect(source).toContain("label: 'Always allow this tool'")
     expect(source).toContain("label: 'Allow for this chat'")
     expect(source).toContain('Reject')

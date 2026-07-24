@@ -1,7 +1,18 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+
 import { CODEX_TOOL_NAME } from '../../core/agent/CodexToolRunner'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
-import { getToolMessageContent } from './ToolMessage'
+import ToolMessage, {
+  ToolApprovalAction,
+  getToolMessageContent,
+  runToolApprovalAction,
+} from './ToolMessage'
+
+jest.mock('clsx', () => ({
+  __esModule: true,
+  default: (...values: unknown[]) => values.filter(Boolean).join(' '),
+}))
 
 jest.mock('../../contexts/settings-context', () => ({
   useSettings: () => ({
@@ -81,5 +92,69 @@ describe('getToolMessageContent', () => {
 
     expect(content).toContain('Call github:search')
     expect(content).not.toContain('Call >_')
+  })
+})
+
+describe('runToolApprovalAction', () => {
+  const request = {
+    id: 'permission-1',
+    name: CODEX_TOOL_NAME,
+  }
+
+  it.each<ToolApprovalAction>([
+    'allow',
+    'allow-for-conversation',
+    'reject',
+    'cancel',
+  ])('routes %s through the inner approval adapter', (action) => {
+    const adapter = jest.fn()
+    const fallback = jest.fn()
+
+    runToolApprovalAction(adapter, action, request, fallback)
+
+    expect(adapter).toHaveBeenCalledWith(action, request)
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('preserves the existing tool action when no adapter is provided', async () => {
+    const fallback = jest.fn().mockResolvedValue(undefined)
+
+    await runToolApprovalAction(undefined, 'allow', request, fallback)
+
+    expect(fallback).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Codex approval actions', () => {
+  it('shows only decisions offered by Codex', () => {
+    const html = renderToStaticMarkup(
+      <ToolMessage
+        message={{
+          id: 'permission-message',
+          role: 'tool',
+          toolCalls: [
+            {
+              request: {
+                id: 'permission-1',
+                name: CODEX_TOOL_NAME,
+              },
+              response: {
+                status: ToolCallResponseStatus.PendingApproval,
+              },
+            },
+          ],
+        }}
+        conversationId="conversation-1"
+        executeToolCall={async () => undefined}
+        abortToolCall={() => undefined}
+        onToolCallResponseUpdate={() => undefined}
+        approvalActionAdapter={() => undefined}
+        approvalActions={['cancel', 'reject']}
+      />,
+    )
+
+    expect(html).not.toContain('Allow')
+    expect(html).toContain('Reject')
+    expect(html).toContain('Abort')
   })
 })

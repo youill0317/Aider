@@ -17,6 +17,7 @@ type CodexSettingsOverride = {
   readonly cwdMode?: 'custom' | 'vault'
   readonly defaultSandbox?: CodexSandboxMode
   readonly enabled?: boolean
+  readonly resume?: boolean
 }
 
 describe('CodexToolRunner', () => {
@@ -87,6 +88,150 @@ describe('CodexToolRunner', () => {
     expect(prompt.length).toBeLessThan(MAX_CODEX_TOOL_PROMPT_CHARS)
     expect(response.status).toBe(ToolCallResponseStatus.Success)
     expect(requests[0].prompt).toBe(prompt)
+  })
+
+  it('returns and resumes a direct Agent session without affecting generic calls', async () => {
+    const requests: CodexExecRequest[] = []
+    const runtime: CodexRuntime = {
+      execute: (request) => {
+        requests.push(request)
+        return {
+          abort: jest.fn(),
+          done: Promise.resolve({
+            ...createRunResult('completed'),
+            threadId: `thread-${requests.length}`,
+          }),
+        }
+      },
+    }
+    const runner = createRunner({ runtime })
+
+    const firstResponse = await runner.callTool({
+      args: JSON.stringify({ prompt: 'First delta' }),
+      codexSession: { initialPrompt: 'First full prompt' },
+      id: 'agent-call-1',
+    })
+    if (firstResponse.status !== ToolCallResponseStatus.Success) {
+      throw new Error('expected first Agent call to succeed')
+    }
+    const firstSession = firstResponse.data.codexSession
+    if (!firstSession) throw new Error('expected a resumable session')
+
+    const secondResponse = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Second delta' }),
+      codexSession: {
+        initialPrompt: 'Second full prompt',
+        resume: firstSession,
+      },
+      id: 'agent-call-2',
+    })
+    const genericResponse = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Generic tool call' }),
+      id: 'generic-call',
+    })
+
+    expect(requests[0]).toMatchObject({
+      prompt: 'First full prompt',
+      resume: undefined,
+    })
+    expect(requests[1]).toMatchObject({
+      prompt: 'Second delta',
+      resume: firstSession,
+    })
+    expect(requests[2]).toMatchObject({
+      prompt: 'Generic tool call',
+      resume: undefined,
+    })
+    expect(secondResponse).toMatchObject({
+      status: ToolCallResponseStatus.Success,
+      data: { codexSession: { threadId: 'thread-2' } },
+    })
+    expect(genericResponse).toEqual({
+      status: ToolCallResponseStatus.Success,
+      data: {
+        type: 'text',
+        text: 'Codex run completed.',
+      },
+    })
+  })
+
+  it('starts from the full prompt when session resume is disabled', async () => {
+    const requests: CodexExecRequest[] = []
+    const runner = createRunner({
+      runtime: {
+        execute: (request) => {
+          requests.push(request)
+          return {
+            abort: jest.fn(),
+            done: Promise.resolve(createRunResult('completed')),
+          }
+        },
+      },
+      settingsOverrides: { agent: { codex: { resume: false } } },
+    })
+
+    await runner.callTool({
+      args: JSON.stringify({ prompt: 'Only the new messages' }),
+      codexSession: {
+        initialPrompt: 'Full conversation',
+        resume: {
+          approvalPolicy: 'on-request',
+          cwd: '/vault',
+          sandboxMode: 'workspace-write',
+          threadId: 'thread-old',
+        },
+      },
+      id: 'agent-call',
+    })
+
+    expect(requests[0].prompt).toBe('Full conversation')
+    expect(requests[0].resume).toBeUndefined()
+  })
+
+  it('starts a fresh session when resume fails before emitting an event', async () => {
+    const requests: CodexExecRequest[] = []
+    const runtime: CodexRuntime = {
+      execute: (request) => {
+        requests.push(request)
+        return {
+          abort: jest.fn(),
+          done:
+            requests.length === 1
+              ? Promise.reject(new Error('Saved thread is unavailable'))
+              : Promise.resolve({
+                  ...createRunResult('completed'),
+                  threadId: 'thread-new',
+                }),
+        }
+      },
+    }
+    const runner = createRunner({ runtime })
+
+    const response = await runner.callTool({
+      args: JSON.stringify({ prompt: 'Only new messages' }),
+      codexSession: {
+        initialPrompt: 'Full conversation',
+        resume: {
+          approvalPolicy: 'on-request',
+          cwd: '/vault',
+          sandboxMode: 'workspace-write',
+          threadId: 'thread-old',
+        },
+      },
+      id: 'agent-call',
+    })
+
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).toMatchObject({
+      prompt: 'Only new messages',
+      resume: { threadId: 'thread-old' },
+    })
+    expect(requests[1].prompt).toBe('Full conversation')
+    expect(requests[1].resume).toBeUndefined()
+    expect(response).toMatchObject({
+      status: ToolCallResponseStatus.Success,
+      data: { codexSession: { threadId: 'thread-new' } },
+    })
   })
 
   it('rejects a second Codex run while one run is active', async () => {

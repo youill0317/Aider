@@ -11,11 +11,11 @@ import {
   ChatToolMessage,
   ChatUserMessage,
 } from '../../types/chat'
+import type { CodexResumeContext } from '../../types/codex'
 import { MentionableCurrentFile } from '../../types/mentionable'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 import { redactSecrets } from '../security/redact-secrets'
 
-import { getLastChatTurns } from './promptGenerator'
 import {
   wrapUntrustedContext,
   wrapUntrustedToolOutput,
@@ -28,13 +28,18 @@ export {
 export const AGENT_CHAT_SUMMARY = 'Agent Chat'
 
 export const AGENT_CHAT_CONTEXT_HEADING = '## Current Obsidian Markdown File'
-const AGENT_CHAT_HISTORY_TURNS = 10
 const MAX_AGENT_HISTORY_CONTENT_CHARS = 24_000
 
 type BuildAgentPromptParams = {
   readonly messages: readonly ChatMessage[]
   readonly prompt: string
   readonly userMessage: ChatUserMessage
+}
+
+export type AgentSessionPrompts = {
+  readonly initialPrompt: string
+  readonly prompt: string
+  readonly resume?: CodexResumeContext
 }
 
 export function buildAgentChatRequestArgs(prompt: string): string {
@@ -46,11 +51,56 @@ export function buildAgentChatRequestArgs(prompt: string): string {
 
 export function buildAgentAssistantMessage(
   content: string,
+  agentSession: CodexResumeContext | null = null,
 ): ChatAssistantMessage {
   return {
     role: 'assistant',
     content,
     id: uuidv4(),
+    metadata: { agentSession },
+  }
+}
+
+export function appendAgentAssistantMessage(
+  messages: readonly ChatMessage[],
+  content: string,
+  agentSession: CodexResumeContext | null = null,
+): ChatMessage[] {
+  return [
+    ...invalidateAgentSessions(messages),
+    buildAgentAssistantMessage(content, agentSession),
+  ]
+}
+
+export function invalidateAgentSessions(
+  messages: readonly ChatMessage[],
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.role === 'assistant' && message.metadata?.agentSession
+      ? {
+          ...message,
+          metadata: { ...message.metadata, agentSession: null },
+        }
+      : message,
+  )
+}
+
+export function buildAgentSessionPrompts(
+  params: BuildAgentPromptParams,
+): AgentSessionPrompts {
+  const initialPrompt = buildAgentPrompt(params)
+  const previousAgentResponse = findLatestAgentResponse(params.messages)
+  if (!previousAgentResponse?.session) {
+    return { initialPrompt, prompt: initialPrompt }
+  }
+
+  return {
+    initialPrompt,
+    prompt: buildAgentPrompt({
+      ...params,
+      messages: params.messages.slice(previousAgentResponse.index + 1),
+    }),
+    resume: previousAgentResponse.session,
   }
 }
 
@@ -92,6 +142,22 @@ Path: ${currentFile.path}
   )}`
 }
 
+function findLatestAgentResponse(messages: readonly ChatMessage[]): {
+  readonly index: number
+  readonly session: CodexResumeContext | null
+} | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (
+      message.role === 'assistant' &&
+      message.metadata?.agentSession !== undefined
+    ) {
+      return { index, session: message.metadata.agentSession }
+    }
+  }
+  return null
+}
+
 function buildAgentConversationPrompt({
   fallbackPrompt,
   messages,
@@ -99,15 +165,16 @@ function buildAgentConversationPrompt({
   readonly fallbackPrompt: string
   readonly messages: readonly ChatMessage[]
 }): string {
-  const contextMessages = getLastChatTurns(messages, AGENT_CHAT_HISTORY_TURNS)
-  if (contextMessages.length === 0) {
-    return fallbackPrompt
+  const reverseTranscript: string[] = []
+  let transcriptChars = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const line = formatAgentHistoryMessage(messages[index])
+    if (!line) continue
+    reverseTranscript.push(line)
+    transcriptChars += line.length + 2
+    if (transcriptChars >= MAX_CODEX_TOOL_PROMPT_CHARS) break
   }
-
-  const transcript = contextMessages
-    .map((message) => formatAgentHistoryMessage(message))
-    .filter((line) => line.length > 0)
-    .join('\n\n')
+  const transcript = reverseTranscript.reverse().join('\n\n')
 
   return transcript || fallbackPrompt
 }

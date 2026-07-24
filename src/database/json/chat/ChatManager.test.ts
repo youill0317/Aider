@@ -660,6 +660,74 @@ describe('ChatManager', () => {
     })
   })
 
+  it('keeps a valid persisted Agent session marker', async () => {
+    const stored = {
+      id: 'agent-session-chat',
+      title: 'Agent session',
+      messages: [
+        {
+          id: 'answer-1',
+          role: 'assistant',
+          content: 'Done',
+          metadata: {
+            agentSession: {
+              approvalPolicy: 'never',
+              cwd: '/vault',
+              sandboxMode: 'workspace-write',
+              threadId: 'thread-1',
+            },
+          },
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 1,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    }
+    mockAdapter.read.mockResolvedValue(JSON.stringify(stored))
+
+    await expect(chatManager.read('agent-session.json')).resolves.toEqual(
+      stored,
+    )
+  })
+
+  it('normalizes the removed Codex default approval marker', async () => {
+    const stored = {
+      id: 'legacy-agent-session-chat',
+      title: 'Legacy Agent session',
+      messages: [
+        {
+          id: 'answer-1',
+          role: 'assistant',
+          content: 'Done',
+          metadata: {
+            agentSession: {
+              approvalPolicy: 'default',
+              cwd: '/vault',
+              sandboxMode: 'workspace-write',
+              threadId: 'thread-1',
+            },
+          },
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 1,
+      schemaVersion: CHAT_SCHEMA_VERSION,
+    }
+    mockAdapter.read.mockResolvedValue(JSON.stringify(stored))
+
+    await expect(
+      chatManager.read('legacy-agent-session.json'),
+    ).resolves.toMatchObject({
+      messages: [
+        {
+          metadata: {
+            agentSession: { approvalPolicy: 'on-request' },
+          },
+        },
+      ],
+    })
+  })
+
   it.each([
     ['invalid message collection', 'not-an-array'],
     ['invalid nested message', [{ id: 'message-id', role: 'user' }]],

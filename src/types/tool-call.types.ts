@@ -1,3 +1,5 @@
+import type { CodexResumeContext } from './codex'
+
 export type ToolCallRequest = {
   id: string
   name: string
@@ -16,6 +18,7 @@ export type ToolCallResponse =
       data: {
         type: 'text'
         text: string
+        codexSession?: CodexResumeContext
       }
     }
   | {

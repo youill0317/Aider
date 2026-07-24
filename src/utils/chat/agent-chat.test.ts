@@ -4,15 +4,17 @@ import {
   CODEX_TOOL_NAME,
   MAX_CODEX_TOOL_PROMPT_CHARS,
 } from '../../core/agent/CodexToolRunner'
-import type { ChatUserMessage } from '../../types/chat'
+import type { ChatMessage, ChatUserMessage } from '../../types/chat'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
 import {
   AGENT_CHAT_CONTEXT_HEADING,
+  appendAgentAssistantMessage,
   buildAgentAssistantMessage,
   buildAgentChatRequestArgs,
   buildAgentCommandMessageFromEvent,
   buildAgentPrompt,
+  buildAgentSessionPrompts,
   getRunningAgentChatToolCallIds,
   isAgentChatToolMessage,
   upsertAgentCommandMessage,
@@ -198,6 +200,186 @@ describe('buildAgentAssistantMessage', () => {
     expect(message.role).toBe('assistant')
     expect(message.content).toBe(output)
     expect(message.toolCallRequests).toBeUndefined()
+    expect(message.metadata?.agentSession).toBeNull()
+  })
+
+  it('keeps only the latest Agent response resumable', () => {
+    const firstSession = {
+      approvalPolicy: 'never' as const,
+      cwd: '/vault',
+      sandboxMode: 'workspace-write' as const,
+      threadId: 'thread-1',
+    }
+    const secondSession = { ...firstSession, threadId: 'thread-2' }
+    const firstResponse = buildAgentAssistantMessage('First', firstSession)
+    const messages = appendAgentAssistantMessage(
+      [firstResponse],
+      'Second',
+      secondSession,
+    )
+
+    expect(
+      messages[0].role === 'assistant'
+        ? messages[0].metadata?.agentSession
+        : undefined,
+    ).toBeNull()
+    expect(
+      messages[1].role === 'assistant'
+        ? messages[1].metadata?.agentSession
+        : undefined,
+    ).toEqual(secondSession)
+
+    const editedRequest: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Edited branch',
+      id: 'edited-user',
+      mentionables: [],
+    }
+    const branchedPrompts = buildAgentSessionPrompts({
+      messages: [messages[0], editedRequest],
+      prompt: 'Edited branch',
+      userMessage: editedRequest,
+    })
+    expect(branchedPrompts.resume).toBeUndefined()
+    expect(branchedPrompts.prompt).toBe(branchedPrompts.initialPrompt)
+  })
+})
+
+describe('buildAgentSessionPrompts', () => {
+  it('resumes with only messages added after the last Agent response', () => {
+    const previousSession = {
+      approvalPolicy: 'never' as const,
+      cwd: '/vault',
+      sandboxMode: 'workspace-write' as const,
+      threadId: 'thread-1',
+    }
+    const currentMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Second Agent request',
+      id: 'agent-user-2',
+      mentionables: [],
+    }
+    const prompts = buildAgentSessionPrompts({
+      messages: [
+        {
+          role: 'user',
+          content: null,
+          promptContent: 'First Agent request',
+          id: 'agent-user-1',
+          mentionables: [],
+        },
+        {
+          role: 'agent-command',
+          id: 'agent-command-1',
+          title: '>_',
+          detail: 'inspect',
+          input: 'inspect',
+          output: 'old command output',
+          status: 'success',
+          kind: 'command',
+          exitCode: 0,
+        },
+        {
+          role: 'assistant',
+          content: 'First Agent answer',
+          id: 'agent-assistant-1',
+          metadata: { agentSession: previousSession },
+        },
+        {
+          role: 'user',
+          content: null,
+          promptContent: 'Normal follow-up',
+          id: 'normal-user',
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          content: 'Normal answer',
+          id: 'normal-assistant',
+        },
+        {
+          role: 'user',
+          content: null,
+          promptContent: 'Vault follow-up',
+          id: 'vault-user',
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          content: 'Vault answer',
+          id: 'vault-assistant',
+        },
+        currentMessage,
+      ],
+      prompt: 'Second Agent request',
+      userMessage: currentMessage,
+    })
+
+    expect(prompts.resume).toEqual(previousSession)
+    expect(prompts.initialPrompt).toContain('First Agent request')
+    expect(prompts.prompt).not.toContain('First Agent request')
+    expect(prompts.prompt).not.toContain('old command output')
+    expect(prompts.prompt).not.toContain('First Agent answer')
+    expect(prompts.prompt).toContain('Normal follow-up')
+    expect(prompts.prompt).toContain('Normal answer')
+    expect(prompts.prompt).toContain('Vault follow-up')
+    expect(prompts.prompt).toContain('Vault answer')
+    expect(prompts.prompt).toContain('Second Agent request')
+  })
+
+  it('keeps every unsynced turn until the prompt size limit', () => {
+    const previousSession = {
+      approvalPolicy: 'never' as const,
+      cwd: '/vault',
+      sandboxMode: 'workspace-write' as const,
+      threadId: 'thread-1',
+    }
+    const currentMessage: ChatUserMessage = {
+      role: 'user',
+      content: null,
+      promptContent: 'Run Agent now',
+      id: 'agent-user',
+      mentionables: [],
+    }
+    const interstitialMessages = Array.from({ length: 12 }).reduce<
+      ChatMessage[]
+    >((messages, _, index) => {
+      messages.push(
+        {
+          role: 'user',
+          content: null,
+          promptContent: `Normal question ${index + 1}`,
+          id: `normal-user-${index + 1}`,
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          content: `Normal answer ${index + 1}`,
+          id: `normal-assistant-${index + 1}`,
+        },
+      )
+      return messages
+    }, [])
+    const prompts = buildAgentSessionPrompts({
+      messages: [
+        {
+          role: 'assistant',
+          content: 'Previous Agent answer',
+          id: 'agent-assistant',
+          metadata: { agentSession: previousSession },
+        },
+        ...interstitialMessages,
+        currentMessage,
+      ],
+      prompt: 'Run Agent now',
+      userMessage: currentMessage,
+    })
+
+    expect(prompts.prompt).toContain('Normal question 1')
+    expect(prompts.prompt).toContain('Normal answer 12')
+    expect(prompts.prompt).toContain('Run Agent now')
   })
 })
 

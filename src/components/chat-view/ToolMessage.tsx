@@ -73,18 +73,42 @@ export type ToolCallResponseUpdater = (
   response: ToolCallResponse,
 ) => void
 
+export type ToolApprovalAction =
+  | 'allow'
+  | 'allow-for-conversation'
+  | 'reject'
+  | 'cancel'
+
+export type ToolApprovalActionAdapter = (
+  action: ToolApprovalAction,
+  request: ToolCallRequest,
+) => void
+
+export function runToolApprovalAction(
+  adapter: ToolApprovalActionAdapter | undefined,
+  action: ToolApprovalAction,
+  request: ToolCallRequest,
+  fallback: () => void | Promise<void>,
+): void | Promise<void> {
+  return adapter ? adapter(action, request) : fallback()
+}
+
 const ToolMessage = memo(function ToolMessage({
   message,
   conversationId,
   executeToolCall,
   abortToolCall,
   onToolCallResponseUpdate,
+  approvalActionAdapter,
+  approvalActions,
 }: {
   message: ChatToolMessage
   conversationId: string
   executeToolCall: ExecuteApprovedToolCall
   abortToolCall: AbortApprovedToolCall
   onToolCallResponseUpdate: ToolCallResponseUpdater
+  approvalActionAdapter?: ToolApprovalActionAdapter
+  approvalActions?: readonly ToolApprovalAction[]
 }) {
   return (
     <div className="smtcmp-toolcall-container">
@@ -99,6 +123,8 @@ const ToolMessage = memo(function ToolMessage({
             conversationId={conversationId}
             executeToolCall={executeToolCall}
             abortToolCall={abortToolCall}
+            approvalActionAdapter={approvalActionAdapter}
+            approvalActions={approvalActions}
             onResponseUpdate={(response) =>
               onToolCallResponseUpdate(
                 message.id,
@@ -119,6 +145,8 @@ function ToolCallItem({
   conversationId,
   executeToolCall,
   abortToolCall,
+  approvalActionAdapter,
+  approvalActions,
   onResponseUpdate,
 }: {
   request: ToolCallRequest
@@ -126,6 +154,8 @@ function ToolCallItem({
   conversationId: string
   executeToolCall: ExecuteApprovedToolCall
   abortToolCall: AbortApprovedToolCall
+  approvalActionAdapter?: ToolApprovalActionAdapter
+  approvalActions?: readonly ToolApprovalAction[]
   onResponseUpdate: (response: ToolCallResponse) => void
 }) {
   const {
@@ -171,10 +201,21 @@ function ToolCallItem({
       return request.arguments
     }
   }, [request.arguments])
-  const approveToolCall = (savePermission?: () => Promise<void>) => {
+  const runApprovalAction = (
+    action: ToolApprovalAction,
+    fallback: () => void | Promise<void>,
+  ) => runToolApprovalAction(approvalActionAdapter, action, request, fallback)
+  const actionAllowed = (action: ToolApprovalAction) =>
+    approvalActions === undefined || approvalActions.includes(action)
+  const approveToolCall = (
+    action: ToolApprovalAction,
+    savePermission?: () => Promise<void>,
+  ) => {
     void (async () => {
-      await savePermission?.()
-      await handleToolCall()
+      await runApprovalAction(action, async () => {
+        await savePermission?.()
+        await handleToolCall()
+      })
       setIsOpen(false)
     })().catch((error) => {
       new Notice('Unable to approve tool call')
@@ -233,46 +274,86 @@ function ToolCallItem({
         <div className="smtcmp-toolcall-footer">
           {response.status === ToolCallResponseStatus.PendingApproval && (
             <div className="smtcmp-toolcall-footer-actions">
-              <SplitButton
-                primaryText="Allow"
-                onPrimaryClick={() => approveToolCall()}
-                menuOptions={
-                  isCodexTool
-                    ? [
-                        {
-                          label: 'Allow for this chat',
-                          onClick: () =>
-                            approveToolCall(handleAllowForConversation),
-                        },
-                      ]
-                    : [
-                        {
-                          label: 'Always allow this tool',
-                          onClick: () =>
-                            approveToolCall(handleAllowAutoExecution),
-                        },
-                        {
-                          label: 'Allow for this chat',
-                          onClick: () =>
-                            approveToolCall(handleAllowForConversation),
-                        },
-                      ]
-                }
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  handleReject()
-                  setIsOpen(false)
-                }}
-              >
-                Reject
-              </button>
+              {(actionAllowed('allow') ||
+                actionAllowed('allow-for-conversation')) && (
+                <SplitButton
+                  primaryText={
+                    actionAllowed('allow') ? 'Allow' : 'Allow for this chat'
+                  }
+                  onPrimaryClick={() =>
+                    actionAllowed('allow')
+                      ? approveToolCall('allow')
+                      : approveToolCall(
+                          'allow-for-conversation',
+                          handleAllowForConversation,
+                        )
+                  }
+                  menuOptions={
+                    actionAllowed('allow') &&
+                    actionAllowed('allow-for-conversation')
+                      ? isCodexTool
+                        ? [
+                            {
+                              label: 'Allow for this chat',
+                              onClick: () =>
+                                approveToolCall(
+                                  'allow-for-conversation',
+                                  handleAllowForConversation,
+                                ),
+                            },
+                          ]
+                        : [
+                            {
+                              label: 'Always allow this tool',
+                              onClick: () =>
+                                approveToolCall(
+                                  'allow',
+                                  handleAllowAutoExecution,
+                                ),
+                            },
+                            {
+                              label: 'Allow for this chat',
+                              onClick: () =>
+                                approveToolCall(
+                                  'allow-for-conversation',
+                                  handleAllowForConversation,
+                                ),
+                            },
+                          ]
+                      : []
+                  }
+                />
+              )}
+              {actionAllowed('reject') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    runApprovalAction('reject', handleReject)
+                    setIsOpen(false)
+                  }}
+                >
+                  Reject
+                </button>
+              )}
+              {actionAllowed('cancel') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    runApprovalAction('cancel', handleAbort)
+                    setIsOpen(false)
+                  }}
+                >
+                  Abort
+                </button>
+              )}
             </div>
           )}
           {response.status === ToolCallResponseStatus.Running && (
             <div className="smtcmp-toolcall-footer-actions">
-              <button type="button" onClick={handleAbort}>
+              <button
+                type="button"
+                onClick={() => runApprovalAction('cancel', handleAbort)}
+              >
                 Abort
               </button>
             </div>

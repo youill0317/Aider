@@ -10,14 +10,19 @@ import {
 import { redactSecrets } from '../../utils/security/redact-secrets'
 
 import { extractAgentText, statusMessage } from './agent-output'
-import { createCodexExecRuntime } from './codex/createCodexExecRuntime'
+import { createCodexRuntime } from './codex/createCodexRuntime'
 import type {
   CodexAgentEvent,
   CodexApprovalPolicy,
   CodexExecRequest,
+  CodexPermissionDecision,
+  CodexPermissionRequest,
   CodexRunHandle,
+  CodexRunResult,
   CodexRuntime,
+  CodexRuntimeHandlers,
   CodexSandboxMode,
+  CodexSessionRequest,
 } from './types'
 
 export const CODEX_TOOL_NAME = 'run_codex'
@@ -27,6 +32,8 @@ const MAX_CODEX_TOOL_OUTPUT_CHARS = 24_000
 const MAX_CODEX_TOOL_ARGUMENT_CHARS = 4 * 1024 * 1024
 const MAX_ALLOWED_CONVERSATIONS = 1_000
 const MAX_ALLOWED_EXECUTIONS_PER_CONVERSATION = 100
+const SAFE_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
+const ABSOLUTE_PATH_PATTERN = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/
 
 const codexToolArgsSchema = z.object({
   prompt: z.string().trim().min(1).max(MAX_CODEX_TOOL_PROMPT_CHARS),
@@ -61,6 +68,9 @@ export class CodexToolRunner {
   private settings: SmartComposerSettings
   private readonly unsubscribeFromSettings: () => void
   private runtime: CodexRuntime | null
+  private readonly runtimeInjected: boolean
+  private runtimeCommand: string | null = null
+  private runtimeLoading: Promise<CodexRuntime> | null = null
   private readonly allowedExecutionsByConversation = new Map<
     string,
     Set<string>
@@ -79,6 +89,7 @@ export class CodexToolRunner {
     this.app = app
     this.settings = settings
     this.runtime = runtime ?? null
+    this.runtimeInjected = runtime !== undefined
     this.unsubscribeFromSettings = registerSettingsListener((newSettings) => {
       this.settings = newSettings
     })
@@ -92,6 +103,14 @@ export class CodexToolRunner {
     this.abortingRunIds.clear()
     this.allowedExecutionsByConversation.clear()
     this.unsubscribeFromSettings()
+    const runtimeLoading = this.runtimeLoading
+    if (runtimeLoading) {
+      await Promise.allSettled([runtimeLoading])
+    }
+    const runtime = this.runtime
+    this.runtime = null
+    this.runtimeCommand = null
+    await runtime?.dispose?.()
     await Promise.allSettled(activeRuns.map((run) => run.done))
   }
 
@@ -133,6 +152,9 @@ export class CodexToolRunner {
     conversationId: string,
   ): void {
     const executionKey = this.getExecutionKeyFromRequestArgs(requestArgs)
+    if (executionKey === null) {
+      return
+    }
     let allowedExecutions =
       this.allowedExecutionsByConversation.get(conversationId)
     if (!allowedExecutions) {
@@ -175,6 +197,9 @@ export class CodexToolRunner {
       return false
     }
     const executionKey = this.getExecutionKeyFromRequestArgs(requestArgs)
+    if (executionKey === null) {
+      return false
+    }
     return (
       this.allowedExecutionsByConversation
         .get(conversationId)
@@ -185,12 +210,18 @@ export class CodexToolRunner {
   async callTool({
     args,
     id,
+    codexSession,
     onEvent,
+    onPermissionRequest,
     signal,
   }: {
     readonly args?: string
     readonly id: string
+    readonly codexSession?: CodexSessionRequest
     readonly onEvent?: (event: CodexAgentEvent) => void
+    readonly onPermissionRequest?: (
+      request: CodexPermissionRequest,
+    ) => Promise<CodexPermissionDecision | null>
     readonly signal?: AbortSignal
   }): Promise<ToolCallResponse> {
     if (!this.isAvailable()) {
@@ -226,25 +257,40 @@ export class CodexToolRunner {
       return { status: ToolCallResponseStatus.Aborted }
     }
 
-    const request = this.buildExecRequest(parsedArgs.data)
+    let request: CodexExecRequest
+    try {
+      request = this.buildExecRequest(parsedArgs.data, codexSession)
+    } catch (error) {
+      return {
+        status: ToolCallResponseStatus.Error,
+        error: boundAndRedact(
+          error instanceof Error ? error.message : String(error),
+        ),
+      }
+    }
     let lastAgentText = ''
+    let receivedEvent = false
     let run: CodexRunHandle
+    let runtime: CodexRuntime
+    const runtimeHandlers: CodexRuntimeHandlers = {
+      onError: () => undefined,
+      onEvent: (event: CodexAgentEvent) => {
+        receivedEvent = true
+        onEvent?.(event)
+        const text = extractAgentText(event)
+        if (text.length > 0) {
+          lastAgentText = text
+        }
+      },
+      onPermissionRequest,
+    }
     this.startingRun = true
     try {
-      const runtime = await this.getRuntime()
+      runtime = await this.getRuntime(request.command ?? 'codex')
       if (!this.isAvailable() || signal?.aborted) {
         return { status: ToolCallResponseStatus.Aborted }
       }
-      run = runtime.execute(request, {
-        onError: () => undefined,
-        onEvent: (event) => {
-          onEvent?.(event)
-          const text = extractAgentText(event)
-          if (text.length > 0) {
-            lastAgentText = text
-          }
-        },
-      })
+      run = runtime.execute(request, runtimeHandlers)
       this.activeRuns.set(id, run)
     } catch (error) {
       return {
@@ -261,16 +307,51 @@ export class CodexToolRunner {
     signal?.addEventListener('abort', abortListener, { once: true })
 
     try {
-      const result = await run.done
+      let result: CodexRunResult
+      try {
+        result = await run.done
+      } catch (error) {
+        if (
+          !request.resume ||
+          !codexSession ||
+          receivedEvent ||
+          signal?.aborted
+        ) {
+          throw error
+        }
+        run = runtime.execute(
+          {
+            ...request,
+            prompt: codexSession.initialPrompt,
+            resume: undefined,
+          },
+          runtimeHandlers,
+        )
+        this.activeRuns.set(id, run)
+        result = await run.done
+      }
       if (result.status === 'cancelled') {
         return { status: ToolCallResponseStatus.Aborted }
       }
       const output = lastAgentText.trim() || statusMessage(result.status)
+      const resumableSession =
+        codexSession &&
+        this.settings.agent.codex.resume &&
+        result.status === 'completed' &&
+        isSafeThreadId(result.threadId)
+          ? {
+              approvalPolicy: request.approvalPolicy,
+              cwd: request.cwd,
+              sandboxMode: request.sandboxMode,
+              threadId: result.threadId,
+            }
+          : undefined
       return {
         status: ToolCallResponseStatus.Success,
         data: {
           type: 'text',
           text: boundAndRedact(output),
+          ...(resumableSession ? { codexSession: resumableSession } : {}),
         },
       }
     } catch (error) {
@@ -301,32 +382,54 @@ export class CodexToolRunner {
     run.abort()
   }
 
-  private buildExecRequest(args: CodexToolArgs): CodexExecRequest {
+  private buildExecRequest(
+    args: CodexToolArgs,
+    session?: CodexSessionRequest,
+  ): CodexExecRequest {
+    const approvalPolicy = this.settings.agent.codex.approvalPolicy
+    const cwd = this.resolveDefaultCwd()
+    const sandboxMode = this.settings.agent.codex.defaultSandbox
+    const resume =
+      this.settings.agent.codex.resume &&
+      session?.resume?.approvalPolicy === approvalPolicy &&
+      session.resume.cwd === cwd &&
+      session.resume.sandboxMode === sandboxMode &&
+      isSafeThreadId(session.resume.threadId)
+        ? session.resume
+        : undefined
+
     return {
-      approvalPolicy: this.settings.agent.codex.approvalPolicy,
+      approvalPolicy,
       command: this.settings.agent.codex.command,
-      cwd: this.resolveDefaultCwd(),
+      cwd,
       model: normalizeOptionalString(args.model),
-      prompt: args.prompt,
-      sandboxMode: this.settings.agent.codex.defaultSandbox,
+      prompt: resume ? args.prompt : (session?.initialPrompt ?? args.prompt),
+      resume,
+      sandboxMode,
     }
   }
 
-  private getExecutionKeyFromRequestArgs(args: string | undefined): string {
+  private getExecutionKeyFromRequestArgs(
+    args: string | undefined,
+  ): string | null {
     const parsedArgs = this.parseArgs(args)
     const codexArgs = parsedArgs.success
       ? parsedArgs.data
       : {
           prompt: '',
         }
-    return buildExecutionKey({
-      approvalPolicy: this.settings.agent.codex.approvalPolicy,
-      command: this.settings.agent.codex.command,
-      cwd: this.resolveDefaultCwd(),
-      model: normalizeOptionalString(codexArgs.model),
-      prompt: codexArgs.prompt.trim(),
-      sandbox: this.settings.agent.codex.defaultSandbox,
-    })
+    try {
+      return buildExecutionKey({
+        approvalPolicy: this.settings.agent.codex.approvalPolicy,
+        command: this.settings.agent.codex.command,
+        cwd: this.resolveDefaultCwd(),
+        model: normalizeOptionalString(codexArgs.model),
+        prompt: codexArgs.prompt.trim(),
+        sandbox: this.settings.agent.codex.defaultSandbox,
+      })
+    } catch {
+      return null
+    }
   }
 
   private parseArgs(args: string | undefined):
@@ -357,18 +460,64 @@ export class CodexToolRunner {
 
   private resolveDefaultCwd(): string {
     const customCwd = this.settings.agent.codex.customCwd.trim()
-    if (this.settings.agent.codex.cwdMode === 'custom' && customCwd) {
+    if (this.settings.agent.codex.cwdMode === 'custom') {
+      if (!customCwd || !ABSOLUTE_PATH_PATTERN.test(customCwd)) {
+        throw new Error(
+          'Codex custom working directory must be a non-empty absolute path.',
+        )
+      }
       return customCwd
     }
-    if (this.app.vault.adapter instanceof FileSystemAdapter) {
-      return this.app.vault.adapter.getBasePath()
+    if (!(this.app.vault.adapter instanceof FileSystemAdapter)) {
+      throw new Error(
+        'Codex requires a local filesystem vault or an absolute custom working directory.',
+      )
     }
-    return '/'
+    const vaultCwd = this.app.vault.adapter.getBasePath().trim()
+    if (!vaultCwd || !ABSOLUTE_PATH_PATTERN.test(vaultCwd)) {
+      throw new Error(
+        'Codex vault working directory must be a non-empty absolute path.',
+      )
+    }
+    return vaultCwd
   }
 
-  private async getRuntime(): Promise<CodexRuntime> {
+  private async getRuntime(requestedCommand: string): Promise<CodexRuntime> {
+    if (this.runtimeInjected) {
+      if (this.runtime === null) {
+        throw new Error('Injected Codex runtime is unavailable.')
+      }
+      return this.runtime
+    }
+
+    const command = requestedCommand.trim() || 'codex'
+    const runtimeLoading = this.loadRuntime(command)
+    this.runtimeLoading = runtimeLoading
+    try {
+      const runtime = await runtimeLoading
+      if (this.disposed) {
+        throw new Error(
+          'Codex tool runner was disposed while loading its runtime.',
+        )
+      }
+      return runtime
+    } finally {
+      if (this.runtimeLoading === runtimeLoading) {
+        this.runtimeLoading = null
+      }
+    }
+  }
+
+  private async loadRuntime(command: string): Promise<CodexRuntime> {
+    if (this.runtime !== null && this.runtimeCommand !== command) {
+      const staleRuntime = this.runtime
+      this.runtime = null
+      this.runtimeCommand = null
+      await staleRuntime.dispose?.()
+    }
     if (this.runtime === null) {
-      this.runtime = await createCodexExecRuntime()
+      this.runtime = await createCodexRuntime()
+      this.runtimeCommand = command
     }
     return this.runtime
   }
@@ -402,4 +551,12 @@ function normalizeOptionalString(
 ): string | undefined {
   const trimmedValue = value?.trim()
   return trimmedValue && trimmedValue.length > 0 ? trimmedValue : undefined
+}
+
+function isSafeThreadId(threadId: string | null): threadId is string {
+  return (
+    threadId !== null &&
+    threadId.length <= 512 &&
+    SAFE_THREAD_ID_PATTERN.test(threadId)
+  )
 }

@@ -1,5 +1,9 @@
 import { v4 as uuidv4 } from 'uuid'
 
+import type {
+  CodexPermissionDecision,
+  CodexPermissionRequest,
+} from '../../core/agent/types'
 import { BaseLLMProvider } from '../../core/llm/base'
 import { ChatMessage, ChatToolMessage } from '../../types/chat'
 import { ChatModel } from '../../types/chat-model.types'
@@ -41,6 +45,9 @@ export type ResponseGeneratorParams = {
   toolDispatcher: ToolDispatcher
   abortSignal?: AbortSignal
   isToolsEnabled?: () => boolean
+  onPermissionRequest?: (
+    request: CodexPermissionRequest,
+  ) => Promise<CodexPermissionDecision | null>
 }
 
 export class ResponseGenerator {
@@ -52,6 +59,9 @@ export class ResponseGenerator {
   private readonly promptGenerator: PromptGenerator
   private readonly toolDispatcher: ToolDispatcher
   private readonly abortSignal?: AbortSignal
+  private readonly onPermissionRequest?: (
+    request: CodexPermissionRequest,
+  ) => Promise<CodexPermissionDecision | null>
   private readonly receivedMessages: ChatMessage[]
   private readonly maxAutoIterations: number
 
@@ -70,6 +80,7 @@ export class ResponseGenerator {
     this.promptGenerator = params.promptGenerator
     this.toolDispatcher = params.toolDispatcher
     this.abortSignal = params.abortSignal
+    this.onPermissionRequest = params.onPermissionRequest
   }
 
   public subscribe(callback: (messages: ChatMessage[]) => void) {
@@ -127,6 +138,7 @@ export class ResponseGenerator {
               name: toolCall.request.name,
               args: toolCall.request.arguments,
               id: toolCall.request.id,
+              onPermissionRequest: this.onPermissionRequest,
               signal: this.abortSignal,
             })
             this.updateResponseMessages((messages) =>

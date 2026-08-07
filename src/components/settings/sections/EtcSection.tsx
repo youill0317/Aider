@@ -6,6 +6,7 @@ import { smartComposerSettingsSchema } from '../../../settings/schema/setting.ty
 import { ObsidianButton } from '../../common/ObsidianButton'
 import { ObsidianSetting } from '../../common/ObsidianSetting'
 import { ConfirmModal } from '../../modals/ConfirmModal'
+import { resetSettings } from '../destructive-actions'
 
 type EtcSectionProps = {
   app: App
@@ -22,16 +23,12 @@ export function EtcSection({ app, plugin }: EtcSectionProps) {
         'Are you sure you want to reset all settings to default values? This cannot be undone.',
       ctaText: 'Reset',
       onConfirm: async () => {
-        const defaultSettings = smartComposerSettingsSchema.parse({})
-        await Promise.all([
-          ...plugin.settings.providers.map((provider) =>
-            plugin.revokeProviderRouteTrust(provider),
-          ),
-          ...plugin.settings.mcp.servers.map((server) =>
-            plugin.revokeMcpServerTrust(server.id),
-          ),
-        ])
-        await setSettings(() => defaultSettings)
+        await resetSettings({
+          defaultSettings: smartComposerSettingsSchema.parse({}),
+          plugin,
+          setSettings,
+          settings: plugin.settings,
+        })
         new Notice('Settings have been reset to defaults')
       },
     }).open()

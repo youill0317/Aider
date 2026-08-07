@@ -24,6 +24,7 @@ import { runAsyncAction } from '../../../utils/async-action'
 import { ObsidianButton } from '../../common/ObsidianButton'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 import { ConfirmModal } from '../../modals/ConfirmModal'
+import { deleteMcpServer } from '../destructive-actions'
 import {
   AddMcpServerModal,
   EditMcpServerModal,
@@ -139,16 +140,7 @@ function McpServerComponent({
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        await plugin.revokeMcpServerTrust(server.name)
-        await setSettings((currentSettings) => ({
-          ...currentSettings,
-          mcp: {
-            ...currentSettings.mcp,
-            servers: currentSettings.mcp.servers.filter(
-              (s) => s.id !== server.name,
-            ),
-          },
-        }))
+        await deleteMcpServer({ plugin, serverId: server.name, setSettings })
       },
     }).open()
   }, [server.name, setSettings, app, plugin])

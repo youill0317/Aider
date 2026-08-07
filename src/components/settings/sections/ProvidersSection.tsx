@@ -11,6 +11,7 @@ import SmartComposerPlugin from '../../../main'
 import { LLMProvider } from '../../../types/provider.types'
 import { redactSecrets } from '../../../utils/security/redact-secrets'
 import { ConfirmModal } from '../../modals/ConfirmModal'
+import { deleteProvider } from '../destructive-actions'
 import {
   AddProviderModal,
   EditProviderModal,
@@ -48,68 +49,20 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        let removedEmbeddingModelIds: string[] = []
-        await plugin.revokeProviderRouteTrust(provider)
-        await setSettings((currentSettings) => {
-          const currentChatModels = currentSettings.chatModels.filter(
-            (model) => model.providerId !== provider.id,
-          )
-          const currentEnabledChatModels = currentChatModels.filter(
-            (model) => model.enable !== false,
-          )
-          const currentEmbeddingModels = currentSettings.embeddingModels.filter(
-            (model) => model.providerId !== provider.id,
-          )
-          const currentFallbackChatModel = currentEnabledChatModels[0]
-          const currentFallbackEmbeddingModel = currentEmbeddingModels[0]
-          if (!currentFallbackChatModel || !currentFallbackEmbeddingModel) {
-            throw new Error('Cannot delete the last available model provider')
-          }
-          removedEmbeddingModelIds = currentSettings.embeddingModels
-            .filter((model) => model.providerId === provider.id)
-            .map((model) => model.id)
-          return {
-            ...currentSettings,
-            providers: currentSettings.providers.filter(
-              (value) => value.id !== provider.id,
-            ),
-            chatModels: currentChatModels,
-            embeddingModels: currentEmbeddingModels,
-            chatModelId: currentEnabledChatModels.some(
-              ({ id }) => id === currentSettings.chatModelId,
+        await deleteProvider({
+          plugin,
+          provider,
+          setSettings,
+          onCleanupError: (error) => {
+            new Notice(
+              'Provider was removed, but its cached embeddings could not be cleared',
             )
-              ? currentSettings.chatModelId
-              : currentFallbackChatModel.id,
-            applyModelId: currentEnabledChatModels.some(
-              ({ id }) => id === currentSettings.applyModelId,
+            console.error(
+              'Failed to clear embeddings for removed provider',
+              redactSecrets(error),
             )
-              ? currentSettings.applyModelId
-              : currentFallbackChatModel.id,
-            embeddingModelId: currentEmbeddingModels.some(
-              ({ id }) => id === currentSettings.embeddingModelId,
-            )
-              ? currentSettings.embeddingModelId
-              : currentFallbackEmbeddingModel.id,
-          }
+          },
         })
-        try {
-          const vectorManager = (await plugin.getDbManager()).getVectorManager()
-          const embeddingStats = await vectorManager.getEmbeddingStats()
-          const modelsWithData = removedEmbeddingModelIds.filter((modelId) =>
-            embeddingStats.some(
-              (stat) => stat.model === modelId && stat.rowCount > 0,
-            ),
-          )
-          await vectorManager.clearAllVectorsForModels(modelsWithData)
-        } catch (error) {
-          new Notice(
-            'Provider was removed, but its cached embeddings could not be cleared',
-          )
-          console.error(
-            'Failed to clear embeddings for removed provider',
-            redactSecrets(error),
-          )
-        }
       },
     }).open()
   }

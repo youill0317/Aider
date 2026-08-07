@@ -6,6 +6,7 @@ import { useSettings } from '../../../../contexts/settings-context'
 import SmartComposerPlugin from '../../../../main'
 import { redactSecrets } from '../../../../utils/security/redact-secrets'
 import { ConfirmModal } from '../../../modals/ConfirmModal'
+import { deleteEmbeddingModel } from '../../destructive-actions'
 import { AddEmbeddingModelModal } from '../../modals/AddEmbeddingModelModal'
 
 type EmbeddingModelsSubSectionProps = {
@@ -36,35 +37,20 @@ export function EmbeddingModelsSubSection({
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
-        await setSettings((currentSettings) => {
-          if (modelId === currentSettings.embeddingModelId) {
-            throw new Error('Cannot remove a model that is currently selected')
-          }
-          return {
-            ...currentSettings,
-            embeddingModels: currentSettings.embeddingModels.filter(
-              (v) => v.id !== modelId,
-            ),
-          }
+        await deleteEmbeddingModel({
+          modelId,
+          plugin,
+          setSettings,
+          onCleanupError: (error) => {
+            new Notice(
+              'Model was removed, but its cached embeddings could not be cleared',
+            )
+            console.error(
+              'Failed to clear embeddings for removed model',
+              redactSecrets(error),
+            )
+          },
         })
-        try {
-          const vectorManager = (await plugin.getDbManager()).getVectorManager()
-          const embeddingStats = await vectorManager.getEmbeddingStats()
-          const embeddingStat = embeddingStats.find(
-            (value) => value.model === modelId,
-          )
-          if (embeddingStat?.rowCount && embeddingStat.rowCount > 0) {
-            await vectorManager.clearAllVectors(modelId)
-          }
-        } catch (error) {
-          new Notice(
-            'Model was removed, but its cached embeddings could not be cleared',
-          )
-          console.error(
-            'Failed to clear embeddings for removed model',
-            redactSecrets(error),
-          )
-        }
       },
     }).open()
   }

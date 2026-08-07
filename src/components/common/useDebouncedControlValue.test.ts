@@ -1,6 +1,3 @@
-import * as fs from 'fs'
-import * as path from 'path'
-
 import {
   CONTROL_CHANGE_DEBOUNCE_MS,
   createDebouncedCommit,
@@ -39,21 +36,5 @@ describe('createDebouncedCommit', () => {
     expect(commit).toHaveBeenCalledTimes(1)
     expect(commit).toHaveBeenCalledWith('draft')
     expect(debounced.isPending()).toBe(false)
-  })
-
-  it('resynchronizes a settled save from the controlled value', () => {
-    const source = fs.readFileSync(
-      path.join(
-        process.cwd(),
-        'src/components/common/useDebouncedControlValue.ts',
-      ),
-      'utf8',
-    )
-
-    expect(source).toContain('setSettledVersion((version) => version + 1)')
-    expect(source).toContain(
-      'if (commit.isPending() || value === draftRef.current) return',
-    )
-    expect(source).toContain('draftRef.current = value')
   })
 })

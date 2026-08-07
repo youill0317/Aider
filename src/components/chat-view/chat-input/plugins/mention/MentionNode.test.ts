@@ -1,6 +1,3 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
-
 import {
   $createParagraphNode,
   $getRoot,
@@ -31,18 +28,6 @@ describe('mention paste security', () => {
       configurable: true,
       value: NativeClipboardEvent,
     })
-  })
-
-  it('gives the image paste handler precedence', () => {
-    const source = readFileSync(
-      join(
-        process.cwd(),
-        'src/components/chat-view/chat-input/plugins/image/ImagePastePlugin.tsx',
-      ),
-      'utf8',
-    )
-
-    expect(source).toContain('COMMAND_PRIORITY_HIGH')
   })
 
   it('pastes rich clipboard data as plain text', () => {

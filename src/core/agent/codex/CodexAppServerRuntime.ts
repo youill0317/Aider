@@ -65,7 +65,7 @@ type CodexSpawn = (
 export type CodexAppServerRuntimeOptions = {
   readonly interruptTimeoutMs?: number
   readonly maxJsonlLineChars?: number
-  readonly maxStderrBytes?: number
+  readonly maxStderrChars?: number
   readonly spawnProcess: CodexSpawn
   readonly spawnSpecResolver?: CodexSpawnSpecResolver
   readonly spawnSpecResolverOptions?: CodexSpawnSpecResolverOptions
@@ -111,7 +111,7 @@ const PERMISSION_OPTIONS: readonly CodexPermissionOption[] = [
 export class CodexAppServerRuntime implements CodexRuntime {
   private readonly interruptTimeoutMs: number
   private readonly maxJsonlLineChars: number
-  private readonly maxStderrBytes: number
+  private readonly maxStderrChars: number
   private readonly spawnProcess: CodexSpawn
   private readonly spawnSpecResolver: CodexSpawnSpecResolver
   private readonly spawnSpecResolverOptions: CodexSpawnSpecResolverOptions
@@ -131,14 +131,14 @@ export class CodexAppServerRuntime implements CodexRuntime {
   constructor({
     interruptTimeoutMs = 2_000,
     maxJsonlLineChars = 1_000_000,
-    maxStderrBytes = 8192,
+    maxStderrChars = 8192,
     spawnProcess,
     spawnSpecResolver = new CodexSpawnSpecResolver(),
     spawnSpecResolverOptions = {},
   }: CodexAppServerRuntimeOptions) {
     this.interruptTimeoutMs = interruptTimeoutMs
     this.maxJsonlLineChars = maxJsonlLineChars
-    this.maxStderrBytes = maxStderrBytes
+    this.maxStderrChars = maxStderrChars
     this.spawnProcess = spawnProcess
     this.spawnSpecResolver = spawnSpecResolver
     this.spawnSpecResolverOptions = spawnSpecResolverOptions
@@ -314,7 +314,7 @@ export class CodexAppServerRuntime implements CodexRuntime {
         this.stderr = appendBounded(
           this.stderr,
           chunk.toString(),
-          this.maxStderrBytes,
+          this.maxStderrChars,
         )
       }
     })
@@ -1240,13 +1240,13 @@ function requiredString(value: unknown, name: string): string {
 function appendBounded(
   previous: string,
   next: string,
-  maxBytes: number,
+  maxChars: number,
 ): string {
-  if (maxBytes <= 0) {
+  if (maxChars <= 0) {
     return ''
   }
-  if (next.length >= maxBytes) {
-    return next.slice(-maxBytes)
+  if (next.length >= maxChars) {
+    return next.slice(-maxChars)
   }
-  return `${previous.slice(next.length - maxBytes)}${next}`
+  return `${previous.slice(next.length - maxChars)}${next}`
 }

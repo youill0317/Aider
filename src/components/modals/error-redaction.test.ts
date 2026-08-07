@@ -1,6 +1,3 @@
-import * as fs from 'fs'
-import * as path from 'path'
-
 import { createMcpManagerTestHarness } from '../../core/mcp/mcp-permissions.test-utils'
 import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
@@ -139,58 +136,4 @@ describe('redaction integration boundaries', () => {
       expect(result.error).toBe('Authorization: Bearer [REDACTED]')
     }
   })
-
-  it('chat and apply error notice paths redact diagnostics', () => {
-    // Given: generic Notice and console branches can display raw errors.
-    const chatSource = readProjectFile(
-      'src/components/chat-view/useChatStreamManager.ts',
-    )
-    const applySource = readProjectFile('src/components/chat-view/Chat.tsx')
-
-    // When/Then: both branches redact notice messages and console payloads.
-    expect(chatSource).toContain('new Notice(redactSecrets(error.message))')
-    expect(chatSource).toContain(
-      "console.error('Failed to generate response', redactSecrets(error))",
-    )
-    expect(applySource).toContain('new Notice(redactSecrets(error.message))')
-    expect(applySource).toContain(
-      "console.error('Failed to apply changes', redactSecrets(error))",
-    )
-  })
-
-  it('Gemini project errors redact access-token diagnostics', () => {
-    // Given: Gemini project helpers call endpoints with bearer tokens.
-    const source = readProjectFile('src/core/llm/geminiProject.ts')
-
-    // When/Then: caught errors pass through the token-aware redaction helper.
-    expect(source).toContain('redactGeminiProjectError(error, accessToken)')
-    expect(source).not.toContain(
-      "console.error('Failed to load Gemini managed project:', error)",
-    )
-    expect(source).not.toContain(
-      "console.error('Failed to onboard Gemini managed project:', error)",
-    )
-  })
-
-  it('provider and prompt errors are redacted before logging', () => {
-    const providerSource = readProjectFile('src/core/llm/openai.ts')
-    const promptSource = readProjectFile('src/utils/chat/promptGenerator.ts')
-
-    expect(providerSource).toContain(
-      "const safeError = redactAuthError(error, [this.provider.apiKey ?? ''])",
-    )
-    expect(providerSource).toContain(
-      "console.error('Error in generateResponse:', safeError)",
-    )
-    expect(providerSource).toContain(
-      "console.error('Error in streamResponse:', safeError)",
-    )
-    expect(promptSource).toContain(
-      "console.error('Failed to compile user message', redactSecrets(error))",
-    )
-  })
 })
-
-function readProjectFile(relativePath: string): string {
-  return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8')
-}

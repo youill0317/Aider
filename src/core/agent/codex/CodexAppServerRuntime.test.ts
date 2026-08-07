@@ -668,7 +668,7 @@ describe('CodexAppServerRuntime', () => {
     const childProcess = new FakeChildProcess()
     const runtime = new CodexAppServerRuntime({
       maxJsonlLineChars: 16,
-      maxStderrBytes: 8,
+      maxStderrChars: 8,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {

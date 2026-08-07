@@ -46,12 +46,13 @@ describe('Windows native compatibility guardrails', () => {
     await stopGeminiCallbackServer()
   })
 
-  it('no POSIX shell wrapper is required', () => {
-    // Given: MCP manager source should use StdioClientTransport parameters.
+  // Negative source guards only: they fail safe (a false alarm at worst) and
+  // catch a shell-injection regression that has no cheap runtime assertion.
+  // Do not add positive "source must contain X" assertions here -- those pass
+  // while the behavior is broken and block harmless refactors.
+  it('never wraps an MCP command in a shell', () => {
     const source = readProjectFile('src/core/mcp/mcpManager.ts')
 
-    // When/Then: no shell-string wrapper is introduced around MCP commands.
-    expect(source).toContain('new StdioClientTransport({')
     expect(source).not.toContain('shell: true')
     expect(source).not.toContain('/bin/sh')
     expect(source).not.toContain('cmd.exe')
@@ -75,13 +76,10 @@ describe('Windows native compatibility guardrails', () => {
   })
 
   it('Obsidian secret backend does not import electron', () => {
-    // Given: secret storage source should depend on Obsidian feature detection.
     const source = readProjectFile('src/security/secret-store/secret-store.ts')
 
-    // When/Then: direct Electron storage APIs are not used.
     expect(source).not.toMatch(/\bfrom ['"]electron['"]/)
     expect(source).not.toContain('safeStorage')
-    expect(source).toContain('secretStorage')
   })
 })
 

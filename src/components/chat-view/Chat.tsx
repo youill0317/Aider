@@ -43,13 +43,10 @@ import {
 } from '../../types/tool-call.types'
 import {
   appendAgentAssistantMessage,
-  buildAgentChatRequestArgs,
-  buildAgentCommandMessageFromEvent,
   buildAgentSessionPrompts,
   getRunningAgentChatToolCallIds,
   invalidateAgentSessions,
   isAgentChatTerminalMessage,
-  upsertAgentCommandMessage,
   withCurrentFileMentionable,
 } from '../../utils/chat/agent-chat'
 import { applyChangesToFile } from '../../utils/chat/apply'
@@ -59,6 +56,7 @@ import {
 } from '../../utils/chat/mentionable'
 import { buildChatMessageRows } from '../../utils/chat/message-groups'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
+import { runAgentTurn } from '../../utils/chat/run-agent-turn'
 import { readTFileContent } from '../../utils/obsidian'
 import { redactSecrets } from '../../utils/security/redact-secrets'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -776,62 +774,15 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           const toolCallId = uuidv4()
           const abortController = new AbortController()
           registerActiveAgentToolCall(toolCallId, abortController)
-          const agentTask = (async () => {
-            try {
-              const response = await toolDispatcher.callTool({
-                name: CODEX_TOOL_NAME,
-                args: buildAgentChatRequestArgs(agentSessionPrompts.prompt),
-                codexSession: {
-                  initialPrompt: agentSessionPrompts.initialPrompt,
-                  resume: agentSessionPrompts.resume,
-                },
-                id: toolCallId,
-                onPermissionRequest: handleCodexPermissionRequest,
-                onEvent: (event) => {
-                  if (!isCurrentWork(generation, conversationId)) return
-                  const commandMessage =
-                    buildAgentCommandMessageFromEvent(event)
-                  if (!commandMessage) {
-                    return
-                  }
-                  setChatMessages((prevMessages) =>
-                    upsertAgentCommandMessage(prevMessages, commandMessage),
-                  )
-                },
-                signal: abortController.signal,
-              })
-              if (!isCurrentWork(generation, conversationId)) return
-              const content =
-                response.status === ToolCallResponseStatus.Success
-                  ? response.data.text
-                  : response.status === ToolCallResponseStatus.Aborted
-                    ? 'Agent Chat was stopped.'
-                    : response.status === ToolCallResponseStatus.Error
-                      ? response.error
-                      : `Agent Chat ended with status: ${response.status}`
-              setChatMessages((prevMessages) =>
-                appendAgentAssistantMessage(
-                  prevMessages,
-                  content,
-                  response.status === ToolCallResponseStatus.Success
-                    ? (response.data.codexSession ?? null)
-                    : null,
-                ),
-              )
-            } catch (error) {
-              if (!isCurrentWork(generation, conversationId)) return
-              setChatMessages((prevMessages) =>
-                appendAgentAssistantMessage(
-                  prevMessages,
-                  redactSecrets(
-                    error instanceof Error ? error.message : String(error),
-                  ),
-                ),
-              )
-            } finally {
-              unregisterActiveAgentToolCall(toolCallId)
-            }
-          })()
+          const agentTask = runAgentTurn({
+            callTool: toolDispatcher.callTool,
+            isCurrent: () => isCurrentWork(generation, conversationId),
+            onPermissionRequest: handleCodexPermissionRequest,
+            prompts: agentSessionPrompts,
+            setChatMessages,
+            signal: abortController.signal,
+            toolCallId,
+          }).finally(() => unregisterActiveAgentToolCall(toolCallId))
           activeAgentTasksRef.current.add(agentTask)
           void agentTask.finally(() => {
             activeAgentTasksRef.current.delete(agentTask)

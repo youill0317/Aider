@@ -282,6 +282,50 @@ describe('CodexAppServerRuntime', () => {
     runtime.dispose()
   })
 
+  it('redacts credentialed proxy URLs from app-server events and stderr', async () => {
+    const childProcess = new FakeChildProcess()
+    const proxyUrl = 'http://alice:proxyPass123@proxy.internal:8080'
+    let childEnv: NodeJS.ProcessEnv = {}
+    const events: CodexAgentEvent[] = []
+    const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: {
+        env: { HTTP_PROXY: proxyUrl, PATH: '/usr/bin' },
+        platform: 'linux',
+      },
+      spawnProcess: (_command, _args, options) => {
+        childEnv = options.env
+        return childProcess
+      },
+    })
+    const handle = runtime.execute(BASE_REQUEST, {
+      onEvent: (event) => events.push(event),
+    })
+    await initialize(childProcess)
+    await startTurn(childProcess)
+    childProcess.send({
+      method: 'item/completed',
+      params: {
+        item: {
+          aggregatedOutput: `proxy=${proxyUrl}`,
+          id: 'message-1',
+          text: `proxy=${proxyUrl}`,
+          type: 'agentMessage',
+        },
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+      },
+    })
+    childProcess.stderr.write(`proxy=${proxyUrl}`)
+    completeTurn(childProcess)
+
+    const result = await handle.done
+    expect(childEnv).toHaveProperty('HTTP_PROXY', proxyUrl)
+    expect(JSON.stringify(events)).not.toContain(proxyUrl)
+    expect(JSON.stringify(events)).toContain('[REDACTED]')
+    expect(result.stderr).toBe('proxy=[REDACTED]')
+    runtime.dispose()
+  })
+
   it('answers approval requests with the same id and cleans resolved signals', async () => {
     const childProcess = new FakeChildProcess()
     const decisions: CodexPermissionDecision[] = [

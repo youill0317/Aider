@@ -29,6 +29,7 @@ export const AGENT_CHAT_SUMMARY = 'Agent Chat'
 
 export const AGENT_CHAT_CONTEXT_HEADING = '## Current Obsidian Markdown File'
 const MAX_AGENT_HISTORY_CONTENT_CHARS = 24_000
+const AGENT_CHAT_TRUNCATION_NOTICE = '[Earlier agent context truncated]\n'
 
 type BuildAgentPromptParams = {
   readonly messages: readonly ChatMessage[]
@@ -109,10 +110,6 @@ export function buildAgentPrompt({
   prompt,
   userMessage,
 }: BuildAgentPromptParams): string {
-  const conversationPrompt = buildAgentConversationPrompt({
-    fallbackPrompt: prompt,
-    messages,
-  })
   const currentFile = userMessage.mentionables.find(
     (mentionable): mentionable is MentionableCurrentFile =>
       mentionable.type === 'current-file',
@@ -124,22 +121,12 @@ Path: ${currentFile.path}
 
 `
       : ''
-  if (
-    currentFileContext.length + conversationPrompt.length <=
-    MAX_CODEX_TOOL_PROMPT_CHARS
-  ) {
-    return `${currentFileContext}${conversationPrompt}`
-  }
-
-  const truncationNotice = '[Earlier agent context truncated]\n'
-  const availableConversationChars =
-    MAX_CODEX_TOOL_PROMPT_CHARS -
-    currentFileContext.length -
-    truncationNotice.length
-  // ponytail: preserve the latest request; summarize history if tail truncation hurts answer quality.
-  return `${currentFileContext}${truncationNotice}${conversationPrompt.slice(
-    -availableConversationChars,
-  )}`
+  const conversationPrompt = buildAgentConversationPrompt({
+    fallbackPrompt: prompt,
+    maxChars: MAX_CODEX_TOOL_PROMPT_CHARS - currentFileContext.length,
+    messages,
+  })
+  return `${currentFileContext}${conversationPrompt}`
 }
 
 function findLatestAgentResponse(messages: readonly ChatMessage[]): {
@@ -160,23 +147,52 @@ function findLatestAgentResponse(messages: readonly ChatMessage[]): {
 
 function buildAgentConversationPrompt({
   fallbackPrompt,
+  maxChars,
   messages,
 }: {
   readonly fallbackPrompt: string
+  readonly maxChars: number
   readonly messages: readonly ChatMessage[]
 }): string {
   const reverseTranscript: string[] = []
   let transcriptChars = 0
+  let truncated = false
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const line = formatAgentHistoryMessage(messages[index])
     if (!line) continue
+    const addedChars = line.length + (reverseTranscript.length > 0 ? 2 : 0)
+    if (transcriptChars + addedChars > maxChars) {
+      truncated = true
+      break
+    }
     reverseTranscript.push(line)
-    transcriptChars += line.length + 2
-    if (transcriptChars >= MAX_CODEX_TOOL_PROMPT_CHARS) break
+    transcriptChars += addedChars
   }
-  const transcript = reverseTranscript.reverse().join('\n\n')
+  if (!truncated) {
+    const transcript = reverseTranscript.reverse().join('\n\n')
+    if (transcript || fallbackPrompt.length <= maxChars) {
+      return transcript || fallbackPrompt
+    }
+  }
 
-  return transcript || fallbackPrompt
+  const availableChars = maxChars - AGENT_CHAT_TRUNCATION_NOTICE.length
+  while (transcriptChars > availableChars) {
+    const removedLine = reverseTranscript.pop()
+    if (removedLine === undefined) break
+    transcriptChars -= removedLine.length
+    if (reverseTranscript.length > 0) transcriptChars -= 2
+  }
+
+  if (reverseTranscript.length === 0) {
+    if (fallbackPrompt.length > availableChars) {
+      throw new Error('Latest Agent request is too large')
+    }
+    return `${AGENT_CHAT_TRUNCATION_NOTICE}${fallbackPrompt}`
+  }
+
+  return `${AGENT_CHAT_TRUNCATION_NOTICE}${reverseTranscript
+    .reverse()
+    .join('\n\n')}`
 }
 
 function formatAgentHistoryMessage(message: ChatMessage): string {

@@ -2,6 +2,8 @@
 module.exports = {
   testEnvironment: 'node',
   transform: {
-    '^.+.tsx?$': ['ts-jest', {}],
+    // esModuleInterop is off in tsconfig (esbuild handles the real build), but
+    // CommonJS test output needs it for `import React from 'react'` to resolve.
+    '^.+.tsx?$': ['ts-jest', { tsconfig: { esModuleInterop: true } }],
   },
 }

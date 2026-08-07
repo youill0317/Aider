@@ -17,6 +17,12 @@ export class Modal {
   onOpen() {}
   onClose() {}
 }
+export class ItemView {
+  app: unknown
+  containerEl = { children: [] as unknown[] }
+
+  constructor(public leaf?: unknown) {}
+}
 export const Notice = jest.fn()
 export const Platform = {
   isDesktop: true,
@@ -31,4 +37,5 @@ export class Plugin {
 export const TFile = jest.fn()
 export const TFolder = jest.fn()
 export const Vault = jest.fn()
+export const WorkspaceLeaf = jest.fn()
 export const normalizePath = jest.fn((path: string) => path)

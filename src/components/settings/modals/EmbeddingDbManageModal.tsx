@@ -25,6 +25,8 @@ import { IndexProgress } from '../../chat-view/QueryProgress'
 import { ReactModal } from '../../common/ReactModal'
 import { ConfirmModal } from '../../modals/ConfirmModal'
 
+import { rebuildEmbeddingIndex } from './rebuild-embedding-index'
+
 type EmbeddingDbManagerModalComponentWrapperProps = {
   app: App
   plugin: SmartComposerPlugin
@@ -125,64 +127,28 @@ function EmbeddingDbManageModalComponent({ app }: { app: App }) {
     },
   })
 
-  const handleRebuildIndex = async (modelId: string) => {
-    if (rebuildControllersRef.current.has(modelId)) return
-    const abortController = new AbortController()
-    rebuildControllersRef.current.set(modelId, abortController)
-    setIndexProgressMap((current) =>
-      new Map(current).set(modelId, {
-        completedChunks: 0,
-        totalChunks: 1,
-        totalFiles: 0,
-      }),
-    )
-    try {
-      const embeddingModel = getEmbeddingModelClient({
-        settings,
-        embeddingModelId: modelId,
-      })
-
-      await (
-        await getVectorManager()
-      ).updateVaultIndex(
-        embeddingModel,
-        {
-          chunkSize: settings.ragOptions.chunkSize,
-          excludePatterns: settings.ragOptions.excludePatterns,
-          includePatterns: settings.ragOptions.includePatterns,
-          reindexAll: true,
-          signal: abortController.signal,
-        },
-        (progress) => {
-          if (!mountedRef.current || abortController.signal.aborted) return
-          setIndexProgressMap((prev) => {
-            const newMap = new Map(prev)
-            newMap.set(modelId, progress)
-            return newMap
-          })
-        },
-      )
-    } catch (error) {
-      if (
-        abortController.signal.aborted ||
-        (error instanceof Error && error.name === 'AbortError')
-      ) {
-        return
-      }
-      console.error(error)
-      new Notice('Failed to rebuild index')
-    } finally {
-      rebuildControllersRef.current.delete(modelId)
-      if (mountedRef.current) {
+  const handleRebuildIndex = (modelId: string) =>
+    rebuildEmbeddingIndex({
+      controllers: rebuildControllersRef.current,
+      getEmbeddingModel: () =>
+        getEmbeddingModelClient({ settings, embeddingModelId: modelId }),
+      getVectorManager,
+      isMounted: () => mountedRef.current,
+      modelId,
+      onError: (error) => {
+        console.error(error)
+        new Notice('Failed to rebuild index')
+      },
+      ragOptions: settings.ragOptions,
+      refetch,
+      setProgress: (id, progress) =>
         setIndexProgressMap((prev) => {
           const newMap = new Map(prev)
-          newMap.delete(modelId)
+          if (progress) newMap.set(id, progress)
+          else newMap.delete(id)
           return newMap
-        })
-        await refetch()
-      }
-    }
-  }
+        }),
+    })
 
   const handleRemoveIndex = async (modelId: string) => {
     setRemovingModelIds((current) => new Set(current).add(modelId))

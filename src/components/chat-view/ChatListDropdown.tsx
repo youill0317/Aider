@@ -5,27 +5,58 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ChatConversationMetadata } from '../../database/json/chat/types'
 
+export function createTitleInputController(
+  title: string,
+  onSubmit: (title: string) => Promise<void>,
+  onCancel: () => void,
+) {
+  let isFinished = false
+
+  return {
+    submit: async (value: string) => {
+      if (isFinished) return false
+      isFinished = true
+      try {
+        await onSubmit(value.trim() || title)
+        return true
+      } catch (error) {
+        isFinished = false
+        throw error
+      }
+    },
+    cancel: () => {
+      if (isFinished) return false
+      isFinished = true
+      onCancel()
+      return true
+    },
+  }
+}
+
 function TitleInput({
   title,
   onSubmit,
+  onCancel,
 }: {
   title: string
   onSubmit: (title: string) => Promise<void>
+  onCancel: () => void
 }) {
   const [value, setValue] = useState(title)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const controllerRef = useRef(
+    createTitleInputController(title, onSubmit, onCancel),
+  )
 
   const submit = async () => {
-    if (isSubmitting) return
     setIsSubmitting(true)
     try {
-      await onSubmit(value.trim() || title)
+      await controllerRef.current.submit(value)
     } catch (error) {
+      setIsSubmitting(false)
       new Notice('Failed to rename conversation')
       console.error('Failed to rename conversation', error)
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -46,11 +77,14 @@ function TitleInput({
       className="smtcmp-chat-list-dropdown-item-title-input"
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void submit()}
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.nativeEvent.isComposing) return
         if (e.key === 'Enter') {
           void submit()
+        } else if (e.key === 'Escape') {
+          controllerRef.current.cancel()
         }
       }}
       autoFocus
@@ -70,6 +104,7 @@ function ChatListItem({
   onDelete,
   onStartEdit,
   onFinishEdit,
+  onCancel,
 }: {
   title: string
   isFocused: boolean
@@ -81,11 +116,12 @@ function ChatListItem({
   onDelete: () => Promise<void>
   onStartEdit: () => void
   onFinishEdit: (title: string) => Promise<void>
+  onCancel: () => void
 }) {
   return (
     <li onMouseEnter={onMouseEnter} className={isFocused ? 'selected' : ''}>
       {isEditing ? (
-        <TitleInput title={title} onSubmit={onFinishEdit} />
+        <TitleInput title={title} onSubmit={onFinishEdit} onCancel={onCancel} />
       ) : (
         <button
           ref={itemRef}
@@ -107,6 +143,7 @@ function ChatListItem({
           }}
           className="clickable-icon smtcmp-chat-list-dropdown-item-icon"
           aria-label={`Rename ${title}`}
+          tabIndex={isFocused ? 0 : -1}
         >
           <Pencil />
         </button>
@@ -118,6 +155,7 @@ function ChatListItem({
           }}
           className="clickable-icon smtcmp-chat-list-dropdown-item-icon"
           aria-label={`Delete ${title}`}
+          tabIndex={isFocused ? 0 : -1}
         >
           <Trash2 />
         </button>
@@ -252,6 +290,7 @@ export function ChatListDropdown({
                     setEditingId(null)
                     focusItem(index)
                   }}
+                  onCancel={() => setEditingId(null)}
                 />
               ))
             )}

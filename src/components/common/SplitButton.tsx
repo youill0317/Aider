@@ -27,30 +27,32 @@ export function SplitButton({
       >
         {primaryText}
       </button>
-      <DropdownMenu.Root open={isOpen} onOpenChange={setIsOpen}>
-        <DropdownMenu.Trigger
-          type="button"
-          className="smtcmp-split-button-toggle"
-          aria-label="Show more options"
-        >
-          <ChevronDown size={16} />
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content className="smtcmp-popover">
-            <ul>
-              {menuOptions.map((option) => (
-                <DropdownMenu.Item
-                  key={option.label}
-                  onSelect={option.onClick}
-                  asChild
-                >
-                  <li>{option.label}</li>
-                </DropdownMenu.Item>
-              ))}
-            </ul>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
+      {menuOptions.length > 0 && (
+        <DropdownMenu.Root open={isOpen} onOpenChange={setIsOpen}>
+          <DropdownMenu.Trigger
+            type="button"
+            className="smtcmp-split-button-toggle"
+            aria-label="Show more options"
+          >
+            <ChevronDown size={16} />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="smtcmp-popover">
+              <ul>
+                {menuOptions.map((option) => (
+                  <DropdownMenu.Item
+                    key={option.label}
+                    onSelect={option.onClick}
+                    asChild
+                  >
+                    <li>{option.label}</li>
+                  </DropdownMenu.Item>
+                ))}
+              </ul>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
     </div>
   )
 }

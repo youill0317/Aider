@@ -77,6 +77,7 @@ function ErrorModalComponent({
               window.open(
                 'https://github.com/youill0317/Aider/issues',
                 '_blank',
+                'noopener,noreferrer',
               )
             }}
           >

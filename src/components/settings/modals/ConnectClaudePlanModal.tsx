@@ -137,7 +137,7 @@ function ConnectClaudePlanModalComponent({
           disabled={!authorizeUrl || isConnecting}
           onClick={() => {
             if (!authorizeUrl) return
-            window.open(authorizeUrl, '_blank')
+            window.open(authorizeUrl, '_blank', 'noopener,noreferrer')
           }}
           cta
         />

@@ -120,7 +120,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
       <ObsidianSetting
         name="Chunk size"
-        desc="Set the chunk size for text splitting. After changing this, please re-index the vault using the 'Rebuild entire vault index' command."
+        desc="Set the chunk size for text splitting. After changing this, please re-index the vault using the 'Rebuild entire vault index' command. Accepted range: 400–100,000."
       >
         <ObsidianTextInput
           value={String(settings.ragOptions.chunkSize)}
@@ -146,7 +146,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
       <ObsidianSetting
         name="Threshold tokens"
-        desc="Maximum number of tokens before switching to RAG. If the total tokens from mentioned files exceed this, RAG will be used instead of including all file contents."
+        desc="Maximum number of tokens before switching to RAG. If the total tokens from mentioned files exceed this, RAG will be used instead of including all file contents. Accepted range: 0–10,000,000."
       >
         <ObsidianTextInput
           value={String(settings.ragOptions.thresholdTokens)}
@@ -173,7 +173,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
       <ObsidianSetting
         name="Minimum similarity"
-        desc="Minimum similarity score for RAG results. Higher values return more relevant but potentially fewer results."
+        desc="Minimum similarity score for RAG results. Higher values return more relevant but potentially fewer results. Accepted range: -1 to 1."
       >
         <ObsidianTextInput
           value={String(settings.ragOptions.minSimilarity)}
@@ -204,7 +204,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
       <ObsidianSetting
         name="Limit"
-        desc="Maximum number of RAG results to include in the prompt. Higher values provide more context but increase token usage."
+        desc="Maximum number of RAG results to include in the prompt. Higher values provide more context but increase token usage. Accepted range: 1–100."
       >
         <ObsidianTextInput
           value={String(settings.ragOptions.limit)}

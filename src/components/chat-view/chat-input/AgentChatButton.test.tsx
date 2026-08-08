@@ -16,7 +16,8 @@ describe('AgentChatButton', () => {
       <AgentChatButton onClick={jest.fn()} disabled />,
     )
 
-    expect(html).toContain('disabled')
+    expect(html).toContain('aria-disabled="true"')
+    expect(html).not.toMatch(/<button\b[^>]*\sdisabled(?:=|(?=[\s>]))/)
     expect(html).toContain('Agent unavailable')
   })
 })

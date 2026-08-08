@@ -31,7 +31,11 @@ function InstallerUpdateRequiredModalComponent() {
           <button
             className="mod-cta"
             onClick={() => {
-              window.open('https://obsidian.md/download')
+              window.open(
+                'https://obsidian.md/download',
+                '_blank',
+                'noopener,noreferrer',
+              )
             }}
           >
             Open Download Page

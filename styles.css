@@ -149,6 +149,17 @@
     flex-direction: column;
   }
 
+  .smtcmp-chat-empty-state {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    margin: auto;
+    padding: var(--size-4-4);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    text-align: center;
+  }
+
   .smtcmp-streaming-response {
     margin: 0;
     overflow-wrap: anywhere;
@@ -357,6 +368,11 @@ button.smtcmp-user-message-edit:focus-visible {
 .smtcmp-chat-edit-cancel-button:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
+}
+
+.smtcmp-chat-secondary-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .smtcmp-chat-stop-button {

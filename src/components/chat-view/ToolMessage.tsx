@@ -327,6 +327,7 @@ function ToolCallItem({
               {actionAllowed('reject') && (
                 <button
                   type="button"
+                  title="Refuse the tool and tell the model, then continue the conversation."
                   onClick={() => {
                     runApprovalAction('reject', handleReject)
                     setIsOpen(false)
@@ -338,6 +339,7 @@ function ToolCallItem({
               {actionAllowed('cancel') && (
                 <button
                   type="button"
+                  title="Stop the current turn."
                   onClick={() => {
                     runApprovalAction('cancel', handleAbort)
                     setIsOpen(false)

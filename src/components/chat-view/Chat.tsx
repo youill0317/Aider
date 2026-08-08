@@ -929,7 +929,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
 
   const handleApply = useCallback(
     (blockToApply: string, chatMessages: ChatMessage[], applyId: string) => {
-      if (activeApplyControllerRef.current) return
+      if (activeApplyControllerRef.current) {
+        new Notice('Another change is already being applied')
+        return
+      }
       const abortController = new AbortController()
       activeApplyControllerRef.current = abortController
       const task = applyMutation
@@ -1248,6 +1251,23 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
             queryProgress.type !== 'idle'
           }
         >
+          {chatMessageRows.length === 0 &&
+            codexPermissionMessages.length === 0 && (
+              <div className="smtcmp-chat-empty-state">
+                <div>
+                  <strong>@</strong> Add file or block context
+                </div>
+                <div>
+                  <strong>/</strong> Use a prompt template
+                </div>
+                <div>
+                  <strong>Vault</strong> Chat with the whole vault
+                </div>
+                <div>
+                  <strong>Agent</strong> Run Codex
+                </div>
+              </div>
+            )}
           {chatMessageRows.map(({ messageOrGroup, endIndex }) =>
             !Array.isArray(messageOrGroup) ? (
               <UserMessageItem

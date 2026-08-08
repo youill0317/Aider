@@ -136,7 +136,7 @@ function ConnectOpenAIPlanModalComponent({
       return
     }
 
-    window.open(effectiveAuthorizeUrl, '_blank')
+    window.open(effectiveAuthorizeUrl, '_blank', 'noopener,noreferrer')
     setIsWaitingForCallback(true)
 
     try {

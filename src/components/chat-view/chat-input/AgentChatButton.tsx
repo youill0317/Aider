@@ -15,7 +15,7 @@ export function AgentChatButton({
             type="button"
             className="smtcmp-chat-secondary-button"
             onClick={onClick}
-            disabled={disabled}
+            aria-disabled={disabled}
             aria-label={
               disabled
                 ? 'Agent unavailable. Enable Codex in settings on desktop.'

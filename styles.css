@@ -271,13 +271,13 @@ button.smtcmp-user-message-edit:focus-visible {
   display: flex;
   flex-direction: column;
   -webkit-app-region: no-drag;
-  background: var(--background-primary);
+  background: var(--background-modifier-form-field);
   border: var(--input-border-width) solid var(--background-modifier-border);
   color: var(--text-normal);
   font-family: inherit;
-  padding: var(--size-4-2);
+  padding: calc(var(--size-2-3) + 1px);
   font-size: var(--font-ui-small);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-s);
   outline: none;
   box-sizing: border-box;
 
@@ -285,8 +285,7 @@ button.smtcmp-user-message-edit:focus-visible {
   &:focus,
   &:focus-visible,
   &:active {
-    border-color: var(--background-modifier-border-focus);
-    box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
     transition: box-shadow 0.15s ease-in-out;
   }
 }
@@ -309,80 +308,85 @@ button.smtcmp-user-message-edit:focus-visible {
   gap: var(--size-4-1);
   justify-content: space-between;
   align-items: center;
-  min-height: 28px;
+  min-height: 24px;
   height: auto;
+  flex-wrap: nowrap;
 
+  /* Model name truncates so the actions always stay on this row, right-aligned. */
   .smtcmp-chat-user-input-controls__model-select-container {
-    flex-shrink: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
   }
 
   .smtcmp-chat-user-input-controls__buttons {
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
     display: flex;
     justify-content: flex-end;
     gap: var(--size-4-1);
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 }
 
-.smtcmp-chat-primary-button,
-.smtcmp-chat-secondary-button,
-.smtcmp-chat-stop-button,
-.smtcmp-chat-edit-cancel-button {
-  min-height: 28px;
-  height: 28px;
-  padding: 0 var(--size-4-2);
+/* Flat, text-only input actions — no filled boxes in a narrow sidebar.
+   Scoped + tag-qualified so Obsidian's own `.x button` defaults don't win. */
+.smtcmp-chat-user-input-controls button.smtcmp-chat-primary-button,
+.smtcmp-chat-user-input-controls button.smtcmp-chat-secondary-button,
+.smtcmp-chat-user-input-controls button.smtcmp-chat-stop-button,
+.smtcmp-chat-user-input-controls button.smtcmp-chat-edit-cancel-button {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 var(--size-2-1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--size-2-2);
-  border: 1px solid var(--background-modifier-border);
+  gap: var(--size-2-1);
+  border: none;
   border-radius: var(--radius-s);
+  background: none;
+  background-color: transparent;
   box-shadow: none;
-  font-size: var(--font-ui-smaller);
-  font-weight: var(--font-medium);
-  white-space: nowrap;
-}
-
-.smtcmp-chat-primary-button {
-  border-color: var(--interactive-accent);
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-.smtcmp-chat-primary-button:hover {
-  border-color: var(--interactive-accent-hover);
-  background: var(--interactive-accent-hover);
-}
-
-.smtcmp-chat-secondary-button,
-.smtcmp-chat-edit-cancel-button {
-  background: transparent;
+  font-size: var(--font-smallest);
+  font-weight: inherit;
   color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.1s ease-in-out;
 }
 
-.smtcmp-chat-secondary-button:hover,
-.smtcmp-chat-edit-cancel-button:hover {
-  background: var(--background-modifier-hover);
+.smtcmp-chat-user-input-controls button.smtcmp-chat-secondary-button:hover,
+.smtcmp-chat-user-input-controls button.smtcmp-chat-edit-cancel-button:hover {
+  background-color: transparent;
+  box-shadow: none;
   color: var(--text-normal);
 }
 
-.smtcmp-chat-secondary-button[aria-disabled='true'] {
+.smtcmp-chat-user-input-controls button.smtcmp-chat-primary-button {
+  color: var(--text-accent);
+}
+
+.smtcmp-chat-user-input-controls button.smtcmp-chat-primary-button:hover {
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--text-accent-hover);
+}
+
+.smtcmp-chat-user-input-controls
+  button.smtcmp-chat-secondary-button[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.smtcmp-chat-stop-button {
-  border-color: color-mix(in srgb, var(--text-error) 35%, transparent);
-  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+.smtcmp-chat-user-input-controls button.smtcmp-chat-stop-button {
   color: var(--text-error);
 }
 
-.smtcmp-chat-stop-button:hover {
-  background: color-mix(in srgb, var(--text-error) 16%, transparent);
+.smtcmp-chat-user-input-controls button.smtcmp-chat-stop-button:hover {
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--text-error);
+  opacity: 0.75;
 }
 
 .smtcmp-chat-primary-button:focus-visible,
@@ -404,8 +408,8 @@ button.smtcmp-similarity-search-item:focus-visible {
 }
 
 button.smtcmp-chat-attach-button {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   color: var(--text-muted);
 }
@@ -417,14 +421,13 @@ button.smtcmp-chat-attach-button {
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   font-size: var(--font-smallest);
-  min-height: 26px;
   max-width: 100%;
-  padding: 0;
-  gap: 0;
+  padding: var(--size-2-1) var(--size-4-1);
+  gap: var(--size-2-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: default;
+  cursor: pointer;
 
   &.smtcmp-chat-user-input-file-badge-focused {
     border: 1px solid var(--interactive-accent);
@@ -440,59 +443,52 @@ button.smtcmp-chat-attach-button {
   }
 }
 
+/* The badge is the chip; its inner buttons exist for keyboard access only. */
 button.smtcmp-chat-user-input-file-badge-main,
 button.smtcmp-chat-user-input-file-badge-eye,
 button.smtcmp-chat-user-input-file-badge-delete {
   min-width: 0;
-  min-height: 24px;
-  height: 24px;
+  min-height: 0;
+  height: auto;
   margin: 0;
-  border: 0;
-  border-radius: var(--radius-s);
+  padding: 0;
+  border: none;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
   color: inherit;
+  font-size: inherit;
+  cursor: pointer;
 }
 
 button.smtcmp-chat-user-input-file-badge-main {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: var(--size-2-1);
-  padding: 0 var(--size-4-1);
   overflow: hidden;
   text-align: left;
 }
 
 button.smtcmp-chat-user-input-file-badge-eye,
 button.smtcmp-chat-user-input-file-badge-delete {
-  flex: 0 0 24px;
+  flex: 0 0 auto;
+  width: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 button.smtcmp-chat-user-input-file-badge-main:hover,
 button.smtcmp-chat-user-input-file-badge-eye:hover,
 button.smtcmp-chat-user-input-file-badge-delete:hover {
-  background: var(--background-modifier-hover);
+  background: transparent;
+  color: var(--text-normal);
 }
 
 .smtcmp-chat-user-input-file-badge:hover {
   background-color: var(--background-modifier-hover);
-}
-
-.smtcmp-chat-user-input-file-badge-delete {
-  display: flex;
-  align-items: center;
-  color: var(--text-muted);
-}
-
-.smtcmp-chat-user-input-file-badge-eye {
-  display: flex;
-  align-items: center;
 }
 
 .smtcmp-chat-user-input-file-badge-name {
@@ -538,11 +534,17 @@ button.smtcmp-chat-user-input-file-badge-delete:hover {
 .smtcmp-context-preview-close {
   position: sticky;
   z-index: 1;
-  top: var(--size-4-1);
+  top: var(--size-2-1);
   float: right;
-  margin: var(--size-4-1) 0 0 var(--size-4-1);
-  background: var(--background-primary) !important;
-  border: 1px solid var(--background-modifier-border);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: var(--size-2-1) 0 0 var(--size-4-1);
+  color: var(--text-faint);
+}
+
+.smtcmp-context-preview-close:hover {
+  color: var(--text-normal);
 }
 
 /**
@@ -2211,10 +2213,10 @@ button.smtcmp-tool-activity-step--selected {
     opacity: 1;
   }
 
-  .smtcmp-chat-primary-button,
-  .smtcmp-chat-secondary-button,
-  .smtcmp-chat-stop-button,
-  .smtcmp-chat-edit-cancel-button,
+  .smtcmp-chat-user-input-controls button.smtcmp-chat-primary-button,
+  .smtcmp-chat-user-input-controls button.smtcmp-chat-secondary-button,
+  .smtcmp-chat-user-input-controls button.smtcmp-chat-stop-button,
+  .smtcmp-chat-user-input-controls button.smtcmp-chat-edit-cancel-button,
   button.smtcmp-chat-attach-button,
   button.smtcmp-chat-list-dropdown-item-icon {
     min-height: 36px;
@@ -2224,6 +2226,7 @@ button.smtcmp-tool-activity-step--selected {
   button.smtcmp-chat-attach-button,
   button.smtcmp-chat-list-dropdown-item-icon {
     width: 36px;
+    height: 36px;
   }
 
   .smtcmp-chat-user-input-file-badge {
@@ -2244,7 +2247,7 @@ button.smtcmp-tool-activity-step--selected {
 
   button.smtcmp-chat-user-input-file-badge-eye,
   button.smtcmp-chat-user-input-file-badge-delete {
-    flex-basis: 36px;
+    width: 36px;
   }
 
   #smtcmp-apply-view .smtcmp-diff-block-actions button {
@@ -2270,20 +2273,6 @@ button.smtcmp-tool-activity-step--selected {
 }
 
 @container (max-width: 480px) {
-  .smtcmp-chat-user-input-controls {
-    flex-wrap: wrap;
-    gap: var(--size-4-1);
-  }
-
-  .smtcmp-chat-user-input-controls__model-select-container,
-  .smtcmp-chat-user-input-controls__buttons {
-    width: 100%;
-  }
-
-  .smtcmp-chat-user-input-controls__buttons {
-    justify-content: flex-start !important;
-  }
-
   .smtcmp-user-message {
     max-width: 94%;
   }

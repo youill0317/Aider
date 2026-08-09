@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop } from 'lucide-react'
+import { CircleStop, CornerDownLeft } from 'lucide-react'
 
 export function SubmitButton({
   onClick,
@@ -16,7 +16,7 @@ export function SubmitButton({
         className="smtcmp-chat-stop-button"
         onClick={onStop}
       >
-        <CircleStop size={14} />
+        <CircleStop size={12} />
         Stop
       </button>
     )
@@ -28,7 +28,7 @@ export function SubmitButton({
       className="smtcmp-chat-primary-button"
       onClick={onClick}
     >
-      <ArrowUp size={14} />
+      <CornerDownLeft size={12} />
       Chat
     </button>
   )

@@ -24,7 +24,7 @@ export function ImageUploadButton({
         aria-label="Attach images"
         onClick={() => inputRef.current?.click()}
       >
-        <ImageIcon size={16} />
+        <ImageIcon size={14} />
       </button>
       <input
         ref={inputRef}

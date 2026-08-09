@@ -327,8 +327,12 @@ export class GeminiProvider extends BaseLLMProvider<
       object: 'chat.completion',
       usage: response.usageMetadata
         ? {
-            prompt_tokens: response.usageMetadata.promptTokenCount ?? 0,
-            completion_tokens: response.usageMetadata.candidatesTokenCount ?? 0,
+            prompt_tokens:
+              (response.usageMetadata.promptTokenCount ?? 0) +
+              (response.usageMetadata.toolUsePromptTokenCount ?? 0),
+            completion_tokens:
+              (response.usageMetadata.candidatesTokenCount ?? 0) +
+              (response.usageMetadata.thoughtsTokenCount ?? 0),
             total_tokens: response.usageMetadata.totalTokenCount ?? 0,
           }
         : undefined,
@@ -366,8 +370,12 @@ export class GeminiProvider extends BaseLLMProvider<
       object: 'chat.completion.chunk',
       usage: chunk.usageMetadata
         ? {
-            prompt_tokens: chunk.usageMetadata.promptTokenCount ?? 0,
-            completion_tokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
+            prompt_tokens:
+              (chunk.usageMetadata.promptTokenCount ?? 0) +
+              (chunk.usageMetadata.toolUsePromptTokenCount ?? 0),
+            completion_tokens:
+              (chunk.usageMetadata.candidatesTokenCount ?? 0) +
+              (chunk.usageMetadata.thoughtsTokenCount ?? 0),
             total_tokens: chunk.usageMetadata.totalTokenCount ?? 0,
           }
         : undefined,

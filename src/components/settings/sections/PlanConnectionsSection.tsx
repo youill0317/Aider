@@ -100,18 +100,6 @@ export function PlanConnectionsSection({
           </div>
 
           <div className="smtcmp-plan-connection-card-desc">
-            <div className="smtcmp-settings-desc-warning">
-              <strong className="smtcmp-settings-desc-warning-title">
-                Warning:
-              </strong>{' '}
-              Anthropic has restricted third-party OAuth access, and there are
-              reports of account bans when using subscription OAuth via
-              third-party clients. See the{' '}
-              <a href="https://github.com/youill0317/Aider?tab=readme-ov-file">
-                README
-              </a>{' '}
-              for full details and use at your own risk.
-            </div>
             Uses your Claude Code usage from your Claude plan.
             <br />
             Check your limit in Claude Code with <code>/usage</code>.

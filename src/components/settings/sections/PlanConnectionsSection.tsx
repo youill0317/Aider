@@ -92,6 +92,20 @@ export function PlanConnectionsSection({
         <br />
       </div>
 
+      <div className="smtcmp-settings-desc smtcmp-settings-callout">
+        <strong>Subscription risk:</strong> These OAuth flows are not official
+        usage-based API access. Anthropic has restricted third-party OAuth use,
+        and Claude users have reported account restrictions. Review the{' '}
+        <a
+          href="https://github.com/youill0317/Aider?tab=readme-ov-file#risks-of-connecting-a-claude-subscription"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          details
+        </a>{' '}
+        before connecting.
+      </div>
+
       <div className="smtcmp-plan-connection-grid">
         <div className="smtcmp-plan-connection-card">
           <div className="smtcmp-plan-connection-card-header">

@@ -917,7 +917,7 @@ function createSettings(
   },
 ): SmartComposerSettings {
   return {
-    version: 20,
+    version: 21,
     providers: [],
     chatModels: [],
     embeddingModels: [],

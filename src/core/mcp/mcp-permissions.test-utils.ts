@@ -43,7 +43,7 @@ export function createMcpManagerTestHarness({
 
 function createSettings(servers: McpServerConfig[]): SmartComposerSettings {
   return {
-    version: 20,
+    version: 21,
     providers: [],
     chatModels: [],
     embeddingModels: [],

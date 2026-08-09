@@ -29,7 +29,7 @@ function createSecureSecretStore() {
 
 function createSettings(providers: LLMProvider[]): SmartComposerSettings {
   return {
-    version: 20,
+    version: 21,
     providers,
     chatModels: [],
     embeddingModels: [],

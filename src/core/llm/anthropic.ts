@@ -39,7 +39,10 @@ export class AnthropicProvider extends BaseLLMProvider<
 > {
   private client: Anthropic
 
-  private static readonly DEFAULT_MAX_TOKENS = 8192
+  // max_tokens caps thinking plus response text. Models that think without an
+  // explicit budget (claude-opus-5 and later) need headroom for both, or the
+  // answer is truncated mid-sentence.
+  private static readonly DEFAULT_MAX_TOKENS = 16384
 
   constructor(provider: Extract<LLMProvider, { type: 'anthropic' }>) {
     super(provider)

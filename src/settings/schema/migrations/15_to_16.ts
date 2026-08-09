@@ -19,7 +19,7 @@ export const DEFAULT_PROVIDERS_V16 = [
   { type: 'lm-studio', id: 'lm-studio' },
 ] as const
 
-const DEFAULT_CHAT_MODELS_V16 = [
+export const DEFAULT_CHAT_MODELS_V16 = [
   ...DEFAULT_CHAT_MODELS_V15.slice(0, 3),
   {
     providerType: 'gemini-plan',

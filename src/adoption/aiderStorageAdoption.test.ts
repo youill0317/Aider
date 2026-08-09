@@ -28,7 +28,7 @@ describe('Aider storage adoption', () => {
     await app.vault.adapter.mkdir('.obsidian/plugins/smart-composer')
     await app.vault.adapter.write(
       legacyPluginDataPath,
-      jsonFile({ version: 20, providers: [] }),
+      jsonFile({ version: 21, providers: [] }),
     )
 
     const marker = await adoptAiderStorage(app)
@@ -114,7 +114,7 @@ describe('Aider storage adoption', () => {
     const legacyPath = '.obsidian/plugins/smart-composer/data.json'
     const targetPath = '.obsidian/plugins/aider/data.json'
     await adapter.mkdir('.obsidian/plugins/smart-composer')
-    await adapter.write(legacyPath, jsonFile({ version: 20, providers: [] }))
+    await adapter.write(legacyPath, jsonFile({ version: 21, providers: [] }))
     const write = adapter.write.bind(adapter)
     jest.spyOn(adapter, 'write').mockImplementationOnce(async (path) => {
       await write(path, '{')
@@ -140,11 +140,11 @@ describe('Aider storage adoption', () => {
     await app.vault.adapter.mkdir('.obsidian/plugins/aider')
     await app.vault.adapter.write(
       '.obsidian/plugins/smart-composer/data.json',
-      jsonFile({ version: 20, providers: [{ id: 'legacy' }] }),
+      jsonFile({ version: 21, providers: [{ id: 'legacy' }] }),
     )
     await app.vault.adapter.write(
       '.obsidian/plugins/aider/data.json',
-      jsonFile({ version: 20, providers: [{ id: 'aider' }] }),
+      jsonFile({ version: 21, providers: [{ id: 'aider' }] }),
     )
 
     const marker = await adoptAiderStorage(app)
@@ -169,7 +169,7 @@ describe('Aider storage adoption', () => {
     await app.vault.adapter.mkdir('.obsidian/plugins/smart-composer')
     await app.vault.adapter.write(
       legacyPath,
-      jsonFile({ version: 20, providers: [] }),
+      jsonFile({ version: 21, providers: [] }),
     )
 
     const marker = await adoptAiderStorage(app)

@@ -56,14 +56,16 @@ export const GEMINI_CODE_ASSIST_HEADERS = {
 } as const
 
 // Default model ids
-export const DEFAULT_CHAT_MODEL_ID = 'claude-sonnet-4.5'
-// gpt-4.1-mini is preferred over gpt-5-mini because gpt-5 models do not support
-// predicted outputs, making them significantly slower for apply tasks.
-export const DEFAULT_APPLY_MODEL_ID = 'gpt-4.1-mini'
+export const DEFAULT_CHAT_MODEL_ID = 'claude-opus-5'
+// gpt-5.6-luna is the cheap, fast tier of the current generation. It does not
+// support predicted outputs, so apply no longer gets that speed-up — see
+// PREDICTED_OUTPUTS_SUPPORTED_MODELS in utils/chat/apply.ts. Add a gpt-4.1
+// model back and select it here if apply latency matters more than model age.
+export const DEFAULT_APPLY_MODEL_ID = 'gpt-5.6-luna'
 
 // Recommended model ids
-export const RECOMMENDED_MODELS_FOR_CHAT = ['claude-sonnet-4.5', 'gpt-5.2']
-export const RECOMMENDED_MODELS_FOR_APPLY = ['gpt-4.1-mini']
+export const RECOMMENDED_MODELS_FOR_CHAT = ['claude-opus-5', 'gpt-5.6-sol']
+export const RECOMMENDED_MODELS_FOR_APPLY = ['gpt-5.6-luna']
 export const RECOMMENDED_MODELS_FOR_EMBEDDING = [
   'openai/text-embedding-3-small',
   'voyage/voyage-4',
@@ -317,101 +319,77 @@ export const DEFAULT_PROVIDERS: readonly LLMProvider[] = [
  * 2. If there's same model id in user's settings, it's data should be overwritten by default model
  */
 export const DEFAULT_CHAT_MODELS: readonly ChatModel[] = [
+  // claude-opus-5 deliberately carries no `thinking` block: it rejects
+  // `budget_tokens` with a 400 and thinks adaptively when the field is omitted.
   {
     providerType: 'anthropic-plan',
     providerId: PROVIDER_TYPES_INFO['anthropic-plan'].defaultProviderId,
-    id: 'claude-opus-4.5 (plan)',
-    model: 'claude-opus-4-5',
-    thinking: {
-      enabled: true,
-      budget_tokens: 8192,
-    },
-  },
-  {
-    providerType: 'anthropic-plan',
-    providerId: PROVIDER_TYPES_INFO['anthropic-plan'].defaultProviderId,
-    id: 'claude-sonnet-4.5 (plan)',
-    model: 'claude-sonnet-4-5',
-    thinking: {
-      enabled: true,
-      budget_tokens: 8192,
-    },
+    id: 'claude-opus-5 (plan)',
+    model: 'claude-opus-5',
   },
   {
     providerType: 'openai-plan',
     providerId: PROVIDER_TYPES_INFO['openai-plan'].defaultProviderId,
-    id: 'gpt-5.2 (plan)',
-    model: 'gpt-5.2',
+    id: 'gpt-5.6-sol (plan)',
+    model: 'gpt-5.6-sol',
+  },
+  {
+    providerType: 'openai-plan',
+    providerId: PROVIDER_TYPES_INFO['openai-plan'].defaultProviderId,
+    id: 'gpt-5.6-luna (plan)',
+    model: 'gpt-5.6-luna',
   },
   {
     providerType: 'gemini-plan',
     providerId: PROVIDER_TYPES_INFO['gemini-plan'].defaultProviderId,
-    id: 'gemini-3-pro-preview (plan)',
-    model: 'gemini-3-pro-preview',
+    id: 'gemini-3.1-pro-preview (plan)',
+    model: 'gemini-3.1-pro-preview',
   },
   {
     providerType: 'gemini-plan',
     providerId: PROVIDER_TYPES_INFO['gemini-plan'].defaultProviderId,
-    id: 'gemini-3-flash-preview (plan)',
-    model: 'gemini-3-flash-preview',
+    id: 'gemini-3.6-flash (plan)',
+    model: 'gemini-3.6-flash',
   },
   {
     providerType: 'anthropic',
     providerId: PROVIDER_TYPES_INFO.anthropic.defaultProviderId,
-    id: 'claude-opus-4.5',
-    model: 'claude-opus-4-5',
-  },
-  {
-    providerType: 'anthropic',
-    providerId: PROVIDER_TYPES_INFO.anthropic.defaultProviderId,
-    id: 'claude-sonnet-4.5',
-    model: 'claude-sonnet-4-5',
-  },
-  {
-    providerType: 'anthropic',
-    providerId: PROVIDER_TYPES_INFO.anthropic.defaultProviderId,
-    id: 'claude-haiku-4.5',
-    model: 'claude-haiku-4-5',
+    id: 'claude-opus-5',
+    model: 'claude-opus-5',
   },
   {
     providerType: 'openai',
     providerId: PROVIDER_TYPES_INFO.openai.defaultProviderId,
-    id: 'gpt-5.2',
-    model: 'gpt-5.2',
+    id: 'gpt-5.6-sol',
+    model: 'gpt-5.6-sol',
   },
   {
     providerType: 'openai',
     providerId: PROVIDER_TYPES_INFO.openai.defaultProviderId,
-    id: 'gpt-5-mini',
-    model: 'gpt-5-mini',
+    id: 'gpt-5.6-luna',
+    model: 'gpt-5.6-luna',
   },
+  // Off by default: gpt-5.3-codex-spark is limited to OpenAI design partners,
+  // so an ordinary API key gets "model does not exist". Enable it in settings
+  // once your key has access.
   {
     providerType: 'openai',
     providerId: PROVIDER_TYPES_INFO.openai.defaultProviderId,
-    id: 'gpt-4.1-mini',
-    model: 'gpt-4.1-mini',
-  },
-  {
-    providerType: 'openai',
-    providerId: PROVIDER_TYPES_INFO.openai.defaultProviderId,
-    id: 'o4-mini',
-    model: 'o4-mini',
-    reasoning: {
-      enabled: true,
-      reasoning_effort: 'medium',
-    },
+    id: 'gpt-5.3-codex-spark',
+    model: 'gpt-5.3-codex-spark',
+    enable: false,
   },
   {
     providerType: 'gemini',
     providerId: PROVIDER_TYPES_INFO.gemini.defaultProviderId,
-    id: 'gemini-3-pro-preview',
-    model: 'gemini-3-pro-preview',
+    id: 'gemini-3.1-pro-preview',
+    model: 'gemini-3.1-pro-preview',
   },
   {
     providerType: 'gemini',
     providerId: PROVIDER_TYPES_INFO.gemini.defaultProviderId,
-    id: 'gemini-3-flash-preview',
-    model: 'gemini-3-flash-preview',
+    id: 'gemini-3.6-flash',
+    model: 'gemini-3.6-flash',
   },
   {
     providerType: 'deepseek',
@@ -524,6 +502,11 @@ type ModelPricing = {
 }
 
 export const OPENAI_PRICES: Record<string, ModelPricing> = {
+  'gpt-5.6-sol': { input: 5, output: 30 },
+  'gpt-5.6-terra': { input: 2, output: 12 },
+  'gpt-5.6-luna': { input: 0.2, output: 1.2 },
+  // gpt-5.3-codex-spark is omitted: OpenAI has not published a rate for the
+  // Spark variant, and guessing one would show a wrong number as if it were real.
   'gpt-5.2': { input: 1.75, output: 14 },
   'gpt-5.1': { input: 1.25, output: 10 },
   'gpt-5': { input: 1.25, output: 10 },
@@ -542,6 +525,7 @@ export const OPENAI_PRICES: Record<string, ModelPricing> = {
 }
 
 export const ANTHROPIC_PRICES: Record<string, ModelPricing> = {
+  'claude-opus-5': { input: 5, output: 25 },
   'claude-opus-4-5': { input: 5, output: 25 },
   'claude-opus-4-1': { input: 15, output: 75 },
   'claude-opus-4-0': { input: 15, output: 75 },
@@ -554,7 +538,14 @@ export const ANTHROPIC_PRICES: Record<string, ModelPricing> = {
 }
 
 // Gemini is currently free for low rate limits
-export const GEMINI_PRICES: Record<string, ModelPricing> = {}
+// These figures drive a deliberately rough "estimated price" readout, not
+// billing. Flat per-model rates are the intent, same as every other table here:
+// Gemini 3.1 Pro really charges $4/$18 above a 200k-token prompt, and that
+// under-reporting is accepted rather than a gap waiting to be closed.
+export const GEMINI_PRICES: Record<string, ModelPricing> = {
+  'gemini-3.1-pro-preview': { input: 2, output: 12 },
+  'gemini-3.6-flash': { input: 1.5, output: 7.5 },
+}
 
 export const XAI_PRICES: Record<string, ModelPricing> = {
   'grok-4-1-fast': { input: 0.2, output: 0.5 },

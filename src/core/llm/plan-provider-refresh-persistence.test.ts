@@ -37,7 +37,7 @@ type PlanProvider = Extract<
 
 function createSettings(provider: PlanProvider): SmartComposerSettings {
   return {
-    version: 20,
+    version: 21,
     providers: [provider],
     chatModels: [
       {

@@ -28,7 +28,7 @@ export class AddProviderModal extends ReactModal<ProviderFormComponentProps> {
       Component: ProviderFormComponent,
       props: { plugin, provider: null },
       options: {
-        title: 'Add Custom Provider',
+        title: 'Add custom provider',
       },
     })
   }
@@ -41,7 +41,7 @@ export class EditProviderModal extends ReactModal<ProviderFormComponentProps> {
       Component: ProviderFormComponent,
       props: { plugin, provider },
       options: {
-        title: `Edit Provider: ${provider.id}`,
+        title: `Edit provider: ${provider.id}`,
       },
     })
   }
@@ -156,7 +156,7 @@ function ProviderFormComponent({
             />
           </ObsidianSetting>
 
-          <ObsidianSetting name="Provider Type" required>
+          <ObsidianSetting name="Provider type" required>
             <ObsidianDropdown
               value={formData.type}
               options={Object.fromEntries(
@@ -185,7 +185,7 @@ function ProviderFormComponent({
       {!PLAN_PROVIDER_TYPES.includes(formData.type) && (
         <>
           <ObsidianSetting
-            name="API Key"
+            name="API key"
             desc="(leave blank if not required)"
             required={providerTypeInfo.requireApiKey}
           >

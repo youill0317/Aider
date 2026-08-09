@@ -23,7 +23,7 @@ export class AddChatModelModal extends ReactModal<AddChatModelModalComponentProp
       Component: AddChatModelModalComponent,
       props: { plugin },
       options: {
-        title: 'Add Custom Chat Model',
+        title: 'Add custom chat model',
       },
     })
   }
@@ -123,7 +123,7 @@ function AddChatModelModalComponent({
         />
       </ObsidianSetting>
 
-      <ObsidianSetting name="Model Name" required>
+      <ObsidianSetting name="Model name" required>
         <ObsidianTextInput
           value={formData.model}
           placeholder="Enter the model name"
@@ -134,7 +134,7 @@ function AddChatModelModalComponent({
       </ObsidianSetting>
 
       <ObsidianSetting
-        name="Prompt Level"
+        name="Prompt level"
         desc={`Choose how complex the system prompt should be. Select "simple" for small models that ignore user questions and just repeat back instructions.`}
         required
       >

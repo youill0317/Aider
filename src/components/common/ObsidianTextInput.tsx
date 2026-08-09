@@ -9,6 +9,9 @@ type ObsidianTextInputProps = {
   placeholder?: string
   onChange: (value: string) => void | Promise<void>
   type?: 'text' | 'number'
+  min?: number
+  max?: number
+  step?: number | 'any'
 }
 
 export function ObsidianTextInput({
@@ -16,6 +19,9 @@ export function ObsidianTextInput({
   placeholder,
   onChange,
   type,
+  min,
+  max,
+  step,
 }: ObsidianTextInputProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { setting } = useObsidianSetting()
@@ -60,8 +66,17 @@ export function ObsidianTextInput({
       textComponent.setValue(draft)
     }
     textComponent.setPlaceholder(placeholder ?? '')
-    textComponent.inputEl.type = type ?? 'text'
-  }, [draft, placeholder, textComponent, type])
+    const input = textComponent.inputEl
+    input.type = type ?? 'text'
+    for (const [attr, val] of [
+      ['min', min],
+      ['max', max],
+      ['step', step],
+    ] as const) {
+      if (val === undefined) input.removeAttribute(attr)
+      else input.setAttribute(attr, String(val))
+    }
+  }, [draft, max, min, placeholder, step, textComponent, type])
 
   return <div ref={containerRef} />
 }

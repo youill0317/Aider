@@ -27,7 +27,7 @@ export class AddMcpServerModal extends ReactModal<McpServerFormComponentProps> {
       Component: McpServerFormComponent,
       props: { plugin },
       options: {
-        title: 'Add MCP Server',
+        title: 'Add MCP server',
       },
     })
   }
@@ -40,7 +40,7 @@ export class EditMcpServerModal extends ReactModal<McpServerFormComponentProps> 
       Component: McpServerFormComponent,
       props: { plugin, serverId: editServerId },
       options: {
-        title: 'Edit MCP Server',
+        title: 'Edit MCP server',
       },
     })
   }

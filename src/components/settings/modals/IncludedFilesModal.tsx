@@ -14,7 +14,7 @@ export class IncludedFilesModal extends ReactModal<IncludedFilesModalComponentPr
       Component: IncludedFilesModalComponent,
       props: { files, patterns },
       options: {
-        title: `${files.length} Files Included`,
+        title: `${files.length} files included`,
       },
     })
   }

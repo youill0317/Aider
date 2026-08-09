@@ -26,7 +26,7 @@ export class ChatModelSettingsModal extends ReactModal<SettingsComponentProps> {
         : () => <div>No settings available for this model</div>,
       props: { model, plugin },
       options: {
-        title: `Edit Chat Model: ${model.id}`,
+        title: `Edit chat model: ${model.id}`,
       },
     })
   }
@@ -99,7 +99,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
           </ObsidianSetting>
           {reasoningEnabled && (
             <ObsidianSetting
-              name="Reasoning Effort"
+              name="Reasoning effort"
               desc={`Controls how much thinking the model does before responding. Default is "medium".`}
               className="smtcmp-setting-item--nested"
               required
@@ -178,7 +178,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
       return (
         <>
           <ObsidianSetting
-            name="Reasoning Effort"
+            name="Reasoning effort"
             desc="Controls how much thinking the model does before responding."
           >
             <ObsidianDropdown
@@ -196,7 +196,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
             />
           </ObsidianSetting>
           <ObsidianSetting
-            name="Reasoning Summary"
+            name="Reasoning summary"
             desc="Optional summary of reasoning."
           >
             <ObsidianDropdown
@@ -284,7 +284,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
       return (
         <>
           <ObsidianSetting
-            name="Extended Thinking"
+            name="Extended thinking"
             desc="Enable extended thinking for Claude. Available for Claude Sonnet 3.7+ and Claude Opus 4.0+."
           >
             <ObsidianToggle
@@ -294,7 +294,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
           </ObsidianSetting>
           {thinkingEnabled && (
             <ObsidianSetting
-              name="Budget Tokens"
+              name="Budget tokens"
               desc="The maximum number of tokens that Claude can use for thinking. Must be at least 1024."
               className="smtcmp-setting-item--nested"
               required
@@ -304,6 +304,8 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
                 placeholder="Number of tokens"
                 onChange={(value: string) => setBudgetTokens(value)}
                 type="number"
+                min={1024}
+                step={1}
               />
             </ObsidianSetting>
           )}
@@ -392,7 +394,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
       return (
         <>
           <ObsidianSetting
-            name="Thinking Settings"
+            name="Thinking settings"
             desc="Customize thinking level or budget. When disabled, the model follows its default behavior (dynamic thinking for most Gemini 2.5 and 3 models)."
           >
             <ObsidianToggle
@@ -403,7 +405,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
           {thinkingEnabled && (
             <>
               <ObsidianSetting
-                name="Control Mode"
+                name="Control mode"
                 desc="Use 'Level' for Gemini 3 models, 'Budget' for Gemini 2.5 models."
                 className="smtcmp-setting-item--nested"
               >
@@ -420,7 +422,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
               </ObsidianSetting>
               {controlMode === 'level' && (
                 <ObsidianSetting
-                  name="Thinking Level"
+                  name="Thinking level"
                   desc="Controls reasoning depth. 'high' is default for Gemini 3."
                   className="smtcmp-setting-item--nested"
                 >
@@ -438,7 +440,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
               )}
               {controlMode === 'budget' && (
                 <ObsidianSetting
-                  name="Thinking Budget"
+                  name="Thinking budget"
                   desc="Token budget for thinking. Use -1 for dynamic, 0 to disable."
                   className="smtcmp-setting-item--nested"
                 >
@@ -447,11 +449,13 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
                     placeholder="-1 for dynamic"
                     onChange={(value: string) => setThinkingBudget(value)}
                     type="number"
+                    min={-1}
+                    step={1}
                   />
                 </ObsidianSetting>
               )}
               <ObsidianSetting
-                name="Include Thought Summaries"
+                name="Include thought summaries"
                 desc="Shows a summary of the model's reasoning process. Enabling this can increase token usage."
                 className="smtcmp-setting-item--nested"
               >
@@ -518,7 +522,7 @@ const MODEL_SETTINGS_REGISTRY: ModelSettingsRegistry[] = [
       return (
         <>
           <ObsidianSetting
-            name="Search Context Size"
+            name="Search context size"
             desc={`Determines how much search context is retrieved for the model. Choose "low" for minimal context and lower costs, "medium" for a balanced approach, or "high" for maximum context at higher cost. Default is "low".`}
           >
             <ObsidianDropdown

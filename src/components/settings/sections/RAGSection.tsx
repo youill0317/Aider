@@ -49,6 +49,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
       <ObsidianSetting
         name="Include patterns"
         desc="Specify glob patterns to include files in indexing (one per line). Example: use 'notes/**' for all files in the notes folder. Leave empty to include all files. Requires 'Rebuild entire vault index' after changes."
+        className="smtcmp-settings-textarea-header"
       >
         <ObsidianButton
           text="Test patterns"
@@ -85,6 +86,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
       <ObsidianSetting
         name="Exclude patterns"
         desc="Specify glob patterns to exclude files from indexing (one per line). Example: use 'notes/**' for all files in the notes folder. Leave empty to exclude nothing. Requires 'Rebuild entire vault index' after changes."
+        className="smtcmp-settings-textarea-header"
       >
         <ObsidianButton
           text="Test patterns"
@@ -125,6 +127,10 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
         <ObsidianTextInput
           value={String(settings.ragOptions.chunkSize)}
           placeholder="1000"
+          type="number"
+          min={400}
+          max={100_000}
+          step={1}
           onChange={async (value) => {
             const chunkSize = Number(value)
             if (
@@ -151,6 +157,10 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
         <ObsidianTextInput
           value={String(settings.ragOptions.thresholdTokens)}
           placeholder="8192"
+          type="number"
+          min={0}
+          max={10_000_000}
+          step={1}
           onChange={async (value) => {
             if (value.trim() === '') return
             const thresholdTokens = Number(value)
@@ -175,6 +185,8 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
         name="Minimum similarity"
         desc="Minimum similarity score for RAG results. Higher values return more relevant but potentially fewer results. Accepted range: -1 to 1."
       >
+        {/* Stays type="text": a native number input sanitizes partial decimals
+            like "0." to "", which fights the debounced draft state. */}
         <ObsidianTextInput
           value={String(settings.ragOptions.minSimilarity)}
           placeholder="0.0"
@@ -209,6 +221,10 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
         <ObsidianTextInput
           value={String(settings.ragOptions.limit)}
           placeholder="10"
+          type="number"
+          min={1}
+          max={100}
+          step={1}
           onChange={async (value) => {
             const limit = Number(value)
             if (Number.isInteger(limit) && limit >= 1 && limit <= 100) {
@@ -224,7 +240,10 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
         />
       </ObsidianSetting>
 
-      <ObsidianSetting name="Manage Embedding Database">
+      <ObsidianSetting
+        name="Manage embedding database"
+        desc="Inspect the embedding database and delete stored indexes by model."
+      >
         <ObsidianButton
           text="Manage"
           onClick={async () => {

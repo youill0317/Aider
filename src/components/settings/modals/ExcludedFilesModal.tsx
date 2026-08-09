@@ -13,7 +13,7 @@ export class ExcludedFilesModal extends ReactModal<ExcludedFilesModalComponentPr
       Component: ExcludedFilesModalComponent,
       props: { files },
       options: {
-        title: `${files.length} Files Excluded`,
+        title: `${files.length} files excluded`,
       },
     })
   }

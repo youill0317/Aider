@@ -6,7 +6,7 @@ import { ObsidianSetting } from '../common/ObsidianSetting'
 
 import { ChatSection } from './sections/ChatSection'
 import { CodexToolSection } from './sections/CodexToolSection'
-import { EtcSection } from './sections/EtcSection'
+import { MaintenanceSection } from './sections/MaintenanceSection'
 import { McpSection } from './sections/McpSection'
 import { ModelsSection } from './sections/ModelsSection'
 import { PlanConnectionsSection } from './sections/PlanConnectionsSection'
@@ -30,23 +30,25 @@ export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
       <RAGSection app={app} plugin={plugin} />
       <McpSection app={app} plugin={plugin} />
       <TemplateSection app={app} />
-      <EtcSection app={app} plugin={plugin} />
-      <ObsidianSetting
-        name="Support Aider"
-        desc="If you find Aider valuable, consider supporting its development!"
-        className="smtcmp-settings-support-smart-composer"
-      >
-        <ObsidianButton
-          text="Open Repository"
-          onClick={() =>
-            window.open(
-              'https://github.com/youill0317/Aider',
-              '_blank',
-              'noopener,noreferrer',
-            )
-          }
-        />
-      </ObsidianSetting>
+      <MaintenanceSection app={app} plugin={plugin} />
+      <div className="smtcmp-settings-section">
+        <h2 className="smtcmp-settings-header">About</h2>
+        <ObsidianSetting
+          name="Support Aider"
+          desc="If you find Aider valuable, consider supporting its development!"
+        >
+          <ObsidianButton
+            text="Open repository"
+            onClick={() =>
+              window.open(
+                'https://github.com/youill0317/Aider',
+                '_blank',
+                'noopener,noreferrer',
+              )
+            }
+          />
+        </ObsidianSetting>
+      </div>
     </>
   )
 }

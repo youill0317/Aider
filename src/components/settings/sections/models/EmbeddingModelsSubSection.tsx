@@ -33,7 +33,7 @@ export function EmbeddingModelsSubSection({
       `This will also delete all embeddings generated using this model from the database.`
 
     new ConfirmModal(app, {
-      title: 'Delete Embedding Model',
+      title: 'Delete embedding model',
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
@@ -57,13 +57,20 @@ export function EmbeddingModelsSubSection({
 
   return (
     <div>
-      <h3 className="smtcmp-settings-sub-header">Embedding Models</h3>
+      <h3 className="smtcmp-settings-sub-header">Embedding models</h3>
       <div className="smtcmp-settings-desc">
         Models used for generating embeddings for RAG
       </div>
 
       <div className="smtcmp-settings-table-container">
         <table className="smtcmp-settings-table">
+          <colgroup>
+            <col />
+            <col />
+            <col />
+            <col width={90} />
+            <col width={60} />
+          </colgroup>
           <thead>
             <tr>
               <th>ID</th>

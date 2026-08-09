@@ -45,7 +45,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
       `All embeddings generated using the associated embedding models will also be deleted.`
 
     new ConfirmModal(app, {
-      title: 'Delete Provider',
+      title: 'Delete provider',
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
@@ -95,7 +95,7 @@ export function ProvidersSection({ app, plugin }: ProvidersSectionProps) {
             <tr>
               <th>ID</th>
               <th>Type</th>
-              <th>API Key</th>
+              <th>API key</th>
               <th>Actions</th>
             </tr>
           </thead>

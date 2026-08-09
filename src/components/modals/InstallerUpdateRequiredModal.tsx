@@ -11,7 +11,7 @@ export class InstallerUpdateRequiredModal extends ReactModal<
       Component: InstallerUpdateRequiredModalComponent,
       props: {},
       options: {
-        title: 'Aider Requires Obsidian Update',
+        title: 'Aider requires an Obsidian update',
       },
     })
   }

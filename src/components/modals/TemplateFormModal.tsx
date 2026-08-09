@@ -42,7 +42,7 @@ export class CreateTemplateModal extends ReactModal<TemplateFormComponentProps> 
         onSubmit,
       },
       options: {
-        title: 'Add Template',
+        title: 'Add template',
       },
     })
   }
@@ -67,7 +67,7 @@ export class EditTemplateModal extends ReactModal<TemplateFormComponentProps> {
         onSubmit,
       },
       options: {
-        title: 'Edit Template',
+        title: 'Edit template',
       },
     })
   }
@@ -203,7 +203,7 @@ function TemplateFormComponent({
       </ObsidianSetting>
 
       <ObsidianSetting
-        name="Template Content"
+        name="Template content"
         desc="Content of the template"
         className="smtcmp-settings-description-preserve-whitespace"
         required

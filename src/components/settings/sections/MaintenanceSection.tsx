@@ -8,12 +8,12 @@ import { ObsidianSetting } from '../../common/ObsidianSetting'
 import { ConfirmModal } from '../../modals/ConfirmModal'
 import { resetSettings } from '../destructive-actions'
 
-type EtcSectionProps = {
+type MaintenanceSectionProps = {
   app: App
   plugin: SmartComposerPlugin
 }
 
-export function EtcSection({ app, plugin }: EtcSectionProps) {
+export function MaintenanceSection({ app, plugin }: MaintenanceSectionProps) {
   const { setSettings } = useSettings()
 
   const handleResetSettings = () => {

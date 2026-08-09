@@ -1,5 +1,5 @@
 import { Check, CircleMinus } from 'lucide-react'
-import { App } from 'obsidian'
+import { App, Platform } from 'obsidian'
 
 import { PROVIDER_TYPES_INFO } from '../../../constants'
 import { useSettings } from '../../../contexts/settings-context'
@@ -9,6 +9,7 @@ import { ConfirmModal } from '../../modals/ConfirmModal'
 import { ConnectClaudePlanModal } from '../modals/ConnectClaudePlanModal'
 import { ConnectGeminiPlanModal } from '../modals/ConnectGeminiPlanModal'
 import { ConnectOpenAIPlanModal } from '../modals/ConnectOpenAIPlanModal'
+import { StatusBadge } from '../StatusBadge'
 
 type PlanConnectionsSectionProps = {
   app: App
@@ -120,6 +121,7 @@ export function PlanConnectionsSection({
             {!isClaudeConnected && (
               <button
                 className="mod-cta"
+                disabled={!Platform.isDesktop}
                 onClick={() => new ConnectClaudePlanModal(app, plugin).open()}
               >
                 Connect
@@ -155,6 +157,7 @@ export function PlanConnectionsSection({
             {!isOpenAIConnected && (
               <button
                 className="mod-cta"
+                disabled={!Platform.isDesktop}
                 onClick={() => new ConnectOpenAIPlanModal(app, plugin).open()}
               >
                 Connect
@@ -184,6 +187,7 @@ export function PlanConnectionsSection({
             {!isGeminiConnected && (
               <button
                 className="mod-cta"
+                disabled={!Platform.isDesktop}
                 onClick={() => new ConnectGeminiPlanModal(app, plugin).open()}
               >
                 Connect
@@ -202,26 +206,11 @@ export function PlanConnectionsSection({
 }
 
 function PlanConnectionStatusBadge({ connected }: { connected: boolean }) {
-  const statusConfig = connected
-    ? {
-        icon: <Check size={16} />,
-        label: 'Connected',
-        statusClass: 'smtcmp-mcp-server-status-badge--connected',
-      }
-    : {
-        icon: <CircleMinus size={14} />,
-        label: 'Disconnected',
-        statusClass: 'smtcmp-mcp-server-status-badge--disconnected',
-      }
-
   return (
-    <div
-      className={`smtcmp-mcp-server-status-badge ${statusConfig.statusClass}`}
-    >
-      {statusConfig.icon}
-      <div className="smtcmp-mcp-server-status-badge-label">
-        {statusConfig.label}
-      </div>
-    </div>
+    <StatusBadge
+      tone={connected ? 'connected' : 'disconnected'}
+      icon={connected ? <Check size={16} /> : <CircleMinus size={16} />}
+      label={connected ? 'Connected' : 'Disconnected'}
+    />
   )
 }

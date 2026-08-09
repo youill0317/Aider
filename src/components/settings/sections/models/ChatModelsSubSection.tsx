@@ -36,7 +36,7 @@ export function ChatModelsSubSection({
 
     const message = `Are you sure you want to delete model "${modelId}"?`
     new ConfirmModal(app, {
-      title: 'Delete Chat Model',
+      title: 'Delete chat model',
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
@@ -90,7 +90,7 @@ export function ChatModelsSubSection({
 
   return (
     <div>
-      <h3 className="smtcmp-settings-sub-header">Chat Models</h3>
+      <h3 className="smtcmp-settings-sub-header">Chat models</h3>
       <div className="smtcmp-settings-desc">Models used for chat and apply</div>
 
       <div className="smtcmp-settings-table-container">

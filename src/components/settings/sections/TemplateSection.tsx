@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { TemplateManager } from '../../../database/json/template/TemplateManager'
 import { TemplateMetadata } from '../../../database/json/template/types'
-import { ObsidianButton } from '../../common/ObsidianButton'
 import { ConfirmModal } from '../../modals/ConfirmModal'
 import {
   CreateTemplateModal,
@@ -59,7 +58,7 @@ export function TemplateSection({ app }: TemplateSectionProps) {
     (template: TemplateMetadata) => {
       const message = `Are you sure you want to delete template "${template.name}"?`
       new ConfirmModal(app, {
-        title: 'Delete Template',
+        title: 'Delete template',
         message: message,
         ctaText: 'Delete',
         onConfirm: async () => {
@@ -82,7 +81,7 @@ export function TemplateSection({ app }: TemplateSectionProps) {
 
   return (
     <div className="smtcmp-settings-section">
-      <h2 className="smtcmp-settings-header">Prompt Templates</h2>
+      <h2 className="smtcmp-settings-header">Prompt templates</h2>
 
       <div className="smtcmp-settings-desc smtcmp-settings-callout">
         <strong>How to use:</strong> Create templates with reusable content that
@@ -92,68 +91,75 @@ export function TemplateSection({ app }: TemplateSectionProps) {
         button for quick template creation.
       </div>
 
-      <div className="smtcmp-settings-sub-header-container">
-        <h3 className="smtcmp-settings-sub-header">Saved Templates</h3>
-        <ObsidianButton text="Add Prompt Template" onClick={handleCreate} />
-      </div>
+      <h3 className="smtcmp-settings-sub-header">Saved templates</h3>
 
-      <div className="smtcmp-templates-container">
-        <div className="smtcmp-templates-header">
-          <div>Name</div>
-          <div>Actions</div>
-        </div>
-        {isLoading ? (
-          <div className="smtcmp-templates-empty">Loading templates...</div>
-        ) : templateList.length > 0 ? (
-          templateList.map((template) => (
-            <TemplateItem
-              key={template.id}
-              template={template}
-              onDelete={() => {
-                handleDelete(template)
-              }}
-              onEdit={() => {
-                handleEdit(template)
-              }}
-            />
-          ))
-        ) : (
-          <div className="smtcmp-templates-empty">No templates found</div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function TemplateItem({
-  template,
-  onEdit,
-  onDelete,
-}: {
-  template: TemplateMetadata
-  onEdit: () => void
-  onDelete: () => void
-}) {
-  return (
-    <div className="smtcmp-template">
-      <div className="smtcmp-template-row">
-        <div className="smtcmp-template-name">{template.name}</div>
-        <div className="smtcmp-template-actions">
-          <button
-            className="clickable-icon"
-            aria-label="Edit Template"
-            onClick={onEdit}
-          >
-            <Edit size={16} />
-          </button>
-          <button
-            className="clickable-icon"
-            aria-label="Delete Template"
-            onClick={onDelete}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
+      <div className="smtcmp-settings-table-container">
+        <table className="smtcmp-settings-table">
+          <colgroup>
+            <col />
+            <col width={60} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr>
+                <td colSpan={2} className="smtcmp-settings-table-empty">
+                  Loading templates...
+                </td>
+              </tr>
+            ) : templateList.length > 0 ? (
+              templateList.map((template) => (
+                <tr key={template.id}>
+                  <td>{template.name}</td>
+                  <td>
+                    <div className="smtcmp-settings-actions">
+                      <button
+                        type="button"
+                        className="clickable-icon"
+                        aria-label={`Edit template ${template.name}`}
+                        onClick={() => {
+                          handleEdit(template)
+                        }}
+                      >
+                        <Edit />
+                      </button>
+                      <button
+                        type="button"
+                        className="clickable-icon"
+                        aria-label={`Delete template ${template.name}`}
+                        onClick={() => {
+                          handleDelete(template)
+                        }}
+                      >
+                        <Trash2 />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={2} className="smtcmp-settings-table-empty">
+                  No templates found
+                </td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={2}>
+                <button type="button" onClick={handleCreate}>
+                  Add prompt template
+                </button>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </div>
   )

@@ -28,7 +28,7 @@ export class AddEmbeddingModelModal extends ReactModal<AddEmbeddingModelModalCom
       Component: AddEmbeddingModelModalComponent,
       props: { plugin },
       options: {
-        title: 'Add Custom Embedding Model',
+        title: 'Add custom embedding model',
       },
     })
   }
@@ -131,7 +131,7 @@ function AddEmbeddingModelModalComponent({
       if (!supportedDimensionsForIndex.includes(dimension)) {
         const confirmed = await new Promise<boolean>((resolve) => {
           new ConfirmModal(plugin.app, {
-            title: 'Performance Warning',
+            title: 'Performance warning',
             message: `This model outputs ${dimension} dimensions, but the optimized dimensions for database indexing are: ${supportedDimensionsForIndex.join(
               ', ',
             )}.\n\nThis may result in slower search performance.\n\nDo you want to continue anyway?`,
@@ -233,7 +233,7 @@ function AddEmbeddingModelModalComponent({
         )}
       </ObsidianSetting>
 
-      <ObsidianSetting name="Model Name" required>
+      <ObsidianSetting name="Model name" required>
         <ObsidianTextInput
           value={formData.model}
           placeholder="Enter the model name"
@@ -244,7 +244,7 @@ function AddEmbeddingModelModalComponent({
       </ObsidianSetting>
 
       <ObsidianSetting
-        name="Output Dimensions"
+        name="Output dimensions"
         desc="Optional. Request a specific output dimension from models that support Matryoshka Representation Learning (MRL), such as OpenAI's text-embedding-3-* or Google's gemini-embedding-001. Leave empty to use the model's default dimension."
       >
         <ObsidianTextInput

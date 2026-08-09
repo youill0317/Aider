@@ -21,7 +21,6 @@ import {
   McpTool,
 } from '../../../types/mcp.types'
 import { runAsyncAction } from '../../../utils/async-action'
-import { ObsidianButton } from '../../common/ObsidianButton'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 import { ConfirmModal } from '../../modals/ConfirmModal'
 import { deleteMcpServer } from '../destructive-actions'
@@ -29,6 +28,7 @@ import {
   AddMcpServerModal,
   EditMcpServerModal,
 } from '../modals/McpServerFormModal'
+import { StatusBadge } from '../StatusBadge'
 
 type McpSectionProps = {
   app: App
@@ -73,42 +73,60 @@ export function McpSection({ app, plugin }: McpSectionProps) {
       </div>
 
       {mcpManager?.disabled ? (
-        <div className="smtcmp-settings-sub-header-container">
-          <div className="smtcmp-settings-sub-header">
-            MCP is not supported on mobile devices
-          </div>
+        <div className="smtcmp-settings-desc">
+          MCP is not supported on mobile devices
         </div>
       ) : (
         <>
-          <div className="smtcmp-settings-sub-header-container">
-            <h3 className="smtcmp-settings-sub-header">MCP Servers</h3>
-            <ObsidianButton
-              text="Add MCP Server"
-              onClick={() => new AddMcpServerModal(app, plugin).open()}
-            />
-          </div>
+          <h3 className="smtcmp-settings-sub-header">MCP servers</h3>
 
-          <div className="smtcmp-mcp-servers-container">
-            <div className="smtcmp-mcp-servers-header">
-              <div>Server</div>
-              <div>Status</div>
-              <div>Enabled</div>
-              <div>Actions</div>
-            </div>
-            {mcpServers.length > 0 ? (
-              mcpServers.map((server) => (
-                <McpServerComponent
-                  key={server.name}
-                  server={server}
-                  app={app}
-                  plugin={plugin}
-                />
-              ))
-            ) : (
-              <div className="smtcmp-mcp-servers-empty">
-                No MCP servers found
-              </div>
-            )}
+          <div className="smtcmp-settings-table-container">
+            <table className="smtcmp-settings-table">
+              <colgroup>
+                <col />
+                <col width={128} />
+                <col width={60} />
+                <col width={120} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Server</th>
+                  <th>Status</th>
+                  <th>Enable</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mcpServers.length > 0 ? (
+                  mcpServers.map((server) => (
+                    <McpServerRows
+                      key={server.name}
+                      server={server}
+                      app={app}
+                      plugin={plugin}
+                    />
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="smtcmp-settings-table-empty">
+                      No MCP servers found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={4}>
+                    <button
+                      type="button"
+                      onClick={() => new AddMcpServerModal(app, plugin).open()}
+                    >
+                      Add MCP server
+                    </button>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </>
       )}
@@ -116,7 +134,7 @@ export function McpSection({ app, plugin }: McpSectionProps) {
   )
 }
 
-function McpServerComponent({
+function McpServerRows({
   server,
   app,
   plugin,
@@ -136,7 +154,7 @@ function McpServerComponent({
   const handleDelete = useCallback(() => {
     const message = `Are you sure you want to delete MCP server "${server.name}"?`
     new ConfirmModal(app, {
-      title: 'Delete MCP Server',
+      title: 'Delete MCP server',
       message: message,
       ctaText: 'Delete',
       onConfirm: async () => {
@@ -175,66 +193,72 @@ function McpServerComponent({
   }, [plugin, server.name])
 
   return (
-    <div className="smtcmp-mcp-server">
-      <div className="smtcmp-mcp-server-row">
-        <div className="smtcmp-mcp-server-name">{server.name}</div>
-        <div className="smtcmp-mcp-server-status">
+    <>
+      <tr>
+        <td>{server.name}</td>
+        <td>
           <McpServerStatusBadge status={server.status} />
-        </div>
-        <div className="smtcmp-mcp-server-toggle">
+        </td>
+        <td>
           <ObsidianToggle
             value={server.config.enabled}
             onChange={handleToggleEnabled}
             ariaLabel={`Enable MCP server ${server.name}`}
           />
-        </div>
-        <div className="smtcmp-mcp-server-actions">
-          {server.status === McpServerStatus.ApprovalRequired && (
+        </td>
+        <td>
+          <div className="smtcmp-settings-actions">
+            {server.status === McpServerStatus.ApprovalRequired && (
+              <button
+                type="button"
+                onClick={() => setIsOpen(true)}
+                className="clickable-icon"
+                aria-label="Review server command"
+                title="Show the exact command, arguments, and environment"
+              >
+                <ShieldCheck />
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setIsOpen(true)}
+              onClick={handleEdit}
               className="clickable-icon"
-              aria-label="Review server command"
-              title="Show the exact command, arguments, and environment"
+              aria-label={`Edit MCP server ${server.name}`}
             >
-              <ShieldCheck size={16} />
+              <Edit />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleEdit}
-            className="clickable-icon"
-            aria-label="Edit"
-          >
-            <Edit size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="clickable-icon"
-            aria-label="Delete"
-          >
-            <Trash2 size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className="clickable-icon"
-            aria-label={isOpen ? 'Collapse' : 'Expand'}
-            aria-expanded={isOpen}
-          >
-            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-        </div>
-      </div>
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="clickable-icon"
+              aria-label={`Delete MCP server ${server.name}`}
+            >
+              <Trash2 />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsOpen(!isOpen)}
+              className="clickable-icon"
+              aria-label={isOpen ? 'Collapse' : 'Expand'}
+              aria-expanded={isOpen}
+            >
+              {isOpen ? <ChevronUp /> : <ChevronDown />}
+            </button>
+          </div>
+        </td>
+      </tr>
       {isOpen && (
-        <ExpandedServerInfo
-          server={server}
-          onTrust={handleTrust}
-          isTrusting={isTrusting}
-        />
+        <tr className="smtcmp-settings-table-expanded-row">
+          <td colSpan={4}>
+            <ExpandedServerInfo
+              server={server}
+              onTrust={handleTrust}
+              isTrusting={isTrusting}
+            />
+          </td>
+        </tr>
       )}
-    </div>
+    </>
   )
 }
 
@@ -309,38 +333,33 @@ function McpServerStatusBadge({ status }: { status: McpServerStatus }) {
     [McpServerStatus.ApprovalRequired]: {
       icon: <ShieldCheck size={16} />,
       label: 'Review required',
-      statusClass: 'smtcmp-mcp-server-status-badge--error',
+      tone: 'error',
     },
     [McpServerStatus.Connected]: {
       icon: <Check size={16} />,
       label: 'Connected',
-      statusClass: 'smtcmp-mcp-server-status-badge--connected',
+      tone: 'connected',
     },
     [McpServerStatus.Connecting]: {
       icon: <Loader2 size={16} className="spinner" />,
       label: 'Connecting...',
-      statusClass: 'smtcmp-mcp-server-status-badge--connecting',
+      tone: 'connecting',
     },
     [McpServerStatus.Error]: {
       icon: <X size={16} />,
       label: 'Error',
-      statusClass: 'smtcmp-mcp-server-status-badge--error',
+      tone: 'error',
     },
     [McpServerStatus.Disconnected]: {
-      icon: <CircleMinus size={14} />,
+      icon: <CircleMinus size={16} />,
       label: 'Disconnected',
-      statusClass: 'smtcmp-mcp-server-status-badge--disconnected',
+      tone: 'disconnected',
     },
-  }
+  } as const
 
-  const { icon, label, statusClass } = statusConfig[status]
+  const { icon, label, tone } = statusConfig[status]
 
-  return (
-    <div className={`smtcmp-mcp-server-status-badge ${statusClass}`}>
-      {icon}
-      <div className="smtcmp-mcp-server-status-badge-label">{label}</div>
-    </div>
-  )
+  return <StatusBadge tone={tone} icon={icon} label={label} />
 }
 
 function McpToolComponent({

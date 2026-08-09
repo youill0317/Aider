@@ -91,8 +91,6 @@ export function TemplateSection({ app }: TemplateSectionProps) {
         button for quick template creation.
       </div>
 
-      <h3 className="smtcmp-settings-sub-header">Saved templates</h3>
-
       <div className="smtcmp-settings-table-container">
         <table className="smtcmp-settings-table">
           <colgroup>

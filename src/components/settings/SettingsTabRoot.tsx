@@ -8,7 +8,8 @@ import { ChatSection } from './sections/ChatSection'
 import { CodexToolSection } from './sections/CodexToolSection'
 import { MaintenanceSection } from './sections/MaintenanceSection'
 import { McpSection } from './sections/McpSection'
-import { ModelsSection } from './sections/ModelsSection'
+import { ChatModelsSubSection } from './sections/models/ChatModelsSubSection'
+import { EmbeddingModelsSubSection } from './sections/models/EmbeddingModelsSubSection'
 import { PlanConnectionsSection } from './sections/PlanConnectionsSection'
 import { ProvidersSection } from './sections/ProvidersSection'
 import { RAGSection } from './sections/RAGSection'
@@ -26,7 +27,8 @@ export function SettingsTabRoot({ app, plugin }: SettingsTabRootProps) {
       <ChatSection />
       <CodexToolSection />
       <ProvidersSection app={app} plugin={plugin} />
-      <ModelsSection app={app} plugin={plugin} />
+      <ChatModelsSubSection app={app} plugin={plugin} />
+      <EmbeddingModelsSubSection app={app} plugin={plugin} />
       <RAGSection app={app} plugin={plugin} />
       <McpSection app={app} plugin={plugin} />
       <TemplateSection app={app} />

@@ -56,8 +56,8 @@ export function EmbeddingModelsSubSection({
   }
 
   return (
-    <div>
-      <h3 className="smtcmp-settings-sub-header">Embedding models</h3>
+    <div className="smtcmp-settings-section">
+      <h2 className="smtcmp-settings-header">Embedding models</h2>
       <div className="smtcmp-settings-desc">
         Models used for generating embeddings for RAG
       </div>

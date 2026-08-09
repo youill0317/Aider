@@ -89,8 +89,8 @@ export function ChatModelsSubSection({
   }
 
   return (
-    <div>
-      <h3 className="smtcmp-settings-sub-header">Chat models</h3>
+    <div className="smtcmp-settings-section">
+      <h2 className="smtcmp-settings-header">Chat models</h2>
       <div className="smtcmp-settings-desc">Models used for chat and apply</div>
 
       <div className="smtcmp-settings-table-container">

@@ -78,8 +78,6 @@ export function McpSection({ app, plugin }: McpSectionProps) {
         </div>
       ) : (
         <>
-          <h3 className="smtcmp-settings-sub-header">MCP servers</h3>
-
           <div className="smtcmp-settings-table-container">
             <table className="smtcmp-settings-table">
               <colgroup>

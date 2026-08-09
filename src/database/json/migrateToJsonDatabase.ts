@@ -1,6 +1,7 @@
 import { App, normalizePath } from 'obsidian'
 
 import { PGLITE_DB_PATH } from '../../constants'
+import { AtomicWriteRecoveryError } from '../../utils/atomic-file'
 import { ChatConversationManager } from '../../utils/chat/chatHistoryManager'
 import { DatabaseManager } from '../DatabaseManager'
 
@@ -115,6 +116,7 @@ async function transferChatHistoryFromLegacy(
       migratedIds.push(normalizedChat.id)
       imported += 1
     } catch (error) {
+      if (error instanceof AtomicWriteRecoveryError) throw error
       failures += 1
       console.error(`Error migrating chat ${chatMeta.id}:`, error)
     }
@@ -201,6 +203,7 @@ async function transferTemplatesFromDrizzle(
         (await drizzleTemplateManager.deleteTemplate(template.id, false)) ||
         deletedAnyTemplate
     } catch (error) {
+      if (error instanceof AtomicWriteRecoveryError) throw error
       failures += 1
       console.error(`Error migrating template ${template.name}:`, error)
     }

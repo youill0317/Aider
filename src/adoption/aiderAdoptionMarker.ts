@@ -38,7 +38,7 @@ export async function readAdoptionMarker(
     return { resources: {} }
   }
 
-  return parseAdoptionMarker(
+  const marker = parseAdoptionMarker(
     await readBoundedTextFile(
       app.vault.adapter,
       markerPath,
@@ -46,6 +46,42 @@ export async function readAdoptionMarker(
       MAX_ADOPTION_MARKER_BYTES,
     ),
   )
+  return {
+    resources: await pruneMissingRecoveryPaths(
+      app.vault.adapter,
+      marker.resources,
+    ),
+  }
+}
+
+// A recovery backup the user already moved or deleted must stop being reported,
+// or the startup notice never goes away.
+async function pruneMissingRecoveryPaths(
+  adapter: AiderAdoptionApp['vault']['adapter'],
+  resources: Partial<Record<AdoptionResource, AdoptionResourceStatus>>,
+): Promise<Partial<Record<AdoptionResource, AdoptionResourceStatus>>> {
+  const pruned = { ...resources }
+  for (const resource of ADOPTION_RESOURCES) {
+    const status = pruned[resource]
+    if (!status?.recoveryPaths?.length) continue
+    const remaining: string[] = []
+    for (const path of status.recoveryPaths) {
+      // An unreadable adapter counts as present; a transient error must not
+      // drop the last pointer to the only surviving copy.
+      if (await adapter.exists(path).catch(() => true)) {
+        remaining.push(path)
+      }
+    }
+    if (remaining.length === status.recoveryPaths.length) continue
+    const next = { ...status }
+    if (remaining.length) {
+      next.recoveryPaths = remaining
+    } else {
+      delete next.recoveryPaths
+    }
+    pruned[resource] = next
+  }
+  return pruned
 }
 
 export async function writeUpdatedMarker(
@@ -114,13 +150,25 @@ function parseAdoptionResourceStatus(
   const completedAt = hasStringProperty(value, 'completedAt')
     ? value.completedAt
     : undefined
-  if (value.status === 'failed' && hasStringProperty(value, 'lastError')) {
+  const storedRecoveryPaths = (value as Record<string, unknown>).recoveryPaths
+  const recoveryPaths = Array.from(
+    new Set<string>(
+      Array.isArray(storedRecoveryPaths) &&
+      storedRecoveryPaths.every((path) => typeof path === 'string')
+        ? storedRecoveryPaths
+        : [],
+    ),
+  )
+  if (value.status === 'failed') {
     return {
       status: value.status,
       sourcePath: value.sourcePath,
       targetPath: value.targetPath,
       completedAt,
-      lastError: value.lastError,
+      ...(hasStringProperty(value, 'lastError')
+        ? { lastError: value.lastError }
+        : {}),
+      ...(recoveryPaths.length ? { recoveryPaths } : {}),
     }
   }
   return {
@@ -128,5 +176,6 @@ function parseAdoptionResourceStatus(
     sourcePath: value.sourcePath,
     targetPath: value.targetPath,
     completedAt,
+    ...(recoveryPaths.length ? { recoveryPaths } : {}),
   }
 }

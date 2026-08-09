@@ -3,7 +3,10 @@ import { PgliteDatabase, drizzle } from 'drizzle-orm/pglite'
 import { App, Notice, normalizePath } from 'obsidian'
 
 import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
-import { writeBinaryFileAtomically } from '../utils/atomic-file'
+import {
+  AtomicWriteRecoveryError,
+  writeBinaryFileAtomically,
+} from '../utils/atomic-file'
 import { withRequestTimeout } from '../utils/llm/httpTransport'
 
 import { PGLiteAbortedException } from './exception'
@@ -271,7 +274,12 @@ export class DatabaseManager {
       this.vectorSaveTimer = null
       void this.save().catch((error) => {
         console.error('Failed to save the vault index', error)
-        new Notice('Failed to save the vault index')
+        new Notice(
+          error instanceof AtomicWriteRecoveryError
+            ? `Vault index save failed. Original data remains at ${error.backupPathList}.`
+            : 'Failed to save the vault index',
+          error instanceof AtomicWriteRecoveryError ? 0 : undefined,
+        )
       })
     }, 500)
   }
@@ -340,6 +348,12 @@ export class DatabaseManager {
       console.error('Failed to close database after save failure:', error)
     }
     if (saveFailed) {
+      if (saveError instanceof AtomicWriteRecoveryError) {
+        new Notice(
+          `Vault index shutdown save failed. Original data remains at ${saveError.backupPathList}.`,
+          0,
+        )
+      }
       throw saveError
     }
   }

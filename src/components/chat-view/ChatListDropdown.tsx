@@ -4,6 +4,7 @@ import { Notice } from 'obsidian'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ChatConversationMetadata } from '../../database/json/chat/types'
+import { AtomicWriteRecoveryError } from '../../utils/atomic-file'
 
 export function createTitleInputController(
   title: string,
@@ -55,7 +56,12 @@ function TitleInput({
       await controllerRef.current.submit(value)
     } catch (error) {
       setIsSubmitting(false)
-      new Notice('Failed to rename conversation')
+      new Notice(
+        error instanceof AtomicWriteRecoveryError
+          ? `Conversation rename failed. Original data remains at ${error.backupPathList}.`
+          : 'Failed to rename conversation',
+        error instanceof AtomicWriteRecoveryError ? 0 : undefined,
+      )
       console.error('Failed to rename conversation', error)
     }
   }

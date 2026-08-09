@@ -1,3 +1,5 @@
+import { AtomicWriteRecoveryError } from '../utils/atomic-file'
+
 import {
   buildAdoptionPaths,
   readAdoptionMarker,
@@ -93,6 +95,9 @@ async function adoptResource(
       sourcePath,
       targetPath,
       error: summarizeAdoptionError(error),
+      ...(error instanceof AtomicWriteRecoveryError
+        ? { recoveryPaths: error.backupPaths }
+        : {}),
     }
   })
   const completedAt = new Date().toISOString()
@@ -108,19 +113,42 @@ async function adoptResource(
           sourcePath: outcome.sourcePath,
           targetPath: outcome.targetPath,
           completedAt,
+          ...(resources[resource]?.recoveryPaths?.length
+            ? { recoveryPaths: resources[resource].recoveryPaths }
+            : {}),
         },
       })
-    case 'failed':
-      return writeUpdatedMarker(app, paths.markerPath, {
-        ...resources,
-        [resource]: {
-          status: 'failed',
-          sourcePath: outcome.sourcePath,
-          targetPath: outcome.targetPath,
-          completedAt,
-          lastError: outcome.error,
-        },
-      })
+    case 'failed': {
+      const recoveryPaths = Array.from(
+        new Set([
+          ...(resources[resource]?.recoveryPaths ?? []),
+          ...(outcome.recoveryPaths ?? []),
+        ]),
+      )
+      try {
+        return await writeUpdatedMarker(app, paths.markerPath, {
+          ...resources,
+          [resource]: {
+            status: 'failed',
+            sourcePath: outcome.sourcePath,
+            targetPath: outcome.targetPath,
+            completedAt,
+            lastError: outcome.error,
+            ...(recoveryPaths.length ? { recoveryPaths } : {}),
+          },
+        })
+      } catch (error) {
+        if (recoveryPaths.length && error instanceof AtomicWriteRecoveryError) {
+          throw new AtomicWriteRecoveryError(
+            error.backupPath,
+            error.replacementError,
+            error.restoreError,
+            [...recoveryPaths, ...error.additionalBackupPaths],
+          )
+        }
+        throw error
+      }
+    }
   }
 }
 

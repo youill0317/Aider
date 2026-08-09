@@ -45,6 +45,7 @@ import {
 } from './settings/schema/setting.types'
 import { parseSmartComposerSettingsResult } from './settings/schema/settings'
 import { SmartComposerSettingTab } from './settings/SettingTab'
+import { AtomicWriteRecoveryError } from './utils/atomic-file'
 import {
   ToolDispatcher,
   createToolDispatcher,
@@ -458,6 +459,11 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
           this.dbManagerInitPromise = null
           if (error instanceof PGLiteAbortedException) {
             new InstallerUpdateRequiredModal(this.app).open()
+          } else if (error instanceof AtomicWriteRecoveryError) {
+            new Notice(
+              `Vault index initialization failed. Original data remains at ${error.backupPathList}.`,
+              0,
+            )
           }
           throw error
         }
@@ -640,27 +646,44 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
       const marker = await adoptAiderStorage(this.app, {
         includeVectorDb: false,
       })
-      if (
-        Object.entries(marker.resources).some(
-          ([resource, status]) =>
-            resource !== 'secrets' &&
-            resource !== 'vectorDb' &&
-            status?.status === 'failed',
-        )
-      ) {
+      const relevantResources = Object.entries(marker.resources).filter(
+        ([resource]) => resource !== 'secrets' && resource !== 'vectorDb',
+      )
+      const hasFailedResource = relevantResources.some(
+        ([, status]) => status?.status === 'failed',
+      )
+      const recoveryPaths = Array.from(
+        new Set(
+          relevantResources.reduce<string[]>(
+            (paths, [, status]) => [...paths, ...(status?.recoveryPaths ?? [])],
+            [],
+          ),
+        ),
+      )
+      if (hasFailedResource || recoveryPaths.length > 0) {
         console.error(
-          'Failed to adopt Smart Composer data into Aider:',
-          'Aider storage adoption is incomplete',
+          recoveryPaths.length > 0
+            ? 'Aider recovery backup remains:'
+            : 'Failed to adopt Smart Composer data into Aider:',
+          recoveryPaths.length > 0
+            ? `Recovery backup: ${recoveryPaths.join(', ')}`
+            : 'Aider storage adoption is incomplete',
         )
         new Notice(
-          'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+          recoveryPaths.length > 0
+            ? `Aider kept recovery backup data at: ${recoveryPaths.join(', ')}`
+            : 'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+          recoveryPaths.length > 0 ? 0 : undefined,
         )
       }
     } catch (error) {
       const summary = summarizeAdoptionError(error)
       console.error('Failed to adopt Smart Composer data into Aider:', summary)
       new Notice(
-        'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+        error instanceof AtomicWriteRecoveryError
+          ? `Aider could not automatically adopt Smart Composer data. Recovery backup: ${error.backupPathList}`
+          : 'Aider could not automatically adopt Smart Composer data. Existing Aider data was left unchanged.',
+        error instanceof AtomicWriteRecoveryError ? 0 : undefined,
       )
       throw new Error(summary)
     }
@@ -669,21 +692,33 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
   private async adoptSmartComposerVectorData(): Promise<boolean> {
     try {
       const marker = await adoptAiderVectorStorage(this.app)
-      const status = marker.resources.vectorDb?.status
-      if (status === 'failed') {
+      const vectorStatus = marker.resources.vectorDb
+      if (vectorStatus?.recoveryPaths?.length) {
+        console.error(
+          'Aider vector recovery backup remains:',
+          vectorStatus.recoveryPaths.join(', '),
+        )
+        new Notice(
+          `Aider kept vector recovery backup data at: ${vectorStatus.recoveryPaths.join(', ')}`,
+          0,
+        )
+      } else if (vectorStatus?.status === 'failed') {
         console.error('Failed to adopt Smart Composer vector data into Aider')
         new Notice(
           'Aider could not adopt the existing Smart Composer vector index. You can rebuild the vault index from Aider.',
         )
       }
-      return isTerminalAdoptionStatus(status)
+      return isTerminalAdoptionStatus(vectorStatus?.status)
     } catch (error) {
       console.error(
         'Failed to adopt Smart Composer vector data into Aider:',
         summarizeAdoptionError(error),
       )
       new Notice(
-        'Aider could not adopt the existing Smart Composer vector index. You can rebuild the vault index from Aider.',
+        error instanceof AtomicWriteRecoveryError
+          ? `Aider could not adopt the existing Smart Composer vector index. Recovery backup: ${error.backupPathList}`
+          : 'Aider could not adopt the existing Smart Composer vector index. You can rebuild the vault index from Aider.',
+        error instanceof AtomicWriteRecoveryError ? 0 : undefined,
       )
       return false
     }
@@ -705,7 +740,10 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
       if (this.unloading) return
       console.error('Failed to migrate to JSON storage:', error)
       new Notice(
-        'Failed to migrate to JSON storage. Please check the console for details.',
+        error instanceof AtomicWriteRecoveryError
+          ? `Failed to migrate to JSON storage. Recovery backup: ${error.backupPathList}`
+          : 'Failed to migrate to JSON storage. Please check the console for details.',
+        error instanceof AtomicWriteRecoveryError ? 0 : undefined,
       )
     }
   }

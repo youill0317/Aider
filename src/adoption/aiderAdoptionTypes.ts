@@ -20,6 +20,7 @@ export type AdoptionResourceStatus = {
   readonly targetPath: string
   readonly completedAt?: string
   readonly lastError?: string
+  readonly recoveryPaths?: readonly string[]
 }
 
 export type AiderAdoptionMarker = {
@@ -80,6 +81,7 @@ export type AdoptionOutcome =
       readonly sourcePath: string
       readonly targetPath: string
       readonly error: string
+      readonly recoveryPaths?: readonly string[]
     }
 
 export function isTerminalAdoptionStatus(

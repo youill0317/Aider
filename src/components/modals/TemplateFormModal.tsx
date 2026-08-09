@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppProvider } from '../../contexts/app-context'
 import { DuplicateTemplateException } from '../../database/json/exception'
 import { TemplateManager } from '../../database/json/template/TemplateManager'
+import { AtomicWriteRecoveryError } from '../../utils/atomic-file'
 import LexicalContentEditable from '../chat-view/chat-input/LexicalContentEditable'
 import { editorStateToPlainText } from '../chat-view/chat-input/utils/editor-state-to-plain-text'
 import { ObsidianButton } from '../common/ObsidianButton'
@@ -157,7 +158,12 @@ function TemplateFormComponent({
         new Notice('A template with this name already exists')
       } else {
         console.error(error)
-        new Notice('Failed to create template')
+        new Notice(
+          error instanceof AtomicWriteRecoveryError
+            ? `Template save failed. Original data remains at ${error.backupPathList}.`
+            : 'Failed to save template',
+          error instanceof AtomicWriteRecoveryError ? 0 : undefined,
+        )
       }
     }
   }

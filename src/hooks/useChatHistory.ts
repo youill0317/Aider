@@ -11,6 +11,7 @@ import {
   SerializedChatMessage,
 } from '../types/chat'
 import { Mentionable } from '../types/mentionable'
+import { AtomicWriteRecoveryError } from '../utils/atomic-file'
 import {
   deserializeMentionable,
   serializeMentionable,
@@ -96,7 +97,12 @@ export function useChatHistory(): UseChatHistory {
   const saveQueue = useMemo(
     () =>
       new ChatSaveQueue(persistConversation, (error) => {
-        new Notice('Failed to save chat history')
+        new Notice(
+          error instanceof AtomicWriteRecoveryError
+            ? `Chat save failed. Original data remains at ${error.backupPathList}.`
+            : 'Failed to save chat history',
+          error instanceof AtomicWriteRecoveryError ? 0 : undefined,
+        )
         console.error('Failed to save chat history', error)
       }),
     [persistConversation],

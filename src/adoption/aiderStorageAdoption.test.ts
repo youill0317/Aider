@@ -1,5 +1,6 @@
 import { MAX_PGLITE_DATABASE_BYTES, PGLITE_DB_PATH } from '../constants'
 import { ROOT_DIR } from '../database/json/constants'
+import { AtomicWriteRecoveryError } from '../utils/atomic-file'
 import { CHAT_HISTORY_DIR } from '../utils/chat/chatHistoryManager'
 
 import {
@@ -7,6 +8,7 @@ import {
   MAX_ADOPTION_JSON_FILE_BYTES,
 } from './aiderAdoptionUtils'
 import {
+  REDACTED_ADOPTION_ERROR,
   adoptAiderStorage,
   adoptAiderVectorStorage,
 } from './aiderStorageAdoption'
@@ -129,6 +131,157 @@ describe('Aider storage adoption', () => {
     const second = await adoptAiderStorage(app)
     expect(second.resources.pluginData?.status).toBe('completed')
     expect(await adapter.read(targetPath)).toBe(await adapter.read(legacyPath))
+  })
+
+  it('records the recovery path without persisting write errors', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    const targetPath = '.obsidian/plugins/aider/data.json'
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.write(legacyPath, jsonFile({ version: 21, providers: [] }))
+    await adapter.write(targetPath, '{')
+    const rename = adapter.rename.bind(adapter)
+    jest
+      .spyOn(adapter, 'rename')
+      .mockImplementation(async (from: string, to: string) => {
+        if (to === targetPath) throw new Error('rename secret')
+        await rename(from, to)
+      })
+    const write = adapter.write.bind(adapter)
+    jest
+      .spyOn(adapter, 'write')
+      .mockImplementation(async (path: string, content: string) => {
+        if (path === targetPath) throw new Error('restore secret')
+        await write(path, content)
+      })
+
+    const marker = await adoptAiderStorage(app)
+
+    expect(marker.resources.pluginData).toMatchObject({
+      status: 'failed',
+      lastError: REDACTED_ADOPTION_ERROR,
+      recoveryPaths: [
+        expect.stringMatching(/^\.obsidian\/plugins\/aider\/\.aider-.+\.tmp$/),
+      ],
+    })
+    const recoveryPath = marker.resources.pluginData?.recoveryPaths?.[0] ?? ''
+    expect(await adapter.read(recoveryPath)).toBe('{')
+
+    const retriedMarker = await adoptAiderStorage(app)
+
+    expect(retriedMarker.resources.pluginData?.recoveryPaths).toEqual([
+      recoveryPath,
+    ])
+    expect(await adapter.read(recoveryPath)).toBe('{')
+
+    jest.restoreAllMocks()
+    await adapter.write(targetPath, '[')
+    jest
+      .spyOn(adapter, 'rename')
+      .mockImplementation(async (from: string, to: string) => {
+        if (to === targetPath) throw new Error('rename secret')
+        await rename(from, to)
+      })
+    jest
+      .spyOn(adapter, 'write')
+      .mockImplementation(async (path: string, content: string) => {
+        if (path === targetPath) throw new Error('restore secret')
+        await write(path, content)
+      })
+
+    const twiceFailedMarker = await adoptAiderStorage(app)
+    const recoveryPaths = twiceFailedMarker.resources.pluginData?.recoveryPaths
+    expect(recoveryPaths).toHaveLength(2)
+    await expect(
+      Promise.all((recoveryPaths ?? []).map((path) => adapter.read(path))),
+    ).resolves.toEqual(expect.arrayContaining(['{', '[']))
+
+    jest.restoreAllMocks()
+    const completedMarker = await adoptAiderStorage(app)
+    expect(completedMarker.resources.pluginData).toMatchObject({
+      status: 'completed',
+      recoveryPaths,
+    })
+    expect(
+      (await adoptAiderStorage(app)).resources.pluginData?.recoveryPaths,
+    ).toEqual(recoveryPaths)
+  })
+
+  it('stops reporting a recovery path once the backup is gone', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    const targetPath = '.obsidian/plugins/aider/data.json'
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.write(legacyPath, jsonFile({ version: 21, providers: [] }))
+    await adapter.write(targetPath, '{')
+    const rename = adapter.rename.bind(adapter)
+    jest
+      .spyOn(adapter, 'rename')
+      .mockImplementation(async (from: string, to: string) => {
+        if (to === targetPath) throw new Error('rename secret')
+        await rename(from, to)
+      })
+    const write = adapter.write.bind(adapter)
+    jest
+      .spyOn(adapter, 'write')
+      .mockImplementation(async (path: string, content: string) => {
+        if (path === targetPath) throw new Error('restore secret')
+        await write(path, content)
+      })
+
+    const failed = await adoptAiderStorage(app)
+    const recoveryPath = failed.resources.pluginData?.recoveryPaths?.[0] ?? ''
+    expect(recoveryPath).not.toBe('')
+
+    jest.restoreAllMocks()
+    await adapter.remove(recoveryPath)
+
+    const retried = await adoptAiderStorage(app)
+
+    expect(retried.resources.pluginData?.recoveryPaths).toBeUndefined()
+  })
+
+  it('reports both resource and marker recovery paths', async () => {
+    const app = createTestApp()
+    const adapter = app.vault.adapter
+    const legacyPath = '.obsidian/plugins/smart-composer/data.json'
+    const targetPath = '.obsidian/plugins/aider/data.json'
+    const markerPath = '.obsidian/plugins/aider/.aider_adoption.json'
+    const markerContent = jsonFile({ resources: {} })
+    await adapter.mkdir('.obsidian/plugins/smart-composer')
+    await adapter.mkdir('.obsidian/plugins/aider')
+    await adapter.write(legacyPath, jsonFile({ version: 21, providers: [] }))
+    await adapter.write(targetPath, '{')
+    await adapter.write(markerPath, markerContent)
+    const rename = adapter.rename.bind(adapter)
+    jest
+      .spyOn(adapter, 'rename')
+      .mockImplementation(async (from: string, to: string) => {
+        if (to === targetPath || to === markerPath) {
+          throw new Error('rename failed')
+        }
+        await rename(from, to)
+      })
+    const write = adapter.write.bind(adapter)
+    jest
+      .spyOn(adapter, 'write')
+      .mockImplementation(async (path: string, content: string) => {
+        if (path === targetPath || path === markerPath) {
+          throw new Error('restore failed')
+        }
+        await write(path, content)
+      })
+
+    const error = await adoptAiderStorage(app).catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(AtomicWriteRecoveryError)
+    if (!(error instanceof AtomicWriteRecoveryError)) throw error
+    expect(new Set(error.backupPaths).size).toBe(2)
+    await expect(
+      Promise.all(error.backupPaths.map((path) => adapter.read(path))),
+    ).resolves.toEqual(expect.arrayContaining(['{', markerContent]))
   })
 
   it('keeps existing Aider plugin data when legacy plugin data also exists', async () => {

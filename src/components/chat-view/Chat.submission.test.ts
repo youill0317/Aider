@@ -76,11 +76,9 @@ describe('chat submission controllers', () => {
   it('leaves history unchanged when confirmation is cancelled', async () => {
     const submit = jest.fn().mockResolvedValue(true)
     let cancelEdit = () => {}
-    const confirm = jest.fn(
-      (_onConfirm: () => void, onCancel: () => void) => {
-        cancelEdit = onCancel
-      },
-    )
+    const confirm = jest.fn((_onConfirm: () => void, onCancel: () => void) => {
+      cancelEdit = onCancel
+    })
     const result = createHistoricalEditSubmitter(true, submit, confirm)()
 
     cancelEdit()

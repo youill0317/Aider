@@ -126,15 +126,18 @@ async function fingerprint(value: string): Promise<string> {
   ).join('')
 }
 
+// v2 added toolOptions, so every v1 fingerprint stops matching and each server
+// has to be reviewed again — auto-execution grants are part of what is trusted.
 function canonicalMcpConfig(config: McpServerConfig): string {
   return JSON.stringify({
-    v: 1,
+    v: 2,
     id: config.id,
     command: config.parameters.command,
     args: config.parameters.args ?? [],
     env: Object.entries(config.parameters.env ?? {}).sort(([left], [right]) =>
       left.localeCompare(right),
     ),
+    toolOptions: sortRecord(config.toolOptions),
   })
 }
 

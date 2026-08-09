@@ -18,6 +18,7 @@ import { chunkArray } from '../../utils/common/chunk-array'
 import { InvalidToolNameException, McpNotAvailableException } from './exception'
 import {
   equalServerParameters,
+  equalServerToolOptions,
   hasAdvertisedTool,
   redactMcpError,
 } from './mcp-security'
@@ -202,6 +203,10 @@ export class McpManager {
             existingServer.config.parameters,
             serverConfig.parameters,
           ) &&
+          equalServerToolOptions(
+            existingServer.config.toolOptions,
+            serverConfig.toolOptions,
+          ) &&
           existingServer.config.enabled === serverConfig.enabled &&
           (existingServer.status === McpServerStatus.Connected ||
             (existingServer.status === McpServerStatus.Disconnected &&
@@ -250,6 +255,23 @@ export class McpManager {
     }
   }
 
+  public async revokeServerTrust(serverId: string): Promise<void> {
+    this.settingsRevision += 1
+    await this.updateServers((servers) =>
+      servers.map((server) =>
+        server.name === serverId
+          ? {
+              name: server.name,
+              config: server.config,
+              status: server.config.enabled
+                ? McpServerStatus.ApprovalRequired
+                : McpServerStatus.Disconnected,
+            }
+          : server,
+      ),
+    )
+  }
+
   private async connectServers(
     configs: McpServerConfig[],
     revision: number,
@@ -287,10 +309,11 @@ export class McpManager {
     )
   }
 
-  private closeClientsInBackground(clients: McpClient[]): void {
+  private closeClientsInBackground(clients: McpClient[]): Promise<void> {
     const closeTask = this.closeClients(clients)
     this.pendingCloseTasks.add(closeTask)
     void closeTask.then(() => this.pendingCloseTasks.delete(closeTask))
+    return closeTask
   }
 
   private releaseConnectedClients(servers: McpServerState[]) {
@@ -340,7 +363,7 @@ export class McpManager {
     newServersOrUpdater?:
       | McpServerState[]
       | ((prevServers: McpServerState[]) => McpServerState[]),
-  ) {
+  ): Promise<void> | undefined {
     const currentServers = this.servers
     const nextServers =
       typeof newServersOrUpdater === 'function'
@@ -360,14 +383,43 @@ export class McpManager {
           ),
       )
 
+    const disconnectedServerNames = new Set(
+      currentServers
+        .filter(
+          (server) =>
+            server.status === McpServerStatus.Connected &&
+            clientsToDisconnect.includes(server.client),
+        )
+        .map((server) => server.name),
+    )
+    if (disconnectedServerNames.size > 0) {
+      for (const [conversationId, allowedTools] of this
+        .allowedToolsByConversation) {
+        for (const requestToolName of allowedTools) {
+          if (
+            disconnectedServerNames.has(
+              parseToolName(requestToolName).serverName,
+            )
+          ) {
+            allowedTools.delete(requestToolName)
+          }
+        }
+        if (allowedTools.size === 0) {
+          this.allowedToolsByConversation.delete(conversationId)
+        }
+      }
+    }
+
     // Disconnect clients in the background
+    let closeTask: Promise<void> | undefined
     if (clientsToDisconnect.length > 0) {
-      this.closeClientsInBackground(clientsToDisconnect)
+      closeTask = this.closeClientsInBackground(clientsToDisconnect)
     }
 
     this.servers = nextServers
     this.availableToolsCache = null // Invalidate available tools cache
     this.notifySubscribers() // Should call after invalidating the cache
+    return closeTask
   }
 
   private async connectServer(
@@ -497,12 +549,11 @@ export class McpManager {
     }
 
     try {
-      const toolList = await withTimeout(
-        client.listTools(),
+      const tools = await withTimeout(
+        this.listServerTools(client),
         MCP_CONNECTION_TIMEOUT_MS,
         `MCP server ${name} tool discovery timed out`,
       )
-      this.assertToolCatalogWithinBounds(toolList.tools)
       if (!this.isConnectionCurrent(revision)) {
         await this.closeClients([client])
         return {
@@ -516,7 +567,7 @@ export class McpManager {
         config: serverConfig,
         status: McpServerStatus.Connected,
         client,
-        tools: toolList.tools,
+        tools,
       }
     } catch (error) {
       await this.closeClients([client])
@@ -839,6 +890,27 @@ export class McpManager {
       return true
     }
     return false
+  }
+
+  private async listServerTools(client: McpClient): Promise<McpTool[]> {
+    const tools: McpTool[] = []
+    const seenCursors = new Set<string>()
+    let cursor: string | undefined
+
+    for (;;) {
+      const page =
+        cursor === undefined
+          ? await client.listTools()
+          : await client.listTools({ cursor })
+      tools.push(...page.tools)
+      this.assertToolCatalogWithinBounds(tools)
+      if (page.nextCursor === undefined) return tools
+      if (seenCursors.has(page.nextCursor)) {
+        throw new Error('MCP server returned a repeated tool cursor')
+      }
+      seenCursors.add(page.nextCursor)
+      cursor = page.nextCursor
+    }
   }
 
   private assertToolCatalogWithinBounds(tools: McpTool[]): void {

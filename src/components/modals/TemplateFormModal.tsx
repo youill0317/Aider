@@ -213,7 +213,6 @@ function TemplateFormComponent({
           initialEditorState={initialEditorState}
           editorRef={editorRef}
           contentEditableRef={contentEditableRef}
-          onEnter={handleSubmit}
         />
       </div>
 

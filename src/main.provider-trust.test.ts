@@ -119,6 +119,31 @@ describe('provider settings route trust', () => {
   })
 })
 
+describe('MCP trust revocation', () => {
+  it('evicts the live server after deleting device trust', async () => {
+    const steps: string[] = []
+    const plugin = Object.assign(Object.create(SmartComposerPlugin.prototype), {
+      mcpManager: {
+        revokeServerTrust: async (serverId: string) => {
+          steps.push(`evict:${serverId}`)
+        },
+      },
+      secretStore: {
+        deleteSecret: async () => {
+          steps.push('delete-trust')
+        },
+        getBackendStatus: () => 'memory-only-fallback',
+        getSecret: async () => null,
+        setSecret: async () => undefined,
+      },
+    }) as SmartComposerPlugin
+
+    await plugin.revokeMcpServerTrust('github')
+
+    expect(steps).toEqual(['delete-trust', 'evict:github'])
+  })
+})
+
 function settingsWith(...providers: LLMProvider[]): SmartComposerSettings {
   return { providers } as SmartComposerSettings
 }

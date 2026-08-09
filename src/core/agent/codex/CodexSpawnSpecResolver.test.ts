@@ -21,6 +21,7 @@ describe('CodexSpawnSpecResolver', () => {
         PATH: '/usr/bin',
         TMPDIR: '/tmp',
       },
+      fileSystem: { existsFile: (filePath) => filePath === '/usr/bin/codex' },
       platform: 'linux',
     })
 
@@ -57,7 +58,7 @@ describe('CodexSpawnSpecResolver', () => {
         PATH: '/usr/bin',
       },
       fileSystem: {
-        existsFile: () => false,
+        existsFile: (filePath) => filePath === '/usr/bin/codex',
         readTextFile: (filePath) => {
           expect(filePath).toBe('/home/me/.codex/config.toml')
           return [
@@ -79,6 +80,18 @@ describe('CodexSpawnSpecResolver', () => {
     expect(spawnSpec.env.INLINE_PROVIDER_KEY).toBe('inline-secret')
     expect(spawnSpec.env).not.toHaveProperty('DATABASE_URL')
     expect(spawnSpec.env).not.toHaveProperty('NODE_OPTIONS')
+  })
+
+  it('rejects an unresolved command instead of spawning it by name', () => {
+    const resolver = new CodexSpawnSpecResolver()
+
+    expect(() =>
+      resolver.resolve(['codex', 'exec'], {
+        env: { PATH: '/usr/bin' },
+        fileSystem: { existsFile: () => false },
+        platform: 'linux',
+      }),
+    ).toThrow('Codex command could not be resolved.')
   })
 
   it('resolves codex from an enhanced Windows npm PATH location', () => {

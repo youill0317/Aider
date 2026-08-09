@@ -260,6 +260,17 @@ describe('ResponseGenerator response bounds', () => {
     )
   })
 
+  it('rejects duplicate tool call IDs before dispatch', async () => {
+    const { callTool, generator } = createGenerator([
+      [toolChunk('call-1', 0), toolChunk('call-1', 1)],
+    ])
+
+    await expect(generator.run()).rejects.toThrow(
+      'Assistant response has duplicate tool call IDs',
+    )
+    expect(callTool).not.toHaveBeenCalled()
+  })
+
   it('rejects annotations that cannot be persisted safely', async () => {
     const chunk = contentChunk('response')
     chunk.choices[0].delta.annotations = [

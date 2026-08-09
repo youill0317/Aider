@@ -15,6 +15,7 @@ import {
   deserializeMentionable,
   serializeMentionable,
 } from '../utils/chat/mentionable'
+import { markNonTerminalToolCallsAborted } from '../utils/chat/message-groups'
 
 import { ChatSaveQueue } from './chat-save-queue'
 import { useChatManager } from './useJsonManagers'
@@ -147,8 +148,10 @@ export function useChatHistory(): UseChatHistory {
       if (!conversation) {
         return null
       }
-      return conversation.messages.map((message) =>
-        deserializeChatMessage(message, app),
+      return markNonTerminalToolCallsAborted(
+        conversation.messages.map((message) =>
+          deserializeChatMessage(message, app),
+        ),
       )
     },
     [chatManager, app, saveQueue],

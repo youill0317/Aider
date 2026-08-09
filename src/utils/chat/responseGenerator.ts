@@ -270,6 +270,12 @@ export class ResponseGenerator {
         }
       })
       .filter((toolCall) => toolCall !== null)
+    if (
+      new Set(toolCallRequests.map((toolCall) => toolCall.id)).size !==
+      toolCallRequests.length
+    ) {
+      throw new Error('Assistant response has duplicate tool call IDs')
+    }
 
     this.updateResponseMessages((messages) =>
       messages.map((message) =>

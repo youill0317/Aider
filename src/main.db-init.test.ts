@@ -93,6 +93,25 @@ describe('SmartComposerPlugin lazy database init', () => {
     expect(second).toBe(manager)
   })
 
+  it('waits for vector adoption and re-checks unload before creating', async () => {
+    let finishAdoption: (() => void) | undefined
+    const plugin = createPlugin()
+    ;(
+      plugin as unknown as { adoptionTask: Promise<boolean> | null }
+    ).adoptionTask = new Promise((resolve) => {
+      finishAdoption = () => resolve(true)
+    })
+
+    const pending = plugin.getDbManager()
+    expect(mockCreate).not.toHaveBeenCalled()
+
+    startUnloading(plugin)
+    finishAdoption?.()
+
+    await expect(pending).rejects.toThrow('Aider is unloading')
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
   it('reuses the created database on later calls', async () => {
     const manager = createManager()
     mockCreate.mockResolvedValue(manager)

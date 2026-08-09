@@ -313,6 +313,36 @@ describe('McpManager permission boundaries', () => {
     ).toBe(false)
   })
 
+  it('revokes conversation allows when a server is replaced', async () => {
+    const manager = createManager({ toolOptions: { search: {} } })
+    const requestToolName = getToolName('github', 'search')
+    const replacementClient = createClient()
+    manager.allowToolForConversation(requestToolName, 'conversation-a')
+    ;(
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer = async (config) => ({
+      client: replacementClient,
+      config,
+      name: config.id,
+      status: McpServerStatus.Connected,
+      tools: [createTool('search')],
+    })
+
+    await manager.handleSettingsUpdate(
+      createSettings({ search: {} }, { command: 'replacement' }),
+    )
+
+    expect(
+      manager.isToolExecutionAllowed({
+        requestToolName,
+        conversationId: 'conversation-a',
+      }),
+    ).toBe(false)
+    await manager.cleanup()
+  })
+
   it('bounds conversation-scoped tool permissions', () => {
     const manager = createManager({ toolOptions: { search: {} } })
     const requestToolName = getToolName('github', 'search')

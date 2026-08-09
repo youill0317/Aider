@@ -47,24 +47,14 @@ function migrateLegacyProviders(data: Record<string, unknown>) {
   const providers = (data.providers ?? []) as ProviderRecord[]
   const chatModels = (data.chatModels ?? []) as ChatModelRecord[]
 
-  // Get provider IDs that have models using them
-  const usedProviderIds = new Set(
-    chatModels
-      .filter((m) => m.providerType in LEGACY_PROVIDERS)
-      .map((m) => m.providerId),
-  )
-
-  // Convert used legacy providers, drop unused ones
-  data.providers = providers.flatMap((p) => {
-    if (!(p.type in LEGACY_PROVIDERS)) return [p]
-    if (!usedProviderIds.has(p.id)) return []
-    return [
-      {
-        ...p,
-        type: 'openai-compatible',
-        baseUrl: p.baseUrl || LEGACY_PROVIDERS[p.type],
-      },
-    ]
+  // Convert legacy providers
+  data.providers = providers.map((p) => {
+    if (!(p.type in LEGACY_PROVIDERS)) return p
+    return {
+      ...p,
+      type: 'openai-compatible',
+      baseUrl: p.baseUrl || LEGACY_PROVIDERS[p.type],
+    }
   })
 
   // Convert legacy chat models

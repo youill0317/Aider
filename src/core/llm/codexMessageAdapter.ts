@@ -66,6 +66,9 @@ export class CodexMessageAdapter {
       if (chunk.type === 'error') {
         throw new Error(chunk.message)
       }
+      if (chunk.type === 'response.failed') {
+        throw responseFailureError(chunk.response)
+      }
 
       if (!responsePayload) {
         throw new Error(
@@ -148,6 +151,7 @@ export class CodexMessageAdapter {
     >()
     const toolCallHasDelta = new Set<number>()
     const reasoningSummaryHasDelta = new Set<string>()
+    const refusalHasDelta = new Set<string>()
 
     const getChunkId = (itemId?: string) =>
       responseId.length > 0 ? responseId : (itemId ?? 'codex-response')
@@ -215,7 +219,38 @@ export class CodexMessageAdapter {
         continue
       }
 
-      if (chunk.type === 'response.output_text.delta') {
+      if (
+        chunk.type === 'response.output_text.delta' ||
+        chunk.type === 'response.refusal.delta'
+      ) {
+        const deltaRole = sentRole ? undefined : 'assistant'
+        sentRole = true
+        if (chunk.type === 'response.refusal.delta') {
+          refusalHasDelta.add(`${chunk.item_id}:${chunk.content_index}`)
+        }
+        yield {
+          id: getChunkId(chunk.item_id),
+          created,
+          model: resolvedModel,
+          object: 'chat.completion.chunk',
+          system_fingerprint: systemFingerprint,
+          choices: [
+            {
+              finish_reason: null,
+              delta: {
+                content: chunk.delta,
+                ...(deltaRole ? { role: deltaRole } : {}),
+              },
+            },
+          ],
+        }
+        continue
+      }
+
+      if (chunk.type === 'response.refusal.done') {
+        if (refusalHasDelta.has(`${chunk.item_id}:${chunk.content_index}`)) {
+          continue
+        }
         const deltaRole = sentRole ? undefined : 'assistant'
         sentRole = true
         yield {
@@ -228,7 +263,7 @@ export class CodexMessageAdapter {
             {
               finish_reason: null,
               delta: {
-                content: chunk.delta,
+                content: chunk.refusal,
                 ...(deltaRole ? { role: deltaRole } : {}),
               },
             },
@@ -388,6 +423,10 @@ export class CodexMessageAdapter {
         continue
       }
 
+      if (chunk.type === 'response.failed') {
+        throw responseFailureError(chunk.response)
+      }
+
       if (chunk.type === 'error') {
         throw new Error(chunk.message)
       }
@@ -538,14 +577,10 @@ function normalizeUserContent(
 }
 
 function extractResponseText(payload: Response): string {
-  if (payload.output_text) {
-    return payload.output_text
-  }
   const message = payload.output.find((item) => item.type === 'message')
-  if (!message) return ''
+  if (!message) return payload.output_text
   return message.content
-    .filter((part) => part.type === 'output_text')
-    .map((part) => part.text)
+    .map((part) => (part.type === 'output_text' ? part.text : part.refusal))
     .join('')
 }
 
@@ -629,6 +664,46 @@ function accumulateResponseSnapshot(
       }
       return snapshot
     }
+    case 'response.refusal.delta': {
+      const output = snapshot.output[event.output_index]
+      if (!output) {
+        throw new Error(`missing output at index ${event.output_index}`)
+      }
+      if (output.type === 'message') {
+        const content = output.content[event.content_index]
+        if (!content) {
+          throw new Error(`missing content at index ${event.content_index}`)
+        }
+        if (content.type !== 'refusal') {
+          throw new Error(
+            `expected content to be 'refusal', got ${content.type}`,
+          )
+        }
+        content.refusal += event.delta
+      }
+      return snapshot
+    }
+    case 'response.refusal.done': {
+      const output = snapshot.output[event.output_index]
+      if (!output) {
+        throw new Error(`missing output at index ${event.output_index}`)
+      }
+      if (output.type === 'message') {
+        const content = output.content[event.content_index]
+        if (!content) {
+          throw new Error(`missing content at index ${event.content_index}`)
+        }
+        if (content.type !== 'refusal') {
+          throw new Error(
+            `expected content to be 'refusal', got ${content.type}`,
+          )
+        }
+        if (!content.refusal.length) {
+          content.refusal = event.refusal
+        }
+      }
+      return snapshot
+    }
     case 'response.function_call_arguments.delta': {
       const output = snapshot.output[event.output_index]
       if (!output) {
@@ -677,6 +752,10 @@ function accumulateResponseSnapshot(
       return snapshot
   }
   return snapshot
+}
+
+function responseFailureError(response: Response): Error {
+  return new Error(response.error?.message ?? 'Codex response failed.')
 }
 
 function mapUsage(usage?: OpenAIResponseUsage): ResponseUsage | undefined {

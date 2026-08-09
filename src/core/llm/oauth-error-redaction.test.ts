@@ -31,6 +31,7 @@ import { LLMAPIKeyInvalidException } from './exception'
 import { refreshGeminiAccessToken } from './geminiAuth'
 import { GeminiPlanProvider } from './geminiPlanProvider'
 import { decideOAuthCallback } from './oauthCallback'
+import { OpenAIAuthenticatedProvider } from './openai'
 import { OpenAICodexProvider } from './openaiCodexProvider'
 
 describe('OAuth and provider auth error redaction', () => {
@@ -87,6 +88,50 @@ describe('OAuth and provider auth error redaction', () => {
     expect(
       (error as LLMAPIKeyInvalidException).rawError?.message,
     ).not.toContain('refresh-token-test')
+  })
+
+  it('OpenAI response failures omit the configured API key', async () => {
+    const apiKey = 'sk-provider-secret'
+    const provider = new OpenAIAuthenticatedProvider({
+      id: 'openai',
+      type: 'openai',
+      apiKey,
+    })
+    const adapter = (
+      provider as unknown as {
+        adapter: {
+          generateResponse: jest.Mock
+          streamResponse: jest.Mock
+        }
+      }
+    ).adapter
+    adapter.generateResponse = jest
+      .fn()
+      .mockRejectedValue(new Error(`upstream echoed ${apiKey}`))
+    adapter.streamResponse = jest
+      .fn()
+      .mockRejectedValue(new Error(`upstream echoed ${apiKey}`))
+    const model: ChatModel = {
+      id: 'openai-model',
+      providerType: 'openai',
+      providerId: 'openai',
+      model: 'gpt-test',
+    }
+
+    for (const action of [
+      () =>
+        provider.generateResponse(model, { model: 'gpt-test', messages: [] }),
+      () =>
+        provider.streamResponse(model, {
+          model: 'gpt-test',
+          messages: [],
+          stream: true,
+        }),
+    ]) {
+      const error = await captureError(action)
+      expect(error.message).toBe('upstream echoed [REDACTED]')
+      expect(error.message).not.toContain(apiKey)
+    }
   })
 
   it('manual redirect state mismatch preserves UX copy', () => {

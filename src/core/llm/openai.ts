@@ -98,7 +98,7 @@ export class OpenAIAuthenticatedProvider extends BaseLLMProvider<
           safeError,
         )
       }
-      throw error
+      throw safeError ?? error
     }
   }
 
@@ -136,7 +136,7 @@ export class OpenAIAuthenticatedProvider extends BaseLLMProvider<
           safeError,
         )
       }
-      throw error
+      throw safeError ?? error
     }
   }
 

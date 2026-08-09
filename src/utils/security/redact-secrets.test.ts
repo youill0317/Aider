@@ -42,6 +42,28 @@ describe('redactSecrets', () => {
     )
   })
 
+  it('redacts Basic authorization headers', () => {
+    const diagnostic = 'request failed with Authorization: Basic dXNlcjpwYXNz'
+
+    expect(redactSecrets(diagnostic)).toBe(
+      'request failed with Authorization: Basic [REDACTED]',
+    )
+  })
+
+  it('redacts complete PEM private key blocks', () => {
+    const diagnostic = [
+      'command output:',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'private-key-material',
+      '-----END RSA PRIVATE KEY-----',
+      'command failed',
+    ].join('\n')
+
+    expect(redactSecrets(diagnostic)).toBe(
+      ['command output:', '[REDACTED]', 'command failed'].join('\n'),
+    )
+  })
+
   it('redacts quoted and unquoted shell secret assignments', () => {
     const diagnostic = [
       'AWS_SECRET_ACCESS_KEY="aws-secret"',

@@ -424,6 +424,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
                 type="button"
                 className="smtcmp-chat-edit-cancel-button"
                 onClick={onDone}
+                disabled={isWorking}
               >
                 Cancel
               </button>

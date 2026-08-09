@@ -124,6 +124,74 @@ describe('McpManager connection lifecycle', () => {
     manager.cleanup()
   })
 
+  it('disconnects a trusted server when tool options change', async () => {
+    let trusted = true
+    const close = jest.fn().mockResolvedValue(undefined)
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({ tools: [] }),
+    }))
+    const { manager, serverConfig } = createManager()
+    const settings = smartComposerSettingsSchema.parse({
+      mcp: {
+        servers: [
+          {
+            ...serverConfig,
+            toolOptions: { destructive: { allowAutoExecution: true } },
+          },
+        ],
+      },
+    })
+    ;(
+      manager as unknown as {
+        isServerTrusted: (config: McpServerConfig) => Promise<boolean>
+      }
+    ).isServerTrusted = async () => trusted
+
+    await manager.initialize()
+    trusted = false
+    await manager.handleSettingsUpdate(settings)
+
+    expect(manager.getServers()[0]?.status).toBe(
+      McpServerStatus.ApprovalRequired,
+    )
+    expect(close).toHaveBeenCalledTimes(1)
+    await manager.cleanup()
+  })
+
+  it('evicts and closes a server before trust revocation returns', async () => {
+    let finishClose: (() => void) | undefined
+    const close = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve
+        }),
+    )
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({ tools: [] }),
+    }))
+    const { manager } = createManager()
+    await manager.initialize()
+
+    let finished = false
+    const revocation = manager.revokeServerTrust('github').then(() => {
+      finished = true
+    })
+    await Promise.resolve()
+
+    expect(manager.getServers()[0]?.status).toBe(
+      McpServerStatus.ApprovalRequired,
+    )
+    expect(finished).toBe(false)
+    finishClose?.()
+    await revocation
+    expect(close).toHaveBeenCalledTimes(1)
+    await manager.cleanup()
+  })
+
   it('does not initialize MCP clients while tools are disabled', async () => {
     const settings = smartComposerSettingsSchema.parse({
       chatOptions: {
@@ -224,6 +292,68 @@ describe('McpManager connection lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('collects every page of an MCP tool catalog', async () => {
+    const close = jest.fn().mockResolvedValue(undefined)
+    const listTools = jest
+      .fn()
+      .mockResolvedValueOnce({
+        tools: [{ name: 'first', inputSchema: { type: 'object' } }],
+        nextCursor: 'page-2',
+      })
+      .mockResolvedValueOnce({
+        tools: [{ name: 'second', inputSchema: { type: 'object' } }],
+      })
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools,
+    }))
+    const { manager, serverConfig } = createManager()
+
+    const state = await (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+
+    expect(state).toMatchObject({
+      status: McpServerStatus.Connected,
+      tools: [{ name: 'first' }, { name: 'second' }],
+    })
+    expect(listTools).toHaveBeenNthCalledWith(1)
+    expect(listTools).toHaveBeenNthCalledWith(2, { cursor: 'page-2' })
+    await manager.cleanup()
+  })
+
+  it('rejects a repeated MCP tool cursor and closes its client', async () => {
+    const close = jest.fn().mockResolvedValue(undefined)
+    const listTools = jest
+      .fn()
+      .mockResolvedValueOnce({ tools: [], nextCursor: 'repeat' })
+      .mockResolvedValueOnce({ tools: [], nextCursor: 'repeat' })
+    ;(Client as unknown as jest.Mock).mockImplementation(() => ({
+      close,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools,
+    }))
+    const { manager, serverConfig } = createManager()
+
+    const state = await (
+      manager as unknown as {
+        connectServer: (config: McpServerConfig) => Promise<McpServerState>
+      }
+    ).connectServer(serverConfig)
+
+    expect(state).toMatchObject({
+      status: McpServerStatus.Error,
+      error: expect.objectContaining({
+        message: expect.stringContaining('repeated tool cursor'),
+      }),
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+    await manager.cleanup()
+  })
+
   it('bounds a stalled MCP connection and closes its client', async () => {
     jest.useFakeTimers()
     try {
@@ -308,15 +438,21 @@ describe('McpManager connection lifecycle', () => {
 
   it('rejects an oversized MCP tool catalog and closes its client', async () => {
     const close = jest.fn().mockResolvedValue(undefined)
+    const createTools = (start: number, length: number) =>
+      Array.from({ length }, (_, index) => ({
+        name: `tool-${start + index}`,
+        inputSchema: { type: 'object' },
+      }))
     ;(Client as unknown as jest.Mock).mockImplementation(() => ({
       close,
       connect: jest.fn().mockResolvedValue(undefined),
-      listTools: jest.fn().mockResolvedValue({
-        tools: Array.from({ length: 257 }, (_, index) => ({
-          name: `tool-${index}`,
-          inputSchema: { type: 'object' },
-        })),
-      }),
+      listTools: jest
+        .fn()
+        .mockResolvedValueOnce({
+          tools: createTools(0, 128),
+          nextCursor: 'page-2',
+        })
+        .mockResolvedValueOnce({ tools: createTools(128, 129) }),
     }))
     const { manager, serverConfig } = createManager()
 

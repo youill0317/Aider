@@ -2,6 +2,7 @@ import type { App } from 'obsidian'
 
 import type { ChatConversation } from '../database/json/chat/types'
 import type { ChatMessage, SerializedChatMessage } from '../types/chat'
+import { ToolCallResponseStatus } from '../types/tool-call.types'
 
 import { useChatHistory } from './useChatHistory'
 
@@ -121,4 +122,41 @@ test('does not duplicate legacy persisted images when loading a chat', async () 
     { type: 'image_url', image_url: { url: imageData } },
     { type: 'text', text: 'describe this' },
   ])
+})
+
+test('aborts persisted tool calls that cannot still be live', async () => {
+  mockChatManager.findById.mockResolvedValue({
+    id: 'chat-with-tool-calls',
+    title: 'Tool chat',
+    messages: [
+      {
+        role: 'tool',
+        id: 'tool-message',
+        toolCalls: [
+          {
+            request: { id: 'pending', name: 'write_file', arguments: '{}' },
+            response: { status: ToolCallResponseStatus.PendingApproval },
+          },
+          {
+            request: { id: 'running', name: 'write_file', arguments: '{}' },
+            response: { status: ToolCallResponseStatus.Running },
+          },
+        ],
+      },
+    ],
+    createdAt: 1,
+    updatedAt: 2,
+    schemaVersion: 1,
+  } satisfies ChatConversation)
+
+  const loadedMessages = await useChatHistory().getChatMessagesById(
+    'chat-with-tool-calls',
+  )
+  const loadedMessage = loadedMessages?.[0]
+
+  expect(
+    loadedMessage?.role === 'tool'
+      ? loadedMessage.toolCalls.map((toolCall) => toolCall.response.status)
+      : [],
+  ).toEqual([ToolCallResponseStatus.Aborted, ToolCallResponseStatus.Aborted])
 })

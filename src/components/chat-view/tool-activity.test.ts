@@ -71,6 +71,31 @@ describe('tool activity summaries', () => {
     expect(shouldUseActivityTimeline(steps)).toBe(false)
   })
 
+  it('bounds summaries of deeply nested tool arguments', () => {
+    const argumentsText = `${'{"nested":'.repeat(5_000)}true${'}'.repeat(5_000)}`
+
+    const steps = getToolActivitySteps([
+      {
+        id: 'message-1',
+        role: 'tool',
+        toolCalls: [
+          {
+            request: {
+              id: 'tool-1',
+              name: 'write_file',
+              arguments: argumentsText,
+            },
+            response: {
+              status: ToolCallResponseStatus.PendingApproval,
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(steps[0]?.summary).toBe('nested: nested: nested: ...')
+  })
+
   it('opens failed completed activity and selects the failing step', () => {
     const steps = getToolActivitySteps([
       {

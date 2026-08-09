@@ -442,6 +442,11 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
     if (!this.dbManagerInitPromise) {
       this.dbManagerInitPromise = (async () => {
         try {
+          const adoptionTask = this.adoptionTask
+          if (adoptionTask) {
+            await adoptionTask
+            this.assertLoaded()
+          }
           const manager = await DatabaseManager.create(this.app)
           if (this.unloading) {
             await manager.cleanup()
@@ -540,6 +545,7 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`
 
   async revokeMcpServerTrust(serverId: string): Promise<void> {
     await revokeMcpServerTrust(serverId, this.getSecretStore())
+    await this.mcpManager?.revokeServerTrust(serverId)
   }
 
   async trustProviderRoute(

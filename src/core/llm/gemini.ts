@@ -284,6 +284,7 @@ export class GeminiProvider extends BaseLLMProvider<
           parts: [
             {
               functionResponse: {
+                id: message.tool_call.id,
                 name: message.tool_call.name,
                 response: { result: message.content }, // Gemini requires a response object
               },
@@ -481,6 +482,7 @@ export class GeminiProvider extends BaseLLMProvider<
           parameters: {
             type: Type.OBJECT,
             properties: cleanedParameters.properties as Record<string, Schema>,
+            required: cleanedParameters.required as string[] | undefined,
           },
         },
       ],

@@ -116,12 +116,14 @@ export class CodexSpawnSpecResolver {
       platform,
       requestedCommand,
     })
-    const command =
-      resolveCommandPath(requestedCommand, env.PATH, {
-        fileSystem: options.fileSystem,
-        pathTools: options.pathTools,
-        platform,
-      }) ?? requestedCommand
+    const command = resolveCommandPath(requestedCommand, env.PATH, {
+      fileSystem: options.fileSystem,
+      pathTools: options.pathTools,
+      platform,
+    })
+    if (!command) {
+      throw new Error('Codex command could not be resolved.')
+    }
 
     if (platform === 'win32' && command.toLowerCase().endsWith('.cmd')) {
       for (const value of [command, ...args]) {

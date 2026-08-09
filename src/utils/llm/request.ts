@@ -63,7 +63,16 @@ export function formatMessages(messages: RequestMessage[]): RequestMessage[] {
   for (const currentMessage of nonSystemMessages) {
     const prevMessage = formattedMessages[formattedMessages.length - 1]
 
-    if (prevMessage && prevMessage.role === currentMessage.role) {
+    if (
+      prevMessage &&
+      prevMessage.role === currentMessage.role &&
+      currentMessage.role !== 'tool' &&
+      !(
+        currentMessage.role === 'assistant' &&
+        (currentMessage.tool_calls?.length ||
+          (prevMessage.role === 'assistant' && prevMessage.tool_calls?.length))
+      )
+    ) {
       prevMessage.content = concatenateMessageContent(
         prevMessage.content,
         currentMessage.content,

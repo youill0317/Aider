@@ -43,6 +43,29 @@ export function equalServerParameters(
   )
 }
 
+export function equalServerToolOptions(
+  left: McpServerConfig['toolOptions'],
+  right: McpServerConfig['toolOptions'],
+): boolean {
+  const leftEntries = Object.entries(left)
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(
+      ([name, option]) =>
+        Object.prototype.hasOwnProperty.call(right, name) &&
+        Object.prototype.hasOwnProperty.call(option, 'disabled') ===
+          Object.prototype.hasOwnProperty.call(right[name], 'disabled') &&
+        Object.prototype.hasOwnProperty.call(option, 'allowAutoExecution') ===
+          Object.prototype.hasOwnProperty.call(
+            right[name],
+            'allowAutoExecution',
+          ) &&
+        option.disabled === right[name].disabled &&
+        option.allowAutoExecution === right[name].allowAutoExecution,
+    )
+  )
+}
+
 export function hasAdvertisedTool(
   server: McpServerState,
   toolName: string,

@@ -303,6 +303,8 @@ export class CodexAppServerRuntime implements CodexRuntime {
     this.processKey = processKey
     this.stderr = ''
     this.stdoutBuffer = ''
+    childProcess.stdout?.setEncoding('utf8')
+    childProcess.stderr?.setEncoding('utf8')
 
     childProcess.stdout?.on('data', (chunk: Buffer | string) => {
       if (this.childProcess === childProcess) {
@@ -474,6 +476,19 @@ export class CodexAppServerRuntime implements CodexRuntime {
         new Error(`Codex app-server ${pending.method} failed: ${detail}`),
       )
       return
+    }
+    if (pending.method === 'turn/start') {
+      const run = this.activeRun
+      const turnId = optionalObject(optionalObject(message.result).turn).id
+      if (
+        run?.turnStartSent &&
+        !run.finished &&
+        typeof turnId === 'string' &&
+        turnId.length > 0 &&
+        (run.turnId === null || run.turnId === turnId)
+      ) {
+        run.turnId = turnId
+      }
     }
     pending.resolve(message.result)
   }

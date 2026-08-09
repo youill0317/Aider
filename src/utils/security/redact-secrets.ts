@@ -3,7 +3,10 @@ const REDACTED = '[REDACTED]'
 const SECRET_KEY_PATTERN =
   /api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|^code$|authorization|private[_-]?key|secret|ssh|password|token|(?:^|[_-])key$|(?:^|[_-])(?:database|redis)[_-]?url$|^(?:all|https?)[_-]proxy$/i
 
-const BEARER_TOKEN_PATTERN = /(Authorization:\s*Bearer\s+)[^\s'",}]+/gi
+const PEM_PRIVATE_KEY_PATTERN =
+  /-----BEGIN ([A-Z0-9 -]*PRIVATE KEY)-----[\s\S]*?-----END \1-----/gi
+const AUTHORIZATION_HEADER_PATTERN =
+  /(Authorization:[ \t]*[^\s]+[ \t]+)[^\r\n]+/gi
 const QUERY_SECRET_PATTERN =
   /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|secret|token|code)=)[^&\s'",}]+/gi
 const QUOTED_SECRET_ASSIGNMENT_PATTERN =
@@ -30,25 +33,26 @@ function isSecretKey(key: string): boolean {
 
 function redactString(value: string): string {
   const trimmedValue = value.trim()
+  const redactedValue = value.replace(PEM_PRIVATE_KEY_PATTERN, REDACTED)
 
   if (
     (trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) ||
     (trimmedValue.startsWith('[') && trimmedValue.endsWith(']'))
   ) {
     try {
-      return JSON.stringify(redactSecrets(JSON.parse(value)))
+      return JSON.stringify(redactSecrets(JSON.parse(redactedValue)))
     } catch {
       return redactSecretAssignments(
-        value
-          .replace(BEARER_TOKEN_PATTERN, `$1${REDACTED}`)
+        redactedValue
+          .replace(AUTHORIZATION_HEADER_PATTERN, `$1${REDACTED}`)
           .replace(QUERY_SECRET_PATTERN, `$1${REDACTED}`),
       )
     }
   }
 
   return redactSecretAssignments(
-    value
-      .replace(BEARER_TOKEN_PATTERN, `$1${REDACTED}`)
+    redactedValue
+      .replace(AUTHORIZATION_HEADER_PATTERN, `$1${REDACTED}`)
       .replace(QUERY_SECRET_PATTERN, `$1${REDACTED}`),
   )
 }

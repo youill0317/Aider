@@ -33,6 +33,7 @@ export type ToolActivityStep =
 
 const SUMMARY_NAME_LIMIT = 3
 const SUMMARY_TEXT_LIMIT = 80
+const SUMMARY_VALUE_DEPTH_LIMIT = 3
 
 export function getToolActivitySteps(
   messages: readonly ToolActivityMessage[],
@@ -170,7 +171,11 @@ function getAgentCommandSummary(
   return summary.length > 0 ? truncate(summary) : null
 }
 
-function summarizeValue(value: unknown): string | null {
+function summarizeValue(value: unknown, depth = 0): string | null {
+  if (depth === SUMMARY_VALUE_DEPTH_LIMIT) {
+    return '...'
+  }
+
   if (typeof value === 'string') {
     return truncate(value)
   }
@@ -193,7 +198,7 @@ function summarizeValue(value: unknown): string | null {
   }
 
   const [key, firstValue] = firstEntry
-  const valueSummary = summarizeValue(firstValue)
+  const valueSummary = summarizeValue(firstValue, depth + 1)
   return valueSummary ? `${key}: ${valueSummary}` : key
 }
 

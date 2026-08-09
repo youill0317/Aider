@@ -3,6 +3,7 @@ import {
   ChatMessage,
   ChatUserMessage,
 } from '../../types/chat'
+import { ToolCallResponseStatus } from '../../types/tool-call.types'
 
 function groupAssistantAndToolMessages(
   messages: ChatMessage[],
@@ -45,4 +46,26 @@ export function buildChatMessageRows(
     endIndex += Array.isArray(messageOrGroup) ? messageOrGroup.length : 1
     return { messageOrGroup, endIndex }
   })
+}
+
+export function markNonTerminalToolCallsAborted(
+  messages: readonly ChatMessage[],
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.role === 'tool'
+      ? {
+          ...message,
+          toolCalls: message.toolCalls.map((toolCall) =>
+            toolCall.response.status ===
+              ToolCallResponseStatus.PendingApproval ||
+            toolCall.response.status === ToolCallResponseStatus.Running
+              ? {
+                  ...toolCall,
+                  response: { status: ToolCallResponseStatus.Aborted as const },
+                }
+              : toolCall,
+          ),
+        }
+      : message,
+  )
 }

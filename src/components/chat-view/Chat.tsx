@@ -54,7 +54,10 @@ import {
   getMentionableKey,
   serializeMentionable,
 } from '../../utils/chat/mentionable'
-import { buildChatMessageRows } from '../../utils/chat/message-groups'
+import {
+  buildChatMessageRows,
+  markNonTerminalToolCallsAborted,
+} from '../../utils/chat/message-groups'
 import { PromptGenerator } from '../../utils/chat/promptGenerator'
 import { runAgentTurn } from '../../utils/chat/run-agent-turn'
 import { readTFileContent } from '../../utils/obsidian'
@@ -95,24 +98,28 @@ const getNewInputMessage = (app: App): ChatUserMessage => {
   }
 }
 
-const markRunningToolCallsAborted = (
-  messages: readonly ChatMessage[],
-): ChatMessage[] =>
-  messages.map((message) =>
-    message.role === 'tool'
-      ? {
-          ...message,
-          toolCalls: message.toolCalls.map((toolCall) =>
-            toolCall.response.status === ToolCallResponseStatus.Running
-              ? {
-                  ...toolCall,
-                  response: { status: ToolCallResponseStatus.Aborted as const },
-                }
-              : toolCall,
-          ),
-        }
-      : message,
-  )
+export const createSubmittedDraftRestorer =
+  (submittedDraft: ChatUserMessage, replacementDraft: ChatUserMessage) =>
+  (currentDraft: ChatUserMessage) =>
+    currentDraft === replacementDraft ? submittedDraft : currentDraft
+
+export const createHistoricalEditSubmitter = (
+  hasLaterMessages: boolean,
+  submit: () => Promise<boolean>,
+  confirm: (onConfirm: () => void, onCancel: () => void) => void,
+) => {
+  return () => {
+    if (!hasLaterMessages) return submit()
+    return new Promise<boolean>((resolve) => {
+      confirm(
+        () => {
+          void submit().then(resolve)
+        },
+        () => resolve(false),
+      )
+    })
+  }
+}
 
 export type ChatRef = {
   openNewChat: (selectedBlock?: MentionableBlockData) => void
@@ -685,7 +692,8 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         await settled
         if (generation !== workGenerationRef.current) return false
         const conversationId = currentConversationIdRef.current
-        const submittedMessages = markRunningToolCallsAborted(inputChatMessages)
+        const submittedMessages =
+          markNonTerminalToolCallsAborted(inputChatMessages)
         setQueryProgress({
           type: 'idle',
         })
@@ -1103,15 +1111,21 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
 
     if (!focusedMessageId) return
     if (inputMessage.id === focusedMessageId) {
-      setInputMessage((prevInputMessage) => ({
-        ...prevInputMessage,
-        mentionables: [
-          mentionable,
-          ...prevInputMessage.mentionables.filter(
-            (mentionable) => mentionable.type !== 'current-file',
-          ),
-        ],
-      }))
+      setInputMessage((prevInputMessage) => {
+        const currentFile = prevInputMessage.mentionables.find(
+          (mentionable) => mentionable.type === 'current-file',
+        )
+        if (currentFile?.file === activeFile) return prevInputMessage
+        return {
+          ...prevInputMessage,
+          mentionables: [
+            mentionable,
+            ...prevInputMessage.mentionables.filter(
+              (mentionable) => mentionable.type !== 'current-file',
+            ),
+          ],
+        }
+      })
     } else {
       chatUserInputRefs.current
         .get(focusedMessageId)
@@ -1279,19 +1293,34 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
                 onSubmit={async (content, mentionables, mode) => {
                   if (!hasSubmittableContent(content, mentionables))
                     return false
-                  return handleUserMessageSubmit({
-                    inputChatMessages: [
-                      ...chatMessages.slice(0, endIndex - 1),
-                      {
-                        role: 'user',
-                        content: content,
-                        promptContent: null,
-                        id: messageOrGroup.id,
-                        mentionables,
-                      },
-                    ],
-                    mode,
-                  })
+                  const submit = () =>
+                    handleUserMessageSubmit({
+                      inputChatMessages: [
+                        ...chatMessages.slice(0, endIndex - 1),
+                        {
+                          role: 'user',
+                          content: content,
+                          promptContent: null,
+                          id: messageOrGroup.id,
+                          mentionables,
+                        },
+                      ],
+                      mode,
+                    })
+                  return createHistoricalEditSubmitter(
+                    endIndex < chatMessages.length,
+                    submit,
+                    (onConfirm, onCancel) => {
+                      new ConfirmModal(app, {
+                        title: 'Edit earlier message?',
+                        message:
+                          'Submitting this edit will remove all later messages from this conversation. This cannot be undone.',
+                        ctaText: 'Submit edit',
+                        onConfirm,
+                        onCancel,
+                      }).open()
+                    },
+                  )()
                 }}
                 onStop={() => {
                   void abortActiveWork()
@@ -1381,16 +1410,21 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           onSubmit={(content, mode) => {
             if (!hasSubmittableContent(content, inputMessage.mentionables))
               return
+            const submittedDraft = { ...inputMessage, content }
+            const replacementDraft = getNewInputMessage(app)
+            const restoreSubmittedDraft = createSubmittedDraftRestorer(
+              submittedDraft,
+              replacementDraft,
+            )
+            setInputMessage(replacementDraft)
             void handleUserMessageSubmit({
-              inputChatMessages: [
-                ...chatMessages,
-                { ...inputMessage, content },
-              ],
+              inputChatMessages: [...chatMessages, submittedDraft],
               mode,
             }).then((submitted) => {
-              if (submitted) {
-                setInputMessage(getNewInputMessage(app))
-              }
+              if (submitted) return
+              setInputMessage((currentDraft) =>
+                restoreSubmittedDraft(currentDraft),
+              )
             })
           }}
           onFocus={() => {

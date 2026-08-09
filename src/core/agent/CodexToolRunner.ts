@@ -127,6 +127,7 @@ export class CodexToolRunner {
           'Use Codex to inspect, edit, refactor, test, or perform multi-step work in the current project or vault. Do not use it for explanation-only answers.',
         parameters: {
           type: 'object',
+          required: ['prompt'],
           properties: {
             prompt: {
               type: 'string',

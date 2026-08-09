@@ -514,7 +514,7 @@ describe('buildAgentPrompt', () => {
         },
         {
           role: 'assistant',
-          content: `Authorization: Bearer assistant-secret-token ${'x'.repeat(
+          content: `Authorization: Bearer assistant-secret-token\n${'x'.repeat(
             24_000,
           )}ASSISTANT_TAIL`,
           id: 'assistant-1',

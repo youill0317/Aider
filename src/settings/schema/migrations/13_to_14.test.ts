@@ -9,14 +9,19 @@ describe('Migration from v13 to v14', () => {
     expect(result.version).toBe(14)
   })
 
-  it('should add xai provider and drop unused groq/morph providers', () => {
+  it('should add xai provider and preserve unused groq/morph providers', () => {
     const oldSettings = {
       version: 13,
       providers: [
         { type: 'openai', id: 'openai', apiKey: 'openai-key' },
         { type: 'anthropic', id: 'anthropic', apiKey: 'anthropic-key' },
         { type: 'gemini', id: 'gemini', apiKey: 'gemini-key' },
-        { type: 'groq', id: 'groq', apiKey: 'groq-key' },
+        {
+          type: 'groq',
+          id: 'groq',
+          apiKey: 'groq-key',
+          baseUrl: 'https://custom-groq.example.com/v1',
+        },
         { type: 'deepseek', id: 'deepseek', apiKey: 'deepseek-key' },
         { type: 'morph', id: 'morph', apiKey: 'morph-key' },
       ],
@@ -33,9 +38,16 @@ describe('Migration from v13 to v14', () => {
     // xai should be added
     expect(providers.find((p) => p.type === 'xai')).toBeDefined()
 
-    // groq and morph should be dropped (no models use them)
-    expect(providers.find((p) => p.id === 'groq')).toBeUndefined()
-    expect(providers.find((p) => p.id === 'morph')).toBeUndefined()
+    expect(providers.find((p) => p.id === 'groq')).toMatchObject({
+      type: 'openai-compatible',
+      apiKey: 'groq-key',
+      baseUrl: 'https://custom-groq.example.com/v1',
+    })
+    expect(providers.find((p) => p.id === 'morph')).toMatchObject({
+      type: 'openai-compatible',
+      apiKey: 'morph-key',
+      baseUrl: 'https://api.morphllm.com/v1',
+    })
   })
 
   it('should convert groq/morph to openai-compatible when models use them', () => {
@@ -918,8 +930,11 @@ describe('Test with real data', () => {
       baseUrl?: string
     }[]
 
-    // groq should be dropped (no models use it)
-    expect(providers.find((p) => p.id === 'groq')).toBeUndefined()
+    // groq should be converted even when no model uses it
+    const groqProvider = providers.find((p) => p.id === 'groq')
+    expect(groqProvider?.type).toBe('openai-compatible')
+    expect(groqProvider?.apiKey).toBe('test-groq-api-key')
+    expect(groqProvider?.baseUrl).toBe('https://api.groq.com/openai/v1')
 
     // morph should be converted to openai-compatible (morph-v0 model uses it)
     const morphProvider = providers.find((p) => p.id === 'morph')

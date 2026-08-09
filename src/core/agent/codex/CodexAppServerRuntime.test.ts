@@ -79,6 +79,14 @@ const BASE_REQUEST: CodexExecRequest = {
   sandboxMode: 'workspace-write',
 }
 
+const RESOLVED_CODEX_OPTIONS = {
+  env: { PATH: '/usr/bin' },
+  fileSystem: {
+    existsFile: (filePath: string) => filePath === '/usr/bin/codex',
+  },
+  platform: 'linux',
+} as const
+
 async function initialize(childProcess: FakeChildProcess): Promise<void> {
   const request = await childProcess.nextMessage()
   expect(request).toMatchObject({
@@ -139,10 +147,7 @@ describe('CodexAppServerRuntime', () => {
       readonly cwd: string
     }[] = []
     const runtime = new CodexAppServerRuntime({
-      spawnSpecResolverOptions: {
-        env: { PATH: '/usr/bin' },
-        platform: 'linux',
-      },
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: (command, args, options) => {
         spawned.push({ args, command, cwd: options.cwd })
         return childProcess
@@ -275,10 +280,88 @@ describe('CodexAppServerRuntime', () => {
     expect(spawned).toEqual([
       {
         args: ['app-server', '--stdio'],
-        command: 'codex',
+        command: '/usr/bin/codex',
         cwd: '/vault',
       },
     ])
+    runtime.dispose()
+  })
+
+  it('preserves UTF-8 split across stdout chunks', async () => {
+    const childProcess = new FakeChildProcess()
+    const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
+      spawnProcess: () => childProcess,
+    })
+    const events: CodexAgentEvent[] = []
+    const handle = runtime.execute(BASE_REQUEST, {
+      onEvent: (event) => events.push(event),
+    })
+    await initialize(childProcess)
+    await startTurn(childProcess)
+    const message = Buffer.from(
+      `${JSON.stringify({
+        method: 'item/completed',
+        params: {
+          item: { id: 'message-1', text: '한', type: 'agentMessage' },
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+        },
+      })}\n`,
+    )
+    const splitAt = message.indexOf(Buffer.from('한')) + 1
+    expect(splitAt).toBeGreaterThan(0)
+
+    childProcess.stdout.write(message.subarray(0, splitAt))
+    childProcess.stdout.write(message.subarray(splitAt))
+    completeTurn(childProcess)
+
+    await expect(handle.done).resolves.toMatchObject({ status: 'completed' })
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          item: expect.objectContaining({ text: '한' }),
+          kind: 'item.completed',
+        }),
+      ]),
+    )
+    runtime.dispose()
+  })
+
+  it('accepts a coalesced turn response and completion', async () => {
+    const childProcess = new FakeChildProcess()
+    const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
+      spawnProcess: () => childProcess,
+    })
+    const handle = runtime.execute(BASE_REQUEST, {
+      onEvent: () => undefined,
+    })
+    await initialize(childProcess)
+    const threadRequest = await childProcess.nextMessage()
+    childProcess.send({
+      id: threadRequest.id,
+      result: { thread: { id: 'thread-1' } },
+    })
+    const turnRequest = await childProcess.nextMessage()
+
+    childProcess.stdout.write(
+      `${JSON.stringify({
+        id: turnRequest.id,
+        result: { turn: { id: 'turn-1' } },
+      })}\n${JSON.stringify({
+        method: 'turn/completed',
+        params: {
+          threadId: 'thread-1',
+          turn: { id: 'turn-1', status: 'completed' },
+        },
+      })}\n`,
+    )
+
+    await expect(handle.done).resolves.toMatchObject({
+      status: 'completed',
+      threadId: 'thread-1',
+    })
     runtime.dispose()
   })
 
@@ -289,8 +372,8 @@ describe('CodexAppServerRuntime', () => {
     const events: CodexAgentEvent[] = []
     const runtime = new CodexAppServerRuntime({
       spawnSpecResolverOptions: {
+        ...RESOLVED_CODEX_OPTIONS,
         env: { HTTP_PROXY: proxyUrl, PATH: '/usr/bin' },
-        platform: 'linux',
       },
       spawnProcess: (_command, _args, options) => {
         childEnv = options.env
@@ -337,6 +420,7 @@ describe('CodexAppServerRuntime', () => {
     ]
     const permissionRequests: CodexPermissionRequest[] = []
     const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {
@@ -500,6 +584,7 @@ describe('CodexAppServerRuntime', () => {
       resolveDecision = resolve
     })
     const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {
@@ -572,6 +657,7 @@ describe('CodexAppServerRuntime', () => {
   it('keeps an aborted startup isolated until its RPC settles', async () => {
     const childProcess = new FakeChildProcess()
     const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const first = runtime.execute(BASE_REQUEST, {
@@ -629,6 +715,7 @@ describe('CodexAppServerRuntime', () => {
     const childProcess = new FakeChildProcess()
     const runtime = new CodexAppServerRuntime({
       interruptTimeoutMs: 5,
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {
@@ -649,6 +736,7 @@ describe('CodexAppServerRuntime', () => {
   it('fails safely when the app-server stdin stream errors', async () => {
     const childProcess = new FakeChildProcess()
     const runtime = new CodexAppServerRuntime({
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {
@@ -669,6 +757,7 @@ describe('CodexAppServerRuntime', () => {
     const runtime = new CodexAppServerRuntime({
       maxJsonlLineChars: 16,
       maxStderrChars: 8,
+      spawnSpecResolverOptions: RESOLVED_CODEX_OPTIONS,
       spawnProcess: () => childProcess,
     })
     const handle = runtime.execute(BASE_REQUEST, {

@@ -192,25 +192,12 @@ function McpServerComponent({
           {server.status === McpServerStatus.ApprovalRequired && (
             <button
               type="button"
-              onClick={isOpen ? handleTrust : () => setIsOpen(true)}
+              onClick={() => setIsOpen(true)}
               className="clickable-icon"
-              aria-label={
-                isOpen
-                  ? 'Trust reviewed server command'
-                  : 'Review server command'
-              }
-              title={
-                isOpen
-                  ? 'Trust the command shown below'
-                  : 'Show the exact command, arguments, and environment'
-              }
-              disabled={isTrusting}
+              aria-label="Review server command"
+              title="Show the exact command, arguments, and environment"
             >
-              {isTrusting ? (
-                <Loader2 size={16} className="spinner" />
-              ) : (
-                <ShieldCheck size={16} />
-              )}
+              <ShieldCheck size={16} />
             </button>
           )}
           <button
@@ -240,12 +227,26 @@ function McpServerComponent({
           </button>
         </div>
       </div>
-      {isOpen && <ExpandedServerInfo server={server} />}
+      {isOpen && (
+        <ExpandedServerInfo
+          server={server}
+          onTrust={handleTrust}
+          isTrusting={isTrusting}
+        />
+      )}
     </div>
   )
 }
 
-function ExpandedServerInfo({ server }: { server: McpServerState }) {
+function ExpandedServerInfo({
+  server,
+  onTrust,
+  isTrusting,
+}: {
+  server: McpServerState
+  onTrust: () => Promise<void>
+  isTrusting: boolean
+}) {
   if (
     server.status === McpServerStatus.Disconnected ||
     server.status === McpServerStatus.Connecting
@@ -271,6 +272,14 @@ function ExpandedServerInfo({ server }: { server: McpServerState }) {
                 ).join(', ')}`
               : ''}
           </div>
+          <button
+            type="button"
+            className="mod-cta"
+            onClick={onTrust}
+            disabled={isTrusting}
+          >
+            {isTrusting ? 'Trusting...' : 'Trust reviewed command'}
+          </button>
         </div>
       )}
       {server.status === McpServerStatus.Connected && (

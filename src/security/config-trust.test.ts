@@ -13,7 +13,7 @@ import {
 import type { SecretStore } from './secret-store/secret-store'
 
 describe('device-local configuration trust', () => {
-  it('binds MCP trust to command, arguments, and environment values', async () => {
+  it('binds MCP trust to command, arguments, environment, and tool options', async () => {
     const secretStore = createMemorySecretStore()
     const config: McpServerConfig = {
       id: 'trust-test-server',
@@ -31,10 +31,36 @@ describe('device-local configuration trust', () => {
     await expect(isMcpServerTrusted(config, secretStore)).resolves.toBe(true)
     await expect(
       isMcpServerTrusted(
-        { ...config, toolOptions: { tool: { disabled: true } } },
+        {
+          ...config,
+          toolOptions: { tool: { allowAutoExecution: true, disabled: false } },
+        },
+        secretStore,
+      ),
+    ).resolves.toBe(false)
+
+    const trustedToolOptions = {
+      first: { disabled: true, allowAutoExecution: false },
+      second: { allowAutoExecution: true },
+    }
+    await trustMcpServer(
+      { ...config, toolOptions: trustedToolOptions },
+      secretStore,
+    )
+    await expect(
+      isMcpServerTrusted(
+        {
+          ...config,
+          toolOptions: {
+            second: { allowAutoExecution: true },
+            first: { allowAutoExecution: false, disabled: true },
+          },
+        },
         secretStore,
       ),
     ).resolves.toBe(true)
+
+    await trustMcpServer(config, secretStore)
 
     for (const parameters of [
       { ...config.parameters, command: 'sh' },

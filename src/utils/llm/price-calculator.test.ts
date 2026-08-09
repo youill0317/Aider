@@ -21,4 +21,29 @@ describe('calculateLLMCost', () => {
       }),
     ).toBeCloseTo(0.7)
   })
+
+  it.each([
+    [200_000, 12.4],
+    [200_001, 18.800004],
+  ])(
+    'uses the correct Gemini 3.1 Pro tier for %i prompt tokens',
+    (promptTokens, expected) => {
+      expect(
+        calculateLLMCost({
+          model: {
+            providerType: 'gemini',
+            providerId: 'gemini',
+            id: 'gemini-3.1-pro-preview',
+            model: 'gemini-3.1-pro-preview',
+            promptLevel: PromptLevel.Default,
+          },
+          usage: {
+            prompt_tokens: promptTokens,
+            completion_tokens: 1_000_000,
+            total_tokens: promptTokens + 1_000_000,
+          },
+        }),
+      ).toBeCloseTo(expected)
+    },
+  )
 })

@@ -499,6 +499,11 @@ export const DEFAULT_EMBEDDING_MODELS: readonly EmbeddingModel[] = [
 type ModelPricing = {
   input: number
   output: number
+  longContext?: {
+    threshold: number
+    input: number
+    output: number
+  }
 }
 
 export const OPENAI_PRICES: Record<string, ModelPricing> = {
@@ -538,12 +543,15 @@ export const ANTHROPIC_PRICES: Record<string, ModelPricing> = {
 }
 
 // Gemini is currently free for low rate limits
-// These figures drive a deliberately rough "estimated price" readout, not
-// billing. Flat per-model rates are the intent, same as every other table here:
-// Gemini 3.1 Pro really charges $4/$18 above a 200k-token prompt, and that
-// under-reporting is accepted rather than a gap waiting to be closed.
+// Gemini 3.1 Pro really does charge more above a 200k-token prompt. No Claude
+// model has a long-context tier, so the flat rates above are accurate rather
+// than an omission - don't "fix" ANTHROPIC_PRICES to match this shape.
 export const GEMINI_PRICES: Record<string, ModelPricing> = {
-  'gemini-3.1-pro-preview': { input: 2, output: 12 },
+  'gemini-3.1-pro-preview': {
+    input: 2,
+    output: 12,
+    longContext: { threshold: 200_000, input: 4, output: 18 },
+  },
   'gemini-3.6-flash': { input: 1.5, output: 7.5 },
 }
 

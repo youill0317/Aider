@@ -36,8 +36,13 @@ export const calculateLLMCost = ({
       )
     }
     case 'gemini': {
-      const modelPricing = GEMINI_PRICES[model.model]
-      if (!modelPricing) return null
+      const pricing = GEMINI_PRICES[model.model]
+      if (!pricing) return null
+      const modelPricing =
+        pricing.longContext &&
+        usage.prompt_tokens > pricing.longContext.threshold
+          ? pricing.longContext
+          : pricing
       return (
         (usage.prompt_tokens * modelPricing.input +
           usage.completion_tokens * modelPricing.output) /
